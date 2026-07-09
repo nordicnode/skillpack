@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-09
+
 ### Fixed
 
 - `init` no longer emits a `when_to_use: "(unspecified)"` placeholder when no
