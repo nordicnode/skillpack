@@ -1,0 +1,4 @@
+# Enables GitHub's "Sponsor this project" button on the repo.
+# See skillpack design spec §9 (Monetization): free MIT core, Polar.sh paid
+# bundles later. GitHub Sponsors is set up per the spec's week-1 plan.
+github: [nordicnode]

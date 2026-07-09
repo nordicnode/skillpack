@@ -95,6 +95,12 @@ Exits non-zero on any critical failure, so it drops straight into CI as a PR gat
 V1: `init` + `verify`, Claude Code only, across the five ecosystems above. MIT-licensed.
 Multi-ecosystem targets (Cursor, Codex) and a bundled skill-pack marketplace are later.
 
+## Funding
+
+`skillpack` is MIT-licensed and free forever. If it saves you time wiring an
+agent-distribution layer, [sponsor on GitHub Sponsors](https://github.com/sponsors/nordicnode).
+Curated, pre-verified skill packs (Polar.sh) come later — see the design spec.
+
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). See [CHANGELOG.md](CHANGELOG.md) for release history.
