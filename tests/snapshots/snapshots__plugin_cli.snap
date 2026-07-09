@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: pj.contents
+---
+{
+  "name": "chronicle",
+  "description": "Journal events to a chronological log",
+  "version": "0.1.0",
+  "author": {
+    "name": "Mikey"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/example/chronicle",
+  "repository": "https://github.com/example/chronicle"
+}

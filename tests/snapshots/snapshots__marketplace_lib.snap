@@ -1,0 +1,23 @@
+---
+source: tests/snapshots.rs
+expression: mp.contents
+---
+{
+  "name": "fastcsv",
+  "owner": {
+    "name": "Unspecified",
+    "type": "individual",
+    "url": "https://github.com/example/fastcsv"
+  },
+  "plugins": [
+    {
+      "name": "fastcsv",
+      "source": "./",
+      "description": "Parse CSV files fast",
+      "license": "MIT",
+      "repository": "https://github.com/example/fastcsv",
+      "keywords": ["node", "library", "ingest"],
+      "category": "developer-tools"
+    }
+  ]
+}

@@ -12,5 +12,8 @@
 .env
 .env.*
 
+# Unreviewed insta snapshot updates — only committed .snap files ship.
+*.snap.new
+
 # Private design spec — not published to the public repo.
 /2026-07-09-skillpack-design.md

@@ -1,0 +1,49 @@
+---
+source: tests/snapshots.rs
+expression: skill.contents
+---
+---
+name: fastcsv
+description: "Parse CSV files fast"
+when_to_use: "ingest csv, convert rows"
+allowed-tools: Read Bash
+---
+
+# fastcsv
+
+Parse CSV files fast
+
+## When to use
+
+Invoke this skill when the user's task matches any of these triggers:
+
+- ingest csv
+- convert rows
+
+## When NOT to use
+
+- Do not use this skill if the user only wants to *read* or *inspect* fastcsv without performing an action — prefer reading docs directly.
+- Do not use this skill for tasks outside the JavaScript/Node it was built for.
+
+## Installation
+
+
+This is a library, not a CLI. The agent uses it by importing from the host project, not by spawning a binary.
+
+Import pattern:
+
+```
+import { parse } from 'fastcsv'
+```
+
+
+
+## Usage
+
+There is no CLI to invoke. Use the import pattern above and call the relevant API surface directly from the task.
+
+
+## Footguns / gotchas
+
+- Verify the tool is installed before relying on it; do not assume availability.
+- This file is authoritative for agent invocation; if it drifts from the CLI's real `--help`, run `skillpack verify` to catch it.

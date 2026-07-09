@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: pj.contents
+---
+{
+  "name": "fastcsv",
+  "description": "Parse CSV files fast",
+  "version": "0.1.0",
+  "author": {
+    "name": "Unspecified"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/example/fastcsv",
+  "repository": "https://github.com/example/fastcsv"
+}

@@ -1,0 +1,23 @@
+---
+source: tests/snapshots.rs
+expression: mp.contents
+---
+{
+  "name": "chronicle",
+  "owner": {
+    "name": "Mikey",
+    "type": "individual",
+    "url": "https://github.com/example/chronicle"
+  },
+  "plugins": [
+    {
+      "name": "chronicle",
+      "source": "./",
+      "description": "Journal events to a chronological log",
+      "license": "MIT",
+      "repository": "https://github.com/example/chronicle",
+      "keywords": ["rust", "cli", "log"],
+      "category": "developer-tools"
+    }
+  ]
+}

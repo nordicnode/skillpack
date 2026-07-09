@@ -201,9 +201,11 @@ fn broken_cli_verify_flags_drift() {
 // --- multi-ecosystem init+verify round trips (design §11: all five ecosystems)
 //
 // Node and Python run end-to-end here because their runtimes are present on
-// this dev machine. Go and Ruby can't be spawned locally (no runtime), so they
-// get structural unit coverage in `src/introspect.rs::candidate_tests` and any
-// real spawned test would be CI-gated (`#[ignore]`) — omitted for V1.
+// this dev machine. Go and Ruby are `#[ignore]`-gated: they don't run in the
+// default `cargo test` (this dev machine lacks those runtimes) but DO run on
+// CI's `ubuntu-latest` runner (which ships Go + Ruby) via `--include-ignored`.
+// Detection of Go/Ruby candidate resolution is covered structurally in
+// `src/introspect.rs::candidate_tests` regardless.
 
 /// `node` must be on PATH for this test to mean anything; if it's absent the
 /// fixture would (correctly) report `has_cli=false` and we'd assert against
@@ -352,4 +354,154 @@ fn python_cli_init_then_verify_round_trip() {
     let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
     assert_eq!(v["plugins"][0]["source"], "./");
     assert_eq!(v["plugins"][0]["name"], "sample-python");
+}
+
+// --- Go + Ruby: `#[ignore]`-gated spawn round trips -------------------------
+//
+// These run only on CI (via `cargo test -- --include-ignored`) where the
+// runtimes are installed. A runtime probe at the top of each test makes them
+// self-skip cleanly if invoked anywhere the runtime is missing — `#[ignore]`
+// plus a probe is belt-and-suspenders.
+
+fn go_available() -> bool {
+    std::process::Command::new("go")
+        .arg("version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[test]
+#[ignore = "requires `go` on PATH; runs on CI via --include-ignored"]
+fn go_cli_init_then_verify_round_trip() {
+    if !go_available() {
+        eprintln!("skipped: go not on PATH");
+        return;
+    }
+    let root = copy_fixture("go-cli");
+    let toml = "[skill]\n\
+        name = \"sample-go\"\n\
+        one_line_description = \"Lint and fix a sample Go project\"\n\
+        when_to_use_phrases = [\"lint go code\", \"run the go demo\"]\n\
+        invocation_command = \"sample-go --lint\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".claude-plugin/plugin.json").exists());
+    assert!(root.join("skills/sample-go/SKILL.md").exists());
+    assert!(root.join("skillpack.toml").exists());
+
+    let skill = fs::read_to_string(root.join("skills/sample-go/SKILL.md")).unwrap();
+    assert!(skill.contains("## Invocation"));
+    assert!(!skill.contains("## Usage"));
+
+    // verify must pass clean, including the real `go run . --help` invocation
+    // check spawned from the project root (the spawn_cwd fix). The go-cli
+    // fixture's `main.go` advertises `--lint` and `--fix`.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify OK"))
+        .stdout(predicate::str::contains(
+            "documented `--help` runs and produces output",
+        ))
+        .stdout(predicate::str::contains(
+            "every documented flag exists in `--help`",
+        ));
+
+    let mp = fs::read_to_string(root.join(".claude-plugin/marketplace.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
+    assert_eq!(v["plugins"][0]["source"], "./");
+    assert_eq!(v["plugins"][0]["name"], "sample-go");
+}
+
+fn ruby_available() -> bool {
+    std::process::Command::new("ruby")
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[test]
+#[ignore = "requires `ruby` on PATH; runs on CI via --include-ignored"]
+fn ruby_cli_init_then_verify_round_trip() {
+    if !ruby_available() {
+        eprintln!("skipped: ruby not on PATH");
+        return;
+    }
+    let root = copy_fixture("ruby-cli");
+    let toml = "[skill]\n\
+        name = \"sample-ruby\"\n\
+        one_line_description = \"Lint and fix a sample Ruby project\"\n\
+        when_to_use_phrases = [\"lint ruby code\", \"run the ruby demo\"]\n\
+        invocation_command = \"sample-ruby --lint\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".claude-plugin/plugin.json").exists());
+    assert!(root.join("skills/sample-ruby/SKILL.md").exists());
+    assert!(root.join("skillpack.toml").exists());
+
+    let skill = fs::read_to_string(root.join("skills/sample-ruby/SKILL.md")).unwrap();
+    assert!(skill.contains("## Invocation"));
+    assert!(!skill.contains("## Usage"));
+
+    // verify must pass clean, including the real `ruby exe/sample-ruby --help`
+    // invocation check (the fixture's binstub prints usage on --help).
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify OK"))
+        .stdout(predicate::str::contains(
+            "documented `--help` runs and produces output",
+        ))
+        .stdout(predicate::str::contains(
+            "every documented flag exists in `--help`",
+        ));
+
+    let mp = fs::read_to_string(root.join(".claude-plugin/marketplace.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
+    assert_eq!(v["plugins"][0]["source"], "./");
+    assert_eq!(v["plugins"][0]["name"], "sample-ruby");
 }

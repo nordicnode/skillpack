@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+# sample-ruby — binstub fixture for skillpack's Ruby CLI detection.
+# Prints a `--help` usage line so skillpack's invocation check can capture it.
+argv = ARGV
+if argv.include?("--help") || argv.include?("-h")
+  puts "Usage: sample-ruby [--lint] [--fix]"
+  exit 0
+end
+puts "sample-ruby"

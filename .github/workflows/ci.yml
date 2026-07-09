@@ -1,0 +1,36 @@
+# CI gate for skillpack (design §7.4): fmt + clippy + full test suite on every
+# PR; no PR merges without green CI.
+#
+# `--include-ignored` runs the Go + Ruby `#[ignore]`-gated round trips here
+# because the ubuntu-latest runner ships those runtimes (the dev machine does
+# not). Each ignored test self-skips via a runtime probe, so a missing runtime
+# anywhere degrades the same way it does locally rather than failing.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Install runtime prereqs (node, python, go, ruby)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nodejs python3 golang ruby
+      - name: fmt --check
+        run: cargo fmt --check
+      - name: clippy --all-targets
+        run: cargo clippy --all-targets -- -D warnings
+      - name: test (incl. ignored runtime round trips)
+        run: cargo test --all-targets -- --include-ignored
