@@ -2,6 +2,10 @@
 
 > Turn any OSS library or CLI into an agent-discoverable skill pack for Claude Code.
 
+[![CI](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml/badge.svg)](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust 1.74+](https://img.shields.io/badge/rust-1.74%2B-orange.svg)](https://www.rust-lang.org)
+
 Coding agents (Claude Code, Cursor, Codex) now discover and invoke tools by reading
 marketplace manifests, skill files, and CLIs — not by `npm install`-ing on instinct. An
 OSS project's code quality no longer matters if the agent can't find, understand, and
@@ -100,6 +104,12 @@ Multi-ecosystem targets (Cursor, Codex) and a bundled skill-pack marketplace are
 `skillpack` is MIT-licensed and free forever. If it saves you time wiring an
 agent-distribution layer, [sponsor on GitHub Sponsors](https://github.com/sponsors/nordicnode).
 Curated, pre-verified skill packs (Polar.sh) come later — see the design spec.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Template edits (`templates/*.tera`) need
+no Rust knowledge — the snapshot tests catch any silent change to generated
+output.
 
 ## License
 
