@@ -1,0 +1,70 @@
+[package]
+name = "skillpack"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+authors = ["Mikey <mikey@example.com>"]
+license = "MIT"
+description = "Generate and verify the agent-distribution layer (Claude Code skill packs) for any OSS project."
+homepage = "https://github.com/nordicnode/skillpack"
+repository = "https://github.com/nordicnode/skillpack"
+keywords = ["cli", "claude", "agent", "skills", "distribution"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "README.md"
+exclude = [
+    "/.claude",
+    "/tests/fixtures/expected",
+]
+
+[lib]
+name = "skillpack"
+path = "src/lib.rs"
+
+[[bin]]
+name = "skillpack"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+dialoguer = { version = "0.11", default-features = false, features = ["fuzzy-select", "editor"] }
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tera = { version = "1", default-features = false }
+anyhow = "1"
+thiserror = "1"
+walkdir = "2"
+regex = "1"
+once_cell = "1"
+indexmap = "2"
+
+[dev-dependencies]
+proptest = "1"
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+insta = "1"
+
+# The Edition 2021 default is fine for warnings; we keep profiles lean.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[lints.rust]
+# Keep the codebase clean in CI without needing a separate clippy config layer.
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+# V1 keeps `pedantic` as `allow`: the codebase is green under `all`, and the
+# remaining pedantic nits (let...else refactors, format!-append, bool-count,
+# fn-too-long) are stylistic churn that risks behavior for no correctness gain.
+# Re-enable pedantic as `warn` once the V1 surface stabilizes and the team has
+# time to absorb the ~22 remaining suggestions deliberately.
+pedantic = { level = "allow", priority = -1 }
+# Allow module_name_injections-style patterns we use; these are pragmatic relaxations.
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

@@ -1,0 +1,9 @@
+[package]
+name = "sample-broken"
+version = "0.1.0"
+license = "MIT"
+edition = "2021"
+
+[[bin]]
+name = "sample-broken"
+path = "src/main.rs"

@@ -1,0 +1,8 @@
+[project]
+name = "sample-python"
+version = "0.1.0"
+description = "A sample Python CLI"
+license = "MIT"
+
+[project.scripts]
+sample-python = "sample_python.cli:main"

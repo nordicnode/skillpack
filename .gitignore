@@ -1,0 +1,16 @@
+# Build artifacts
+/target
+**/*.rs.bk
+
+# IDE / editor
+/.idea
+/.vscode
+*.swp
+.DS_Store
+
+# Local secrets / scratch
+.env
+.env.*
+
+# Private design spec — not published to the public repo.
+/2026-07-09-skillpack-design.md

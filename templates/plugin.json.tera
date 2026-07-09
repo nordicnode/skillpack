@@ -1,0 +1,11 @@
+{
+  "name": {{ name | json_encode | safe }},
+  "description": {{ one_line_description | json_encode | safe }},
+  "version": {{ version | json_encode | safe }},
+  "author": {
+    "name": {{ author | default(value="Unspecified") | json_encode | safe }}
+  },
+  "license": {{ license | default(value="MIT") | json_encode | safe }},
+  "homepage": {{ repo_url | default(value="") | json_encode | safe }},
+  "repository": {{ repo_url | default(value="") | json_encode | safe }}
+}

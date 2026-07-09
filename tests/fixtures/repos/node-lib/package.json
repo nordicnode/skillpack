@@ -1,0 +1,7 @@
+{
+  "name": "sample-lib",
+  "version": "1.0.0",
+  "description": "A pure library, no CLI",
+  "license": "MIT",
+  "main": "index.js"
+}

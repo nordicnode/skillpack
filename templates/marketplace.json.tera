@@ -1,0 +1,19 @@
+{
+  "name": {{ name | json_encode | safe }},
+  "owner": {
+    "name": {{ author | default(value="Unspecified") | json_encode | safe }},
+    "type": "individual",
+    "url": {{ repo_url | default(value="") | json_encode | safe }}
+  },
+  "plugins": [
+    {
+      "name": {{ name | json_encode | safe }},
+      "source": "./",
+      "description": {{ one_line_description | json_encode | safe }},
+      "license": {{ license | default(value="MIT") | json_encode | safe }},
+      "repository": {{ repo_url | default(value="") | json_encode | safe }},
+      "keywords": [{% for kw in keywords %}{{ kw | json_encode | safe }}{% if not loop.last %}, {% endif %}{% endfor %}],
+      "category": "developer-tools"
+    }
+  ]
+}

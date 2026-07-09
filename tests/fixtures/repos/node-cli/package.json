@@ -1,0 +1,8 @@
+{
+  "name": "sample-node",
+  "version": "1.0.0",
+  "description": "A sample node CLI",
+  "license": "MIT",
+  "bin": { "sample-node": "./bin/cli.js" },
+  "main": "index.js"
+}
