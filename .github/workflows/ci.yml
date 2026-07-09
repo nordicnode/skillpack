@@ -20,9 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      # No channel override: install the toolchain pinned in rust-toolchain.toml
+      # so CI's fmt/clippy are byte-identical to local — a newer stable's fmt
+      # collapse rule can't pass one place and fail the other.
+      - uses: dtolnay/rust-toolchain@master
       - uses: Swatinem/rust-cache@v2
       - name: Install runtime prereqs (node, python, go, ruby)
         run: |

@@ -1,0 +1,8 @@
+# Pin the toolchain so local `cargo fmt` / clippy match CI exactly. CI uses
+# `dtolnay/rust-toolchain@stable`; this file pins a dated stable so a newer
+# rustfmt collapse rule can't pass locally and fail CI (or vice versa). Bump
+# deliberately a few times a year — keep at or above `rust-version` in Cargo.toml
+# (currently 1.74 MSRV).
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]

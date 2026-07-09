@@ -46,7 +46,10 @@ fn cli_profile() -> ProjectProfile {
 fn cli_intent() -> Intent {
     Intent {
         one_line_description: "Journal events to a chronological log".to_string(),
-        when_to_use_phrases: vec!["log a journal entry".to_string(), "record an incident".to_string()],
+        when_to_use_phrases: vec![
+            "log a journal entry".to_string(),
+            "record an incident".to_string(),
+        ],
         invocation_command: Some("chronicle --new \"entry\"".to_string()),
         import_pattern: None,
         author: Some("Mikey".to_string()),
