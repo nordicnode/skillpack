@@ -446,16 +446,27 @@ fn spawn_with_timeout(cmd: &mut Command, timeout: Duration) -> SpawnOutcome {
     let deadline = std::time::Instant::now() + timeout;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => {
-                let output = child.wait_with_output().ok().map(|o| {
-                    String::from_utf8_lossy(&o.stdout).to_string()
-                        + String::from_utf8_lossy(&o.stderr).as_ref()
-                });
-                let out = output.unwrap_or_default();
-                return if status.success() {
-                    SpawnOutcome::RanClean(out)
-                } else {
-                    SpawnOutcome::RanNonZero(out)
+            Ok(Some(_)) => {
+                // The child has exited. `wait_with_output` drains the piped
+                // stdout/stderr (buffered in the handles `try_wait` left
+                // untouched) and returns the exit status, so we use it rather
+                // than the status we just probed — avoiding a second wait.
+                break match child.wait_with_output() {
+                    Ok(o) => {
+                        let s = format!(
+                            "{}{}",
+                            String::from_utf8_lossy(&o.stdout),
+                            String::from_utf8_lossy(&o.stderr)
+                        );
+                        if o.status.success() {
+                            SpawnOutcome::RanClean(s)
+                        } else {
+                            SpawnOutcome::RanNonZero(s)
+                        }
+                    }
+                    // Pipes already drained by a prior reap; treat as
+                    // non-zero with no captured text.
+                    Err(_) => SpawnOutcome::RanNonZero(String::new()),
                 };
             }
             Ok(None) => {
@@ -472,6 +483,15 @@ fn spawn_with_timeout(cmd: &mut Command, timeout: Duration) -> SpawnOutcome {
 }
 
 fn which_on_path(name: &str) -> Option<PathBuf> {
+    // ponytail: this is a Unix-shaped PATH probe. Ceilings:
+    //  - a file that exists but lacks the exec bit (cataloged a fixture script
+    //    without +x, or a Windows .exe without PATHEXT matching) returns the
+    //    file here but `spawn()` then fails → mapped to `NotFound` upstream → an
+    //    honest `has_cli = false`, never a crash. Acceptable for V1.
+    //  - Windows: PATH lookups don't append PATHEXT, so probing bare "`node`"
+    //    misses `node.exe`. A Windows run needs `PATHEXT` enumeration + the
+    //    `is_file` test against each `name{ext}`. Add it when skillpack ships a
+    //    native-Windows build (V1 is unix-targeted; CI is ubuntu-latest).
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
         let candidate = dir.join(name);

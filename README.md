@@ -92,6 +92,8 @@ caught up front.
 CLI is documented from the `SKILL.md` itself (a `## Invocation` section, or a fenced block
 with `--flags`). If the skill documents a CLI but no runnable binary is found on your machine,
 the invocation check is reported as a **warning** (not silently skipped), so the gap is visible.
+The invocation check runs against the **first** documented CLI; discovery checks above run
+against every `SKILL.md` (a plugin may ship several).
 
 Exits non-zero on any critical failure, so it drops straight into CI as a PR gate. Pass
 `--format json` for a machine-readable report (per-check ids, counts, `ok` flag) for scripting.

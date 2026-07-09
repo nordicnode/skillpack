@@ -6,6 +6,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `init` now distinguishes its exit codes per design §8.1: a fixable
+  verify critical that the user declines to keep exits `INIT_FIXABLE` (2),
+  not the clean-abort `INIT_ABORTED` (1); fatal errors (introspect / render /
+  I/O) still exit `INIT_FATAL` (3). Previously the interactive decline path
+  returned 1, collapsing the fixable/fatal contract.
+- Removed a redundant second `wait` in both spawn helpers
+  (`introspect::spawn_with_timeout`, `verify::invocation::run_help`): the
+  piped stdout/stderr are drained by a single `wait_with_output`, whose exit
+  status is used rather than re-reading the one `try_wait` already probed.
+
+### Changed
+
+- The invocation check is documented (README + design §5.2) as running
+  against the first documented CLI; discovery checks still cover every
+  `SKILL.md` in a multi-skill plugin. `init` only ever emits one skill, so
+  per-skill spawn plumbing is deferred until a CLI-backed multi-skill plugin
+  is a real case.
+
 ## [0.2.0] — 2026-07-09
 
 ### Fixed

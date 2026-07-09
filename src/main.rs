@@ -150,7 +150,11 @@ fn run_init_inner(
         let proceed = CONFIRM.keep_anyway();
         if !proceed {
             eprintln!("Aborted. No files written.");
-            return Ok(exit::INIT_ABORTED);
+            // A fixable problem the user chose to address rather than ship a
+            // broken pack — exit code 2, not the clean-abort 1 (design §8.1:
+            // "2 if a fixable problem occurred"). INIT_ABORTED is reserved for
+            // a user declining with no underlying verify problem.
+            return Ok(exit::INIT_FIXABLE);
         }
         // User chose to keep — fall through to write.
     } else {

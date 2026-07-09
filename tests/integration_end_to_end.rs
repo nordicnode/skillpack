@@ -390,6 +390,44 @@ fn hand_written_pack_documenting_unrunnable_cli_warns() {
     );
 }
 
+// design §8.1: a fixable verify critical (the user can fix it and re-run) must
+// exit `INIT_FIXABLE` (2), distinct from `INIT_FATAL` (3) and the clean
+// `INIT_ABORTED` (1). The `bad-help` fixture's CLI exits non-zero on `--help`,
+// so `init`'s pre-commit gate hits a real critical. We decline "keep anyway"
+// (pipe `n`) and assert NO files are written AND the exit code is 2, not 1 —
+// the regression this pins is "the decline path used to return INIT_ABORTED".
+#[test]
+fn init_critical_decline_exits_fixable_not_aborted() {
+    let root = copy_fixture("bad-help");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "bad-help");
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["init", "--root", "."])
+        .arg("--accept-warnings") // only criticals matter; warnings won't gate
+        .current_dir(&root)
+        // Decline "Write the files anyway? [y/N]" — `n` defaults to No.
+        .write_stdin("n\n")
+        .assert()
+        .get_output()
+        .clone();
+    let code = out.status.code().unwrap_or(-1);
+    assert_eq!(
+        code, 2,
+        "declining a fixable critical must exit INIT_FIXABLE (2); got {code}"
+    );
+    // The exit-code mapping is only meaningful if we actually refused to write.
+    assert!(
+        !root.join(".claude-plugin/marketplace.json").exists(),
+        "declined init must not write the marketplace manifest"
+    );
+}
+
 // --- multi-ecosystem init+verify round trips (design §11: all five ecosystems)
 //
 // Node and Python run end-to-end here because their runtimes are present on

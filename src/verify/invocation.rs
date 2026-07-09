@@ -248,11 +248,11 @@ fn run_help(cmd: &[String], root: &Path, debug: bool, report: &mut VerifyReport)
     };
 
     let deadline = Instant::now() + HELP_TIMEOUT;
-    let status = loop {
+    loop {
         match child.try_wait() {
-            Ok(Some(s)) => break Some(s),
+            Ok(Some(_)) => break,
             Ok(None) => {}
-            Err(_) => break None,
+            Err(_) => break,
         }
         if Instant::now() > deadline {
             let _ = child.kill();
@@ -266,24 +266,26 @@ fn run_help(cmd: &[String], root: &Path, debug: bool, report: &mut VerifyReport)
             return Ok(String::new());
         }
         std::thread::sleep(Duration::from_millis(20));
-    };
+    }
 
-    let output = child
-        .wait_with_output()
-        .map(|o| {
+    // The poll loop established the child exited (or errored); `wait_with_output`
+    // drains the buffered stdout/stderr AND yields the exit status, so we use
+    // its status rather than the one `try_wait` probed — one wait, not two.
+    let (status, output) = match child.wait_with_output() {
+        Ok(o) => (
+            Some(o.status),
             format!(
                 "{}{}",
                 String::from_utf8_lossy(&o.stdout),
                 String::from_utf8_lossy(&o.stderr)
-            )
-        })
-        .unwrap_or_default();
+            ),
+        ),
+        Err(_) => (None, String::new()),
+    };
 
-    let status = if let Some(s) = status {
-        s
-    } else {
-        // We already pushed the timeout failure inside the loop, but guard
-        // against the Err-broken case too.
+    let Some(status) = status else {
+        // `wait_with_output` couldn't reap the child — surface it rather than
+        // silently treating an empty status as success.
         if !report.has_critical_failure() {
             report.push(CheckResult::fail(
                 "invocation.help_present",
