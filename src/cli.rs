@@ -52,5 +52,10 @@ pub enum Commands {
     Verify {
         #[arg(long, value_name = "DIR", default_value = ".")]
         root: PathBuf,
+
+        /// Output format. `human` (default) prints a readable report; `json`
+        /// prints a machine-readable object with per-check ids for CI gating.
+        #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
+        format: crate::verify::OutputFormat,
     },
 }

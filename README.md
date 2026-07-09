@@ -3,6 +3,7 @@
 > Turn any OSS library or CLI into an agent-discoverable skill pack for Claude Code.
 
 [![CI](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml/badge.svg)](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/skillpack.svg)](https://crates.io/crates/skillpack)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust 1.74+](https://img.shields.io/badge/rust-1.74%2B-orange.svg)](https://www.rust-lang.org)
 
@@ -45,10 +46,13 @@ single branching point.
 ## Install
 
 ```sh
-cargo install --path .    # from source; or `cargo install skillpack` once published
+cargo install skillpack    # from crates.io
 ```
 
-Requires Rust 1.74+.
+Or build from source: `cargo install --path .` (or `cargo build --release` for a
+local binary under `target/release/`).
+
+Requires Rust 1.74+. Published on [crates.io](https://crates.io/crates/skillpack).
 
 ## Quick start
 
@@ -81,17 +85,26 @@ caught up front.
 
 - `--help` executes cleanly under a hard timeout
 - every flag documented in `SKILL.md` exists in the real `--help` output (catches drift)
+- flags the CLI advertises in `--help` that `SKILL.md` doesn't document (a discoverability
+  warning, so an agent doesn't miss options)
 
-Exits non-zero on any critical failure, so it drops straight into CI as a PR gate.
+`verify` works on hand-written skill packs too, not just `init` output: it derives whether a
+CLI is documented from the `SKILL.md` itself (a `## Invocation` section, or a fenced block
+with `--flags`). If the skill documents a CLI but no runnable binary is found on your machine,
+the invocation check is reported as a **warning** (not silently skipped), so the gap is visible.
+
+Exits non-zero on any critical failure, so it drops straight into CI as a PR gate. Pass
+`--format json` for a machine-readable report (per-check ids, counts, `ok` flag) for scripting.
 
 ## Flags
 
-| Flag                  | Purpose                                                          |
-|-----------------------|------------------------------------------------------------------|
-| `init --non-interactive` | skip prompts; requires a `skillpack.toml` (for CI)           |
-| `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks) |
+| Flag                    | Purpose                                                          |
+|-------------------------|------------------------------------------------------------------|
+| `init --non-interactive` | skip prompts; requires a `skillpack.toml` (for CI)             |
+| `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
 | `init --license <SPDX>`  | override the license for this run                              |
-| `--verbose`           | print what `skillpack` detected in the repo (introspection)      |
+| `verify --format human\|json` | human report (default) or machine-readable JSON for CI   |
+| `--verbose`             | print what `skillpack` detected in the repo (introspection)      |
 | `--debug`             | print every subprocess call                                       |
 
 ## Status

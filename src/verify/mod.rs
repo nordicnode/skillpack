@@ -36,6 +36,8 @@ pub struct VerifyInput {
     pub spawn_root: std::path::PathBuf,
     pub has_cli: bool,
     pub cli_command: Option<Vec<String>>,
+    /// Print every subprocess spawn to stderr (design §8.2 --debug).
+    pub debug: bool,
 }
 
 /// Run the full verify suite against `root`, returning the aggregate report.
@@ -48,7 +50,9 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
         report.push(check);
     }
 
-    // Invocation checks. Build the input from the SKILL.md we located.
+    // Invocation checks. Build the input from the SKILL.md we located. Note we
+    // use the FIRST skill's text for the invocation spawn — the documented CLI
+    // belongs to exactly one skill. Discovery above still checks all skills.
     let skill_path = find_skill_file(root);
     let skill_md = skill_path
         .as_ref()
@@ -60,10 +64,20 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
         &skill_md,
         input.has_cli,
         input.cli_command.as_deref(),
+        input.debug,
     );
     invocation::run(&inv, &mut report)?;
 
     Ok(report)
+}
+
+/// How `verify` presents its results (Improvement B). The human format is the
+/// default; `json` is for CI gating / scripting and uses the machine-readable
+/// `check_id`s already on each [`CheckResult`](self::result::CheckResult).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum OutputFormat {
+    Human,
+    Json,
 }
 
 /// Pretty-print a report as the human-facing output (design §5.2 step 4).
@@ -104,4 +118,46 @@ pub fn render(report: &VerifyReport) -> String {
         " — verify OK\n"
     });
     out
+}
+
+/// Render the report as a stable JSON object for CI / scripting. Shape:
+/// `{ "ok": bool, "counts": {pass,warn,fail,skip}, "results": [ {check_id,
+/// check_name, severity, message, suggestion?, location?} ... ] }`.
+pub fn render_json(report: &VerifyReport) -> String {
+    let (pass, warn, fail, skip) = report.counts();
+    let results: Vec<_> = report
+        .results
+        .iter()
+        .map(|r| {
+            let mut o = serde_json::json!({
+                "check_id": r.check_id,
+                "check_name": r.check_name,
+                "severity": r.severity.as_str(),
+                "message": r.message,
+            });
+            if let Some(s) = &r.suggestion {
+                o["suggestion"] = serde_json::Value::String(s.clone());
+            }
+            if let Some((file, line)) = &r.location {
+                let mut loc = serde_json::Map::new();
+                loc.insert("file".to_string(), serde_json::Value::String(file.clone()));
+                if let Some(n) = line {
+                    loc.insert("line".to_string(), serde_json::Value::from(*n));
+                }
+                o["location"] = serde_json::Value::Object(loc);
+            }
+            o
+        })
+        .collect();
+    let body = serde_json::json!({
+        "ok": !report.has_critical_failure(),
+        "counts": {
+            "pass": pass,
+            "warn": warn,
+            "fail": fail,
+            "skip": skip,
+        },
+        "results": results,
+    });
+    serde_json::to_string_pretty(&body).expect("verify report serializes to JSON")
 }

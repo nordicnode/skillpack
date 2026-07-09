@@ -198,6 +198,198 @@ fn broken_cli_verify_flags_drift() {
     );
 }
 
+// Bug 1: init with empty when_to_use_phrases must produce a skill whose verify
+// run WARNS about the missing triggers — not silently pass. The old code emitted
+// a "(unspecified)" placeholder that bypassed the emptiness check.
+#[test]
+fn init_with_empty_when_to_use_warns_on_verify() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    let toml = "[skill]\n\
+        name = \"sample-rust\"\n\
+        one_line_description = \"Print a journal entry to stdout\"\n\
+        when_to_use_phrases = []\n\
+        invocation_command = \"sample-rust --new \\\"entry\\\"\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // The generated skill must carry an empty when_to_use (not the placeholder).
+    let skill = fs::read_to_string(root.join("skills/sample-rust/SKILL.md")).unwrap();
+    assert!(skill.contains("when_to_use: \"\""));
+    assert!(!skill.contains("(unspecified)"));
+
+    // verify must surface the missing-trigger warning (not silently pass).
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(
+        s.contains("when_to_use") && s.contains("warn"),
+        "expected a when_to_use warning, got:\n{s}"
+    );
+}
+
+// Improvement B: --format json emits a machine-readable report with the per-
+// check ids + an `ok` flag, for CI gating.
+#[test]
+fn verify_format_json_is_machine_readable() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out)).unwrap();
+    assert_eq!(v["ok"], serde_json::Value::Bool(true));
+    let results = v["results"].as_array().unwrap();
+    assert!(results.iter().all(|r| r["check_id"].is_string()));
+    assert!(results
+        .iter()
+        .any(|r| r["check_id"].as_str().unwrap().starts_with("invocation.")));
+}
+
+// Improvement C: a plugin shipping multiple skills must verify each (the old
+// code checked only an arbitrary first one — non-deterministic).
+#[test]
+fn verify_checks_all_skills_in_a_multi_skill_plugin() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Add a second skill whose description is empty -> must produce its OWN
+    // failure tagged with the second skill's path, not be silently skipped.
+    fs::create_dir_all(root.join("skills/second-tool")).unwrap();
+    fs::write(
+        root.join("skills/second-tool/SKILL.md"),
+        "---\nname: second-tool\ndescription: \"\"\nwhen_to_use: \"x\"\n---\nbody\n",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(
+        s.contains("skills/second-tool/SKILL.md"),
+        "expected the second skill's path in the report, got:\n{s}"
+    );
+}
+
+// Bug 2: a hand-written skill pack (no `init` output) that documents a CLI but
+// ships no source tree / built artifact must NOT silently pass — `verify`
+// reports the gap as a warning so the maintainer knows the invocation check
+// didn't actually run (the old code skipped it silently under introspect-gated
+// has_cli).
+#[test]
+fn hand_written_pack_documenting_unrunnable_cli_warns() {
+    let dest = tempfile::tempdir().unwrap().keep();
+    fs::create_dir_all(dest.join(".claude-plugin")).unwrap();
+    fs::create_dir_all(dest.join("skills/foo")).unwrap();
+    fs::write(
+        dest.join(".claude-plugin/marketplace.json"),
+        "{\"name\":\"foo-marketplace\",\"owner\":{\"name\":\"x\"},\"plugins\":[{\"name\":\"foo\",\"source\":\"./\"}]}",
+    )
+    .unwrap();
+    fs::write(
+        dest.join(".claude-plugin/plugin.json"),
+        "{\"name\":\"foo\",\"description\":\"Do thing\"}",
+    )
+    .unwrap();
+    // A skill with ## Invocation documenting a CLI, but no source tree / binary.
+    fs::write(
+        dest.join("skills/foo/SKILL.md"),
+        "---\nname: foo\ndescription: \"Run the foo thing\"\nwhen_to_use: \"run foo\"\n---\n\n## Invocation\n\n```\nfoo --new entry\n```\n",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&dest)
+        .assert()
+        .success() // warnings don't fail
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(
+        s.contains("not_runnable_here") || s.contains("no runnable command"),
+        "expected a not-runnable warning, got:\n{s}"
+    );
+    assert!(
+        !s.contains("pure-library project"),
+        "a documented CLI must not read as a pure library, got:\n{s}"
+    );
+}
+
 // --- multi-ecosystem init+verify round trips (design §11: all five ecosystems)
 //
 // Node and Python run end-to-end here because their runtimes are present on

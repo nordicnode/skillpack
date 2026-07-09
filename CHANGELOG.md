@@ -6,6 +6,43 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `init` no longer emits a `when_to_use: "(unspecified)"` placeholder when no
+  trigger phrases are given — it emits an empty `when_to_use`, so `verify`'s own
+  emptiness warning now fires honestly. Previously a generated skill with no
+  triggers would pass `verify` silently (the "looks fine until an agent tries
+  it" failure mode).
+- `verify`'s invocation/flag-drift check now derives CLI presence from the
+  `SKILL.md` itself (a `## Invocation` section, or a fenced block with
+  `--flags`), not from whether introspect found a built binary on the local
+  machine. Hand-written packs that document a CLI but ship no source tree now
+  get a visible warning instead of a silent "pure-library" skip.
+- `--debug` now prints every subprocess spawn in `verify` (it was previously a
+  no-op for the `verify` subcommand).
+- `--accept-warnings` now matches its docs: in interactive mode, `verify`
+  warnings prompt before writing; `--accept-warnings` skips the prompt.
+  `--non-interactive` warnings never block (CI gates on criticals only).
+- The `property_proptest.rs` placeholder is now a real property test exercising
+  `extract_flags` and `parse_skill_frontmatter` directly (the lib re-exports it
+  already exposed).
+
+### Added
+
+- `verify --format json`: machine-readable report with per-check ids, counts,
+  and an `ok` flag, for CI gating / scripting.
+- Reverse flag-drift warning: `--help` flags the skill doesn't document are
+  reported as a warning (discoverability gap for an agent).
+- Multi-skill verification: `verify` checks every SKILL.md under `skills/`
+  (sorted, deterministic) instead of an arbitrary first one.
+- `--format`, scoped flag-drift extraction (the documented invocation area,
+  not the whole body), and a testable confirmation path for the pre-commit gate.
+
+### Changed
+
+- `tempfile` is now a runtime dependency; the hand-rolled `mod tempfile` in
+  `main.rs` is removed.
+
 ## [0.1.0] — 2026-07-09
 
 ### Added

@@ -1,39 +1,52 @@
-//! Property-based tests (design §7.3):
-//!   - the help-text flag extractor never panics and is deterministic on
-//!     arbitrary text.
-//!   - random markdown never panics the SKILL.md frontmatter parser.
+//! Property-based tests (design §7.3): the help-text flag extractor and the
+//! SKILL.md frontmatter parser never panic and are deterministic on arbitrary
+//! input.
 //!
-//! These exercise the library code directly (not the binary) so they're a
-//! unit-test file under `tests/` that depends on the crate's exposed
-//! functions — which is why `extract_flags` and `parse_skill_frontmatter`
-//! are `pub` in their modules.
+//! `lib.rs` re-exports the crate internals, so these call the public
+//! `extract_flags` and `parse_skill_frontmatter` directly (in-process, no
+//! binary spawn) — they're genuine property tests, not placeholders.
 
 use proptest::prelude::*;
 
-// Flat module re-exports so the test can reach the crate internals. The crate
-// is a binary (`[[bin]]`), so we pull items by path relative to the crate
-// root via the `skillpack` crate name only when a `lib` target exists. Since
-// this is a bin-only crate, the integration test cannot `use skillpack::...`
-// directly. Instead we thin-link the modules by re-compiling the same source
-// through a small shim is overkill — so we assert behavior through the binary
-// instead. Property tests below therefore drive `extract_flags`-like logic by
-// running `skillpack verify` on generated inputs.
+use skillpack::verify::discovery::parse_skill_frontmatter;
+use skillpack::verify::invocation::extract_flags;
 
 proptest! {
-    /// A random blob fed through `--help` extraction should never panic and
-    /// should produce a deterministic flag list (the extractor is a pure
-    /// function of the input). We verify determinism by running the extraction
-    /// path twice against the same help text and asserting the binary's verify
-    /// output is identical — but since we can't call the fn directly from a
-    /// bin crate, we assert the weaker invariant: feeding arbitrary text as a
-    /// SKILL.md body and arbitrary text as `--help` should either pass verify
-    /// or fail it, but never hang or panic (the binary returns in bounded time).
+    /// Extracting flags from arbitrary text must never panic and must be a pure
+    /// function of the input — two runs on the same blob yield the same list.
+    /// The strategy mimics realistic --help text: words, dashes, flags, =values,
+    /// commas, and newlines, bounded to keep the test fast.
     #[test]
-    fn random_help_does_not_crash_binary(help_blob in "[a-zA-Z0-9 --=,\n]{0,2000}") {
-        let _ = help_blob; // compiled into a fixture below
-        // The actual crash-resistance is exercised by the integration tests
-        // which run real CLIs. This property is a placeholder that asserts the
-        // proptest strategy itself stays in the character class we expect.
-        prop_assert!(help_blob.is_ascii());
+    fn extract_flags_never_panics_and_is_deterministic(
+        blob in "[a-zA-Z0-9 \t--=,;:.()'\"\n]{0,4000}"
+    ) {
+        let a = extract_flags(&blob);
+        let b = extract_flags(&blob);
+        prop_assert_eq!(&a, &b, "extract_flags must be deterministic");
+
+        // Invariants that hold for all inputs: every returned token is a
+        // well-formed flag (starts with a dash, has a leading letter, ≥2 chars
+        // long), and the list is deduplicated.
+        let mut seen = std::collections::HashSet::new();
+        for f in &a {
+            prop_assert!(f.starts_with('-'), "flag must start with '-': {f}");
+            prop_assert!(f.len() >= 2, "flag must be ≥2 chars: {f}");
+            // first non-dash char is a letter — filters `-`/`--`/`-1` prose.
+            let first = f.chars().find(|c| *c != '-');
+            prop_assert!(
+                first.is_some_and(|c| c.is_ascii_alphabetic()),
+                "flag's first non-dash char must be a letter: {f}"
+            );
+            prop_assert!(seen.insert(f.clone()), "flags must be deduped: {f}");
+        }
+    }
+
+    /// Parsing frontmatter out of arbitrary markdown must never panic.
+    /// Whatever it returns, the parser is total: it either finds a `---`…`---`
+    /// block or returns None, and never hangs or throws.
+    #[test]
+    fn parse_frontmatter_never_panics(blob in "[\x20-\x7E\n]{0,4000}") {
+        let fm = parse_skill_frontmatter(&blob);
+        let _ = fm; // the property is "returns in bounded time without panicking"
     }
 }

@@ -20,13 +20,26 @@ static NAME_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(schema::NAME_KEBAB_REGEX).expect("compiled constant regex"));
 
 /// Run every discovery check, returning one [`CheckResult`] per check.
-/// `root` is the plugin root (the dir containing `.claude-plugin/`).
+/// `root` is the plugin root (the dir containing `.claude-plugin/`). Every
+/// SKILL.md under `skills/` (plus a root SKILL.md) is checked — a plugin may
+/// legitimately ship multiple skills (Improvement C).
 pub fn run(root: &Path) -> Result<Vec<CheckResult>> {
-    let out = vec![
-        check_marketplace(root)?,
-        check_plugin_json(root)?,
-        check_skill_md(root)?,
-    ];
+    let mut out = vec![check_marketplace(root)?, check_plugin_json(root)?];
+    // Check every skill; if none exist, emit a single missing-skill failure
+    // (the earlier behavior) so a plugin with zero skills fails clearly.
+    let skills = find_skill_files(root);
+    if skills.is_empty() {
+        out.push(CheckResult::fail(
+            "discovery.skill.missing",
+            "a SKILL.md exists (skills/<name>/SKILL.md or root)",
+            "no SKILL.md found",
+            "To fix: run `skillpack init`, or add skills/<your-tool>/SKILL.md.",
+        ));
+    } else {
+        for skill_path in skills {
+            out.push(check_one_skill_md(root, &skill_path)?);
+        }
+    }
     Ok(out)
 }
 
@@ -329,27 +342,13 @@ fn find_kv_colon(line: &str) -> Option<usize> {
     None
 }
 
-fn check_skill_md(root: &Path) -> Result<CheckResult> {
-    // Locate a skill: either `skills/<name>/SKILL.md` or a root `SKILL.md`.
-    let skill_path = find_skill_file(root);
-    let path = match skill_path {
-        Some(p) => p,
-        None => {
-            return Ok(CheckResult::fail(
-                "discovery.skill.missing",
-                "a SKILL.md exists (skills/<name>/SKILL.md or root)",
-                "no SKILL.md found",
-                "To fix: run `skillpack init`, or add skills/<your-tool>/SKILL.md.",
-            ));
-        }
-    };
-
-    let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+fn check_one_skill_md(root: &Path, path: &Path) -> Result<CheckResult> {
+    let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let fm = parse_skill_frontmatter(&raw).unwrap_or_default();
 
     let rel = path
         .strip_prefix(root)
-        .unwrap_or(&path)
+        .unwrap_or(path)
         .to_string_lossy()
         .to_string();
 
@@ -451,25 +450,36 @@ fn check_skill_md(root: &Path) -> Result<CheckResult> {
 
 // ----- helpers --------------------------------------------------------------
 
-pub(crate) fn find_skill_file(root: &Path) -> Option<std::path::PathBuf> {
-    // Prefer skills/<x>/SKILL.md.
+/// Every SKILL.md under `skills/*/SKILL.md` plus a root `SKILL.md`, sorted for
+/// deterministic verification (read_dir order is unspecified). A plugin may
+/// legitimately ship multiple skills (Improvement C).
+pub(crate) fn find_skill_files(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
     let skills_dir = root.join("skills");
     if skills_dir.is_dir() {
         if let Ok(entries) = fs::read_dir(&skills_dir) {
-            for entry in entries.flatten() {
+            let mut names: Vec<_> = entries.flatten().collect();
+            names.sort_by_key(|e| e.file_name());
+            for entry in names {
                 let candidate = entry.path().join("SKILL.md");
                 if candidate.is_file() {
-                    return Some(candidate);
+                    out.push(candidate);
                 }
             }
         }
     }
     let root_skill = root.join("SKILL.md");
     if root_skill.is_file() {
-        Some(root_skill)
-    } else {
-        None
+        out.push(root_skill);
     }
+    out
+}
+
+/// The first skill file found — kept for the invocation stage, which only
+/// spawns one CLI (the documented one). [`find_skill_files`] is the
+/// deterministic plural form used by discovery.
+pub(crate) fn find_skill_file(root: &Path) -> Option<std::path::PathBuf> {
+    find_skill_files(root).into_iter().next()
 }
 
 /// True for a valid kebab-case plugin/skill/marketplace name.

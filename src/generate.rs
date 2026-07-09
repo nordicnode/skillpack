@@ -69,13 +69,12 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
 
     // Precompute the joined when-to-use list so the template stays a thin
     // presentation layer (no Tera filter syntax for non-Rust contributors to
-    // trip over). Empty list -> "(unspecified)". The verbatim phrases are
-    // also passed so the body's "When to use" section can list each one.
-    let when_concat = if intent.when_to_use_phrases.is_empty() {
-        "(unspecified)".to_string()
-    } else {
-        intent.when_to_use_phrases.join(", ")
-    };
+    // trip over). Empty list -> empty string: we deliberately do NOT emit a
+    // placeholder like "(unspecified)" here, because that non-empty sentinel
+    // would bypass verify's own `when_to_use` emptiness warning (design §5.3 —
+    // the worst failure mode is a skill pack that looks fine but has no real
+    // triggers). An empty `when_to_use:` keeps the verifier honest.
+    let when_concat = intent.when_to_use_phrases.join(", ");
 
     tera::Context::from_serialize(serde_json::json!({
         "name": name,
@@ -342,5 +341,33 @@ mod tests {
         for (x, y) in a.iter().zip(b.iter()) {
             assert_eq!(x.contents, y.contents);
         }
+    }
+
+    // Bug 1: empty when_to_use_phrases must NOT emit a "(unspecified)"
+    // placeholder that bypasses verify's emptiness warning. The frontmatter
+    // should carry an empty when_to_use so the discovery check fires honestly.
+    #[test]
+    fn empty_when_to_use_emits_empty_not_placeholder() {
+        let mut p = cli_profile();
+        p.has_cli = false;
+        p.cli_command = None;
+        p.cli_help_output = None;
+        let i = Intent {
+            one_line_description: "Do a thing".into(),
+            when_to_use_phrases: vec![],
+            invocation_command: None,
+            import_pattern: Some("import { x } from 'y'".into()),
+            author: None,
+            license: Some("MIT".into()),
+        };
+        let skill = render(&p, &i).unwrap()[2].contents.clone();
+        assert!(
+            skill.contains("when_to_use: \"\""),
+            "empty phrases must yield when_to_use: \"\", got:\n{skill}"
+        );
+        assert!(
+            !skill.contains("(unspecified)"),
+            "the placeholder must not leak into the skill, got:\n{skill}"
+        );
     }
 }
