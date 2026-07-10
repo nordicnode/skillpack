@@ -24,7 +24,7 @@ impl Severity {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Skipped => "skip",
-            Self::Pass => "ok",
+            Self::Pass => "pass",
             Self::Warn => "warn",
             Self::Error => "fail",
         }

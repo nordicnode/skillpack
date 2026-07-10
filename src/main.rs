@@ -227,7 +227,6 @@ fn verify_rendered(
         // (which holds only the rendered files) would false-fail any
         // relative-invocation CLI like `go run .` or `node ./bin/cli.js`.
         spawn_root: root.to_path_buf(),
-        has_cli: profile.has_cli,
         cli_command: profile.cli_command.clone(),
         debug,
     };
@@ -395,7 +394,6 @@ fn run_verify_inner(
     let input = VerifyInput {
         root: root.to_path_buf(),
         spawn_root: root.to_path_buf(),
-        has_cli: profile.has_cli,
         cli_command: profile.cli_command.clone(),
         debug,
     };

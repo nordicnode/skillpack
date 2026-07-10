@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-09
+
+### Fixed
+
+- Generated `SKILL.md` "When NOT to use" prose no longer reads as broken
+  grammar ("outside the systems programming it was built for") — `category_hint`
+  now yields a noun per language ("the Rust tooling", "the JavaScript/Node
+  tooling", etc.).
+- `verify --format json` now reports per-check `severity: "pass"` for passes,
+  matching the `counts.pass` key. Previously it emitted `"ok"` for a passed
+  check while the aggregate `counts` object used `pass` — two words for one
+  concept in the same payload.
+- Removed the dead `has_cli` field from `VerifyInput` / `InvocationInput`.
+  CLI *presence* is derived from the SKILL.md itself, not the introspected
+  binary, so the field was threaded in but never read.
+
+## [0.2.1] - 2026-07-09
+
 ### Fixed
 
 - `init` now distinguishes its exit codes per design §8.1: a fixable

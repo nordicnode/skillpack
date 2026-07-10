@@ -180,12 +180,12 @@ fn derive_keywords(profile: &ProjectProfile, intent: &Intent) -> Vec<String> {
 
 fn category_hint(lang: crate::types::Language) -> &'static str {
     match lang {
-        crate::types::Language::Rust => "the systems programming",
-        crate::types::Language::Node => "the JavaScript/Node",
-        crate::types::Language::Python => "the Python",
-        crate::types::Language::Go => "the Go",
-        crate::types::Language::Ruby => "the Ruby",
-        crate::types::Language::Unknown => "the",
+        crate::types::Language::Rust => "the Rust tooling",
+        crate::types::Language::Node => "the JavaScript/Node tooling",
+        crate::types::Language::Python => "the Python tooling",
+        crate::types::Language::Go => "the Go tooling",
+        crate::types::Language::Ruby => "the Ruby tooling",
+        crate::types::Language::Unknown => "the tooling",
     }
 }
 

@@ -35,7 +35,6 @@ pub struct VerifyInput {
     /// subcommand this equals `root`; for `init`'s pre-commit gate it's the
     /// project root while `root` is the temp dir holding the rendered files.
     pub spawn_root: std::path::PathBuf,
-    pub has_cli: bool,
     pub cli_command: Option<Vec<String>>,
     /// Print every subprocess spawn to stderr (design §8.2 --debug).
     pub debug: bool,
@@ -88,7 +87,6 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
         root,
         &input.spawn_root,
         &skill_md,
-        input.has_cli,
         input.cli_command.as_deref(),
         input.debug,
     );

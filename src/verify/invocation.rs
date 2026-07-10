@@ -17,7 +17,7 @@ use super::result::{CheckResult, VerifyReport};
 const HELP_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Inputs the invocation checker needs. Kept as a plain struct so the caller
-/// (`verify` dispatcher) reads the SKILL.md + knows the `has_cli` flag, while
+/// (`verify` dispatcher) reads the SKILL.md + holds the spawn command, while
 /// this module stays focused on spawning + diffing.
 ///
 /// `skill_root` and `spawn_cwd` are deliberately separate (design §5.3 + §6.3):
@@ -33,12 +33,10 @@ const HELP_TIMEOUT: Duration = Duration::from_secs(8);
 pub struct InvocationInput {
     /// The raw SKILL.md text, so we can extract documented flags/invocations.
     pub skill_md: String,
-    /// True iff introspect/the user confirmed a CLI exists on this machine.
-    /// Used together with `cli_command` to decide whether we can *spawn*; CLI
-    /// *presence* itself is derived from the SKILL.md (see [`run`]).
-    pub has_cli: bool,
     /// The command to run with `--help`, argv-style: `["chronicle", "--help"]`.
-    /// `None` when introspect found no runnable binary.
+    /// `None` when introspect found no runnable binary. CLI *presence* itself is
+    /// derived from the SKILL.md (see [`run`]); this only gates whether we can
+    /// actually spawn.
     pub cli_command: Option<Vec<String>>,
     /// Where the SKILL.md / manifest files live (project root, or the temp
     /// dir for `init`'s pre-commit gate).
@@ -56,13 +54,11 @@ impl InvocationInput {
         skill_root: &Path,
         spawn_cwd: &Path,
         skill_md: &str,
-        has_cli: bool,
         cli_command: Option<&[String]>,
         debug: bool,
     ) -> Self {
         Self {
             skill_md: skill_md.to_string(),
-            has_cli,
             cli_command: cli_command.map(<[std::string::String]>::to_vec),
             skill_root: skill_root.to_path_buf(),
             spawn_cwd: spawn_cwd.to_path_buf(),
@@ -75,10 +71,10 @@ impl InvocationInput {
 ///
 /// CLI presence is derived from whether the SKILL.md *documents* an invocation
 /// (a `## Invocation`/`## Usage` block or a fenced command), NOT from
-/// `input.has_cli` (which reflects whether introspect found a runnable binary
+/// `cli_command` (which only reflects whether introspect found a runnable binary
 /// on *this* machine). This keeps `verify` honest about what the skill claims
 /// even when run on a hand-written pack with no source tree (design §4.2).
-/// `input.has_cli`/`cli_command` only gate whether we can actually *spawn*.
+/// `cli_command` only gates whether we can actually *spawn*.
 pub fn run(input: &InvocationInput, report: &mut VerifyReport) -> Result<()> {
     let skill_invocation = extract_documented_invocation(&input.skill_md);
 
