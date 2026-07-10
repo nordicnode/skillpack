@@ -41,11 +41,14 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
     let name = manifest_name
         .or_else(|| repo_url_name(&repo_url))
         .unwrap_or_else(|| {
-            // Last resort: the directory name itself, kebab-cased.
-            root.file_name().map_or_else(
-                || "unknown-tool".to_string(),
-                |n| n.to_string_lossy().to_string(),
-            )
+            // Last resort: the directory name itself. Canonicalize first so a
+            // bare `--root .` (the documented default) resolves to the real cwd
+            // tail instead of `Path::new(".").file_name() == None` → "unknown-tool".
+            std::fs::canonicalize(root)
+                .ok()
+                .and_then(|c| c.file_name().map(|n| n.to_string_lossy().to_string()))
+                .or_else(|| std::env::current_dir().ok().and_then(|c| c.file_name().map(|n| n.to_string_lossy().to_string())))
+                .unwrap_or_else(|| "unknown-tool".to_string())
         });
 
     Ok(ProjectProfile {
@@ -93,14 +96,17 @@ fn has_gemspec(root: &Path) -> bool {
 fn project_manifest_name(root: &Path, language: Language) -> Option<String> {
     match language {
         Language::Rust => {
+            // Parse Cargo.toml with the real toml crate (same path as Python)
+            // instead of hand-rolling line scans: a hand-scan misreads `name="x"`
+            // (no space before `=`) and `name = { workspace = true }` (extracts
+            // "{ workspace" as the name). toml does both correctly, and returns
+            // None for workspace-inherited names so the caller falls through.
             let raw = fs::read_to_string(root.join("Cargo.toml")).ok()?;
-            let pkg_line = raw
-                .lines()
-                .skip_while(|l| !l.trim_start().starts_with("[package]"))
-                .skip(1)
-                .take_while(|l| !l.trim_start().starts_with('['))
-                .find(|l| l.trim_start().starts_with("name ="))?;
-            Some(extract_toml_string_value(pkg_line)?)
+            let v = toml::from_str::<toml::Value>(&raw).ok()?;
+            v.get("package")
+                .and_then(|p| p.get("name"))
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
         }
         Language::Node => {
             let raw = fs::read_to_string(root.join("package.json")).ok()?;
@@ -491,7 +497,9 @@ fn which_on_path(name: &str) -> Option<PathBuf> {
     //  - Windows: PATH lookups don't append PATHEXT, so probing bare "`node`"
     //    misses `node.exe`. A Windows run needs `PATHEXT` enumeration + the
     //    `is_file` test against each `name{ext}`. Add it when skillpack ships a
-    //    native-Windows build (V1 is unix-targeted; CI is ubuntu-latest).
+    //    native-Windows build (V1 is unix-targeted; CI is ubuntu-latest). The
+    //    README "Platform" note documents this ceiling so a Windows run's
+    //    silent `has_cli=false` isn't a surprise.
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
         let candidate = dir.join(name);
@@ -553,13 +561,11 @@ fn manifest_license(root: &Path, language: Language) -> Option<String> {
         }
         Language::Rust => {
             let raw = fs::read_to_string(root.join("Cargo.toml")).ok()?;
-            let line = raw
-                .lines()
-                .skip_while(|l| !l.trim_start().starts_with("[package]"))
-                .skip(1)
-                .take_while(|l| !l.trim_start().starts_with('['))
-                .find(|l| l.trim_start().starts_with("license ="))?;
-            extract_toml_string_value(line)
+            let v = toml::from_str::<toml::Value>(&raw).ok()?;
+            v.get("package")
+                .and_then(|p| p.get("license"))
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
         }
         _ => None,
     }
@@ -600,18 +606,6 @@ fn repo_url_name(repo_url: &Option<String>) -> Option<String> {
     let last = url.rsplit('/').next()?.trim_end();
     let stem = last.strip_suffix(".git").unwrap_or(last);
     Some(stem.to_string())
-}
-
-/// Parse `name = "foo"` (or `name = 'foo'`) from a TOML line.
-fn extract_toml_string_value(line: &str) -> Option<String> {
-    let after = line.split('=').nth(1)?.trim();
-    let stripped = after
-        .trim_start_matches('"')
-        .trim_start_matches('\'')
-        .trim_end_matches('"')
-        .trim_end_matches('\'')
-        .trim();
-    Some(stripped.to_string())
 }
 
 fn extract_ruby_string_value(line: &str) -> Option<String> {
@@ -811,3 +805,105 @@ mod candidate_tests {
         cleanup(&root);
     }
 }
+
+#[cfg(test)]
+mod parse_tests {
+    //! Bug #1 + #2: the Rust manifest name/license parsers used to hand-scan
+    //! Cargo.toml lines, which misread `name="x"` (no space) and `name = { workspace
+    //! = true }` (extracted "{ workspace" as the name). now go through the real
+    //! toml crate — these tests pin both regressions.
+
+    use super::*;
+
+    fn scratch(files: &[(&str, &str)]) -> PathBuf {
+        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir()
+            .join(format!("skillpack-parse-{}-{}", std::process::id(), n))
+            .join("proj");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        for (rel, contents) in files {
+            std::fs::write(root.join(rel), contents).unwrap();
+        }
+        root
+    }
+
+    fn cleanup(root: &Path) {
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rust_name_with_no_spaces_around_equals() {
+        // name="revtool" — the old `starts_with("name =")` scan missed this.
+        let root = scratch(&[("Cargo.toml", "[package]\nname=\"revtool\"\nversion=\"0.1\"\n")]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Rust).as_deref(),
+            Some("revtool")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rust_name_workspace_inherited_is_none() {
+        // name = { workspace = true } — the old extract returned Some("{ workspace"),
+        // which coerce_kebab turned into a plugin literally named "workspace".
+        let root = scratch(&[(
+            "Cargo.toml",
+            "[package]\nname = { workspace = true }\nversion = \"0.1\"\n",
+        )]);
+        assert_eq!(project_manifest_name(&root, Language::Rust), None);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rust_license_with_no_spaces_around_equals() {
+        // license="MIT" — same brittle scan hit license= (Bug #1).
+        let root = scratch(&[("Cargo.toml", "[package]\nname = \"x\"\nlicense=\"MIT\"\n")]);
+        assert_eq!(
+            manifest_license(&root, Language::Rust).as_deref(),
+            Some("MIT")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rust_license_workspace_inherited_is_none() {
+        let root = scratch(&[(
+            "Cargo.toml",
+            "[package]\nname = \"x\"\nlicense = { workspace = true }\n",
+        )]);
+        assert_eq!(manifest_license(&root, Language::Rust), None);
+        cleanup(&root);
+    }
+
+    // Bug #3: a manifest with no name field and no git remote used to fall back
+    // to the directory tail via `Path::new(".").file_name()` — which returns
+    // None for `.` — emitting the literal "unknown-tool". Now we canonicalize
+    // first, so a bare `--root .` resolves to the real cwd tail.
+    #[test]
+    fn unknown_root_dot_falls_back_to_canonicalized_dir_name() {
+        let root = scratch(&[("package.json", "{}")]);
+        let p = introspect(&root).unwrap();
+        assert_ne!(
+            p.name, "unknown-tool",
+            "a real dir must resolve to its tail, not the unknown-tool sentinel"
+        );
+        assert_eq!(p.name, "proj");
+        cleanup(&root);
+    }
+
+    // Bug #3 at the real boundary: introspect(".") must canonicalize to the cwd
+    // tail, not return "unknown-tool" (Path::new(".").file_name() == None).
+    #[test]
+    fn introspect_dot_yields_cwd_tail_not_unknown_tool() {
+        let p = introspect(Path::new(".")).unwrap();
+        assert_ne!(p.name, "unknown-tool");
+        let cwd_tail = std::env::current_dir()
+            .ok()
+            .and_then(|c| c.file_name().map(|n| n.to_string_lossy().to_string()))
+            .unwrap_or_default();
+        assert_eq!(p.name, cwd_tail);
+    }
+}
+

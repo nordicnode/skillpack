@@ -365,34 +365,32 @@ fn check_flag_drift(help_output: &str, skill_md: &str, report: &mut VerifyReport
                 doc_flags.len()
             ),
         ));
-        return;
+    } else {
+        // Find the first documented drift line so the suggestion is actionable.
+        let first = &drifted[0];
+        let line_hint = skill_md
+            .lines()
+            .position(|l| l.contains(first.as_str()))
+            .map(|n| n + 1);
+
+        let mut fail = CheckResult::fail(
+            "invocation.flag_drift",
+            "every documented flag exists in `--help`",
+            format!(
+                "documented flag(s) missing from `--help`: {}",
+                drifted.join(", ")
+            ),
+            format!("To fix: remove `{first}` from SKILL.md, or add `{first}` to your CLI's `--help`."),
+        );
+        fail.location = Some(("SKILL.md".to_string(), line_hint));
+        report.push(fail);
     }
 
-    // Find the first documented drift line so the suggestion is actionable.
-    let first = &drifted[0];
-    let line_hint = skill_md
-        .lines()
-        .position(|l| l.contains(first.as_str()))
-        .map(|n| n + 1);
-
-    let mut fail = CheckResult::fail(
-        "invocation.flag_drift",
-        "every documented flag exists in `--help`",
-        format!(
-            "documented flag(s) missing from `--help`: {}",
-            drifted.join(", ")
-        ),
-        format!("To fix: remove `{first}` from SKILL.md, or add `{first}` to your CLI's `--help`."),
-    );
-    fail.location = Some(("SKILL.md".to_string(), line_hint));
-    report.push(fail);
-
-    // Reverse drift (Improvement A): flags the CLI advertises in `--help` that
-    // the skill never documents. This is the drift direction that's real for
-    // `init`-generated output (whose documented list is derived from --help,
-    // so it can't itself drift forward) — an agent misses flags the skill
-    // could have told it about. Warn, don't fail: undocumented flags aren't a
-    // correctness bug, just a discoverability gap.
+    // Reverse drift always runs — including on the no-forward-drift success
+    // path — so a CLI advertising flags a hand-written skill never documents
+    // still warns (the feature the README advertises). Previously the pass
+    // branch returned early, gating this off entirely. Warn, don't fail:
+    // undocumented flags are a discoverability gap, not a correctness bug.
     reverse_drift(&help_flags, &doc_flags, report);
 }
 

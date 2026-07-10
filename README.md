@@ -43,6 +43,11 @@ Projects without a CLI take the pure-library path: `SKILL.md` documents the inst
 import pattern instead, and the invocation test is a no-op. The `has_cli` flag is the
 single branching point.
 
+> **Platform:** V1 targets Unix (Linux/macOS). CLI detection probes `PATH` without
+> `PATHEXT`, so on Windows a bare `node` lookup misses `node.exe` and `verify`
+> will honestly report `has_cli=false` and skip the invocation check rather than
+> crash. Run on WSL/Linux/CI, or contribute `PATHEXT` enumeration.
+
 ## Install
 
 ```sh
