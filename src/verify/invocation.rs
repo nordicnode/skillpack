@@ -380,7 +380,9 @@ fn check_flag_drift(help_output: &str, skill_md: &str, report: &mut VerifyReport
                 "documented flag(s) missing from `--help`: {}",
                 drifted.join(", ")
             ),
-            format!("To fix: remove `{first}` from SKILL.md, or add `{first}` to your CLI's `--help`."),
+            format!(
+                "To fix: remove `{first}` from SKILL.md, or add `{first}` to your CLI's `--help`."
+            ),
         );
         fail.location = Some(("SKILL.md".to_string(), line_hint));
         report.push(fail);

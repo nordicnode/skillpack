@@ -47,7 +47,11 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
             std::fs::canonicalize(root)
                 .ok()
                 .and_then(|c| c.file_name().map(|n| n.to_string_lossy().to_string()))
-                .or_else(|| std::env::current_dir().ok().and_then(|c| c.file_name().map(|n| n.to_string_lossy().to_string())))
+                .or_else(|| {
+                    std::env::current_dir()
+                        .ok()
+                        .and_then(|c| c.file_name().map(|n| n.to_string_lossy().to_string()))
+                })
                 .unwrap_or_else(|| "unknown-tool".to_string())
         });
 
@@ -836,7 +840,10 @@ mod parse_tests {
     #[test]
     fn rust_name_with_no_spaces_around_equals() {
         // name="revtool" — the old `starts_with("name =")` scan missed this.
-        let root = scratch(&[("Cargo.toml", "[package]\nname=\"revtool\"\nversion=\"0.1\"\n")]);
+        let root = scratch(&[(
+            "Cargo.toml",
+            "[package]\nname=\"revtool\"\nversion=\"0.1\"\n",
+        )]);
         assert_eq!(
             project_manifest_name(&root, Language::Rust).as_deref(),
             Some("revtool")
@@ -906,4 +913,3 @@ mod parse_tests {
         assert_eq!(p.name, cwd_tail);
     }
 }
-
