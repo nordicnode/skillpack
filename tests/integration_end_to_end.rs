@@ -343,6 +343,114 @@ fn verify_checks_all_skills_in_a_multi_skill_plugin() {
     );
 }
 
+// Bug 4: reverse drift — flags the CLI advertises in `--help` that the skill
+// never documents — must fire on the SUCCESS path (no forward drift), via the
+// real `verify` flow (not a direct `reverse_drift` call). The old code returned
+// early at the pass-branch, gating reverse drift off entirely. The rust-cli
+// fixture advertises `--verbose` in `--help`; a hand-written skill documenting
+// only `--new` must surface `--verbose` as an undocumented-flag WARNING.
+#[test]
+fn reverse_drift_warns_on_success_path_via_verify_run() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Hand-written pack: skill documents only --new, but --help advertises
+    // --verbose too. No forward drift (every documented flag exists).
+    fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+    fs::create_dir_all(root.join("skills/sample-rust")).unwrap();
+    fs::write(
+        root.join(".claude-plugin/marketplace.json"),
+        "{\"name\":\"mp\",\"owner\":{\"name\":\"x\"},\"plugins\":[{\"name\":\"sample-rust\",\"source\":\"./\"}]}",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".claude-plugin/plugin.json"),
+        "{\"name\":\"sample-rust\",\"description\":\"Do thing\"}",
+    )
+    .unwrap();
+    fs::write(
+        root.join("skills/sample-rust/SKILL.md"),
+        "---\nname: sample-rust\ndescription: \"Run the sample rust thing\"\nwhen_to_use: \"run sample rust\"\n---\n\n## Invocation\n\n```\nsample-rust --new entry\n```\n",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success() // warnings don't fail
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(
+        s.contains("undocumented_flags") || s.contains("--verbose"),
+        "expected reverse-drift warning for --verbose via verify, got:\n{s}"
+    );
+}
+
+// GAP #2: a plugin shipping >1 skill each documenting a CLI must warn that the
+// invocation drift check only ran against the first — the others were skipped.
+// Previously this was a documented-but-silent cliff.
+#[test]
+fn multi_cli_plugin_warns_invocation_only_checked_first() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+    fs::create_dir_all(root.join("skills/sample-rust")).unwrap();
+    fs::write(
+        root.join(".claude-plugin/marketplace.json"),
+        "{\"name\":\"mp\",\"owner\":{\"name\":\"x\"},\"plugins\":[{\"name\":\"sample-rust\",\"source\":\"./\"}]}",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".claude-plugin/plugin.json"),
+        "{\"name\":\"sample-rust\",\"description\":\"Do thing\"}",
+    )
+    .unwrap();
+    // First skill documents the real CLI (sample-rust --new).
+    fs::write(
+        root.join("skills/sample-rust/SKILL.md"),
+        "---\nname: sample-rust\ndescription: \"Run the sample rust thing\"\nwhen_to_use: \"run sample rust\"\n---\n\n## Invocation\n\n```\nsample-rust --new entry\n```\n",
+    )
+    .unwrap();
+    // Second skill documents a DIFFERENT CLI invocation. Use a dir name that
+    // sorts AFTER sample-rust so the first-skill spawn still hits sample-rust
+    // (find_skill_files sorts by file_name) — the point of this test is the
+    // multi-CLI warning, not a false forward-drift from the second skill's flags.
+    fs::create_dir_all(root.join("skills/zzz-other-tool")).unwrap();
+    fs::write(
+        root.join("skills/zzz-other-tool/SKILL.md"),
+        "---\nname: zzz-other-tool\ndescription: \"Run the other thing\"\nwhen_to_use: \"run other\"\n---\n\n## Invocation\n\n```\nzzz-other-tool --flag\n```\n",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success() // warnings don't fail
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(
+        s.contains("invocation.multi_cli") || s.contains("only run against the first"),
+        "expected a multi-CLI invocation warning, got:\n{s}"
+    );
+}
+
 // Bug 2: a hand-written skill pack (no `init` output) that documents a CLI but
 // ships no source tree / built artifact must NOT silently pass — `verify`
 // reports the gap as a warning so the maintainer knows the invocation check

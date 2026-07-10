@@ -13,6 +13,7 @@ pub mod schema;
 use anyhow::Result;
 
 use self::invocation::InvocationInput;
+use self::result::CheckResult;
 
 // Re-export the pieces the rest of the crate touches. `find_skill_file` is
 // crate-visible (the dispatcher in main.rs is the only external caller).
@@ -58,6 +59,31 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
         .as_ref()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .unwrap_or_default();
+
+    // GAP #2: invocation only spawns the FIRST skill's documented CLI. If more
+    // than one skill documents a CLI invocation, the other CLIs' drift is
+    // silently unchecked — warn so the maintainer knows the check didn't cover
+    // them (the multi-CLI limit is documented, but a silent skip is a cliff).
+    let cli_skills = discovery::find_skill_files(root)
+        .into_iter()
+        .filter(|p| {
+            std::fs::read_to_string(p)
+                .ok()
+                .and_then(|s| invocation::extract_documented_invocation(&s))
+                .is_some()
+        })
+        .count();
+    if cli_skills > 1 {
+        report.push(CheckResult::warn(
+            "invocation.multi_cli",
+            "invocation drift checks cover every documented CLI",
+            format!(
+                "{cli_skills} skills document a CLI invocation, but invocation checks only run against the first — the others were skipped"
+            ),
+            "To fix: verify is single-CLI by default; split multi-CLI plugins into one plugin per CLI, or run verify per-skill manually.",
+        ));
+    }
+
     let inv = InvocationInput::new(
         root,
         &input.spawn_root,
