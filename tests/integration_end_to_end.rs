@@ -843,3 +843,104 @@ fn ruby_cli_init_then_verify_round_trip() {
     assert_eq!(v["plugins"][0]["source"], "./");
     assert_eq!(v["plugins"][0]["name"], "sample-ruby");
 }
+
+// Subcommand-drift e2e: the subcommand-cli fixture prints a clap-shaped
+// `Commands:` section in `--help` and per-subcommand `--help` with distinct
+// flags. `capture_subcommand_help` (introspect) captures each sub's help;
+// `check_subcommand_drift` (verify) spawns `<base> <sub> --help` and set-diffs.
+// This is the only test that exercises the full subcommand spawn reassembly
+// (`base.pop()` trailing `--help` + `<base> <sub> --help`) end-to-end.
+#[test]
+fn subcommand_cli_init_then_verify_round_trip() {
+    let root = copy_fixture("subcommand-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let toml = "[skill]\n\
+        name = \"sample-sub\"\n\
+        one_line_description = \"Scaffold and verify a skill pack\"\n\
+        when_to_use_phrases = [\"scaffold a skill pack\", \"verify a skill pack\"]\n\
+        invocation_command = \"sample-sub init --root\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // init's introspect must have captured the subcommand help and the
+    // template must have emitted the `### Subcommands` block with the real
+    // sub names + their flags.
+    let skill = fs::read_to_string(root.join("skills/sample-sub/SKILL.md")).unwrap();
+    assert!(
+        skill.contains("### Subcommands"),
+        "SKILL.md must contain ### Subcommands block, got:\n{skill}"
+    );
+    assert!(
+        skill.contains("`init`"),
+        "SKILL.md must document the `init` subcommand, got:\n{skill}"
+    );
+    assert!(
+        skill.contains("`verify`"),
+        "SKILL.md must document the `verify` subcommand, got:\n{skill}"
+    );
+    // Per-sub flags captured from the real per-sub `--help`:
+    assert!(
+        skill.contains("--non-interactive"),
+        "SKILL.md must list init's --non-interactive flag, got:\n{skill}"
+    );
+    assert!(
+        skill.contains("--format"),
+        "SKILL.md must list verify's --format flag, got:\n{skill}"
+    );
+
+    // verify must pass, including the real per-subcommand `--help` drift
+    // checks (the feature this test exists to exercise). Parse the JSON
+    // output directly (avoids string-matching whitespace in pretty-print).
+    let json_out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        json_out.status.success(),
+        "verify must exit 0, got:\n{}",
+        String::from_utf8_lossy(&json_out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&json_out.stdout).unwrap();
+    assert_eq!(
+        json["ok"],
+        serde_json::Value::Bool(true),
+        "verify ok must be true, got:\n{json}"
+    );
+
+    let sub_results: Vec<&serde_json::Value> = json["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["check_id"] == "invocation.subcommand_drift")
+        .collect();
+    assert!(
+        !sub_results.is_empty(),
+        "verify must emit invocation.subcommand_drift results, got:\n{json}"
+    );
+    for r in &sub_results {
+        assert_eq!(
+            r["severity"], "pass",
+            "subcommand_drift must pass for all documented subs, got:\n{json}"
+        );
+    }
+}

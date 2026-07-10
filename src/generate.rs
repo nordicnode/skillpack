@@ -236,7 +236,14 @@ pub fn coerce_kebab(name: &str) -> String {
             prev_dash = true;
         }
     }
+    // Strip leading/trailing hyphens, then strip leading digits: the schema
+    // regex `^[a-z]...` requires the name to start with a letter, so a
+    // numeric-prefixed name like "123foo" → "foo" (not "123foo", which
+    // would fail verify's own `is_valid_kebab` check). Re-trim hyphens
+    // (stripping "123" from "123-foo" leaves "-foo") and re-check empty.
     let s = out.trim_matches('-');
+    let s = s.trim_start_matches(|c: char| c.is_ascii_digit());
+    let s = s.trim_matches('-');
     if s.is_empty() {
         return "tool".to_string();
     }
@@ -352,6 +359,13 @@ mod tests {
         assert_eq!(coerce_kebab("UPPER_CASE"), "upper-case");
         assert_eq!(coerce_kebab("a"), "a");
         assert_eq!(coerce_kebab("!!!"), "tool");
+        // Leading digits must be stripped — the schema regex `^[a-z]`
+        // requires a letter first, so "123foo" → "foo", not "123foo".
+        assert_eq!(coerce_kebab("123foo"), "foo");
+        assert_eq!(coerce_kebab("123-foo"), "foo");
+        // All-digits → fallback, not an empty string.
+        assert_eq!(coerce_kebab("123"), "tool");
+        assert_eq!(coerce_kebab("9"), "tool");
     }
 
     #[test]

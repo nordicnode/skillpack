@@ -356,8 +356,11 @@ fn print_profile(profile: &types::ProjectProfile) {
         println!("  license:     {lic}");
     }
     if let Some(hint) = &profile.description_hint {
-        if hint.len() > 120 {
-            println!("  desc_hint:   {}…", &hint[..120]);
+        if hint.chars().count() > 120 {
+            println!(
+                "  desc_hint:   {}…",
+                hint.chars().take(120).collect::<String>()
+            );
         } else {
             println!("  desc_hint:   {hint}");
         }
@@ -428,5 +431,28 @@ mod confirm_tests {
     fn proceed_with_warnings_routes_through_overridable_confirm() {
         assert!(!with_confirm(false, || CONFIRM.proceed_with_warnings()));
         assert!(with_confirm(true, || CONFIRM.proceed_with_warnings()));
+    }
+
+    // Regression: a README hint with a multibyte char across byte 120 must
+    // not panic. The old `&hint[..120]` byte-slice hit "byte index 120 is
+    // not a char boundary" → catch_unwind → false INIT_FATAL exit.
+    #[test]
+    fn print_profile_multibyte_desc_hint_does_not_panic() {
+        // 118 ASCII chars + a 3-byte emoji = 121 bytes; byte 120 lands mid-char.
+        let mut hint = "x".repeat(118);
+        hint.push('🦀');
+        let profile = types::ProjectProfile {
+            name: "test".into(),
+            language: types::Language::Rust,
+            has_cli: false,
+            cli_command: None,
+            cli_help_output: None,
+            cli_subcommand_help: Vec::new(),
+            repo_url: None,
+            license: Some("MIT".into()),
+            description_hint: Some(hint),
+        };
+        // Must not panic.
+        print_profile(&profile);
     }
 }

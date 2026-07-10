@@ -24,7 +24,7 @@ From your repo, `skillpack init` writes (purely additive — nothing existing is
 
 - `.claude-plugin/marketplace.json` — a single-plugin marketplace entry pointing at your project root
 - `.claude-plugin/plugin.json` — the plugin manifest (name, version, author, repo URL)
-- `skills/<tool-name>/SKILL.md` — the operational knowledge file an agent reads (frontmatter + body)
+- `skills/<tool-name>/SKILL.md` — the operational knowledge file an agent reads (frontmatter + body, including a `### Subcommands` block for CLIs with subcommands)
 
 A `skillpack.toml` at your project root captures your answers so re-runs are deterministic
 and CI-friendly.
@@ -92,6 +92,9 @@ caught up front.
 - every flag documented in `SKILL.md` exists in the real `--help` output (catches drift)
 - flags the CLI advertises in `--help` that `SKILL.md` doesn't document (a discoverability
   warning, so an agent doesn't miss options)
+- for CLIs with subcommands (clap-style `Commands:` sections), `init` captures each
+  subcommand's `--help` and documents them in a `### Subcommands` block; `verify`
+  spawns `<cli> <sub> --help` per documented subcommand and drift-checks its flags
 
 `verify` works on hand-written skill packs too, not just `init` output: it derives whether a
 CLI is documented from the `SKILL.md` itself (a `## Invocation` section, or a fenced block

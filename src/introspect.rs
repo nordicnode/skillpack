@@ -248,6 +248,11 @@ fn detect_cli(root: &Path, language: Language, name: Option<String>) -> DetectCl
             subcommand_help: Vec::new(),
         },
         SpawnOutcome::NotFound => DetectCli::none(),
+        // ponytail: permission-denied etc. are rare; mapping to `none()`
+        // means `has_cli=false` (pure-library path) rather than crashing.
+        // verify's spawn will then surface the gap downstream if the CLI IS
+        // documented. The honest path for V1 — doesn't crash.
+        SpawnOutcome::SpawnFailed(_) => DetectCli::none(),
     }
 }
 
@@ -516,63 +521,10 @@ fn ruby_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
     None
 }
 
-enum SpawnOutcome {
-    /// Exited 0; output captured.
-    RanClean(String),
-    /// Exited non-zero; help is treated as unset. (The partial stdout/stderr a
-    /// non-zero exit sometimes leaves is never consumed — readers only act on
-    /// `RanClean` — so this variant carries no payload.)
-    RanNonZero,
-    /// Did not finish within the timeout (killed).
-    TimedOut,
-    /// Binary not found / could not be spawned.
-    NotFound,
-}
+use crate::spawn::{self, SpawnOutcome};
 
 fn spawn_with_timeout(cmd: &mut Command, timeout: Duration) -> SpawnOutcome {
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return SpawnOutcome::NotFound,
-        Err(_) => return SpawnOutcome::NotFound,
-    };
-    // Poll the child until it exits or we hit the timeout.
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                // The child has exited. `wait_with_output` drains the piped
-                // stdout/stderr (buffered in the handles `try_wait` left
-                // untouched) and returns the exit status, so we use it rather
-                // than the status we just probed — avoiding a second wait.
-                break match child.wait_with_output() {
-                    Ok(o) => {
-                        if o.status.success() {
-                            let s = format!(
-                                "{}{}",
-                                String::from_utf8_lossy(&o.stdout),
-                                String::from_utf8_lossy(&o.stderr)
-                            );
-                            SpawnOutcome::RanClean(s)
-                        } else {
-                            // Non-zero exit: stdout/stderr never read for help.
-                            SpawnOutcome::RanNonZero
-                        }
-                    }
-                    // Pipes already drained by a prior reap; treat as non-zero.
-                    Err(_) => SpawnOutcome::RanNonZero,
-                };
-            }
-            Ok(None) => {
-                if std::time::Instant::now() > deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return SpawnOutcome::TimedOut;
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(_) => return SpawnOutcome::TimedOut,
-        }
-    }
+    spawn::run(cmd, timeout)
 }
 
 fn which_on_path(name: &str) -> Option<PathBuf> {

@@ -4,7 +4,41 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.3] - 2026-07-10
+
+### Fixed
+
+- **Pipe-deadlock on >64KB `--help`** — subprocess spawns in `introspect`
+  (`spawn_with_timeout`), `verify::invocation` (`run_help` + `spawn_capture`)
+  piped stdout/stderr but only drained pipes *after* the child exited. A CLI
+  whose help output exceeded the ~64KB pipe buffer would block on the write,
+  `try_wait` would keep returning `Ok(None)`, and the deadline fired → false
+  `TimedOut`. Extracted a shared `spawn::run` helper that drains pipes on
+  reader threads while polling, killing + reaping on timeout. The new boundary
+  replaces the hand-rolled poll loops in all three call sites.
+- **Byte-slice panic on multibyte README hints** — `print_profile` (`--verbose`)
+  truncated the description hint with `&hint[..120]`, slicing by byte index.
+  A multibyte UTF-8 char across byte 120 (emoji, CJK, accented — common in
+  real OSS) panicked with "byte index 120 is not a char boundary" →
+  `catch_unwind` → false `INIT_FATAL` exit for a display-only path. Fixed to
+  truncate by chars: `hint.chars().take(120).collect::<String>()`.
+- **`coerce_kebab` leading-digit names** — names starting with digits (e.g.
+  `"123foo"`) passed through unchanged, but the schema regex
+  `^[a-z][a-z0-9-]*[a-z0-9]$` requires a letter first. The generated
+  `marketplace.json` / `plugin.json` name would then fail `verify`'s own
+  `is_valid_kebab` check. Now strips leading digits + re-trims hyphens,
+  falling back to `"tool"` if the result is empty.
+
+### Added
+
+- **Subcommand-drift e2e coverage** — the `capture_subcommand_help` (introspect)
+  and `check_subcommand_drift` (verify) code paths — real spawn reassembly of
+  `<base> <sub> --help` — were reasoned about but never exercised against a
+  compiled CLI (every fixture set `cli_subcommand_help: Vec::new()`). Added a
+  zero-dep `subcommand-cli` fixture with a hand-rolled clap-shaped `Commands:`
+  section + per-subcommand `--help`, and an integration test asserting the
+  generated `SKILL.md` contains `### Subcommands` with real sub names/flags and
+  `verify --format json` emits `invocation.subcommand_drift` pass results.
 
 ## [0.2.2] - 2026-07-09
 

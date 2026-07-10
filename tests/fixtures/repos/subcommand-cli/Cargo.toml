@@ -1,0 +1,9 @@
+[package]
+name = "sample-sub"
+version = "0.1.0"
+license = "MIT"
+edition = "2021"
+
+[[bin]]
+name = "sample-sub"
+path = "src/main.rs"

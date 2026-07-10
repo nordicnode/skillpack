@@ -12,5 +12,6 @@ pub mod exit;
 pub mod generate;
 pub mod interview;
 pub mod introspect;
+pub mod spawn;
 pub mod types;
 pub mod verify;

@@ -7,8 +7,8 @@
 //! "Pure-library path" — critical checks still run, no subprocess is spawned.
 
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 use anyhow::Result;
 
@@ -225,14 +225,13 @@ fn run_help(cmd: &[String], root: &Path, debug: bool, report: &mut VerifyReport)
     for arg in &cmd[1..] {
         c.arg(arg);
     }
-    c.current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    c.current_dir(root);
 
-    let mut child = match c.spawn() {
-        Ok(ch) => ch,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+    // The shared spawn helper forces piped stdout/stderr and drains them on
+    // reader threads while polling, so a >64KB `--help` can't deadlock (the
+    // old poll-without-draining loop would false-fail a fat CLI).
+    match crate::spawn::run(&mut c, HELP_TIMEOUT) {
+        crate::spawn::SpawnOutcome::NotFound => {
             report.push(CheckResult::fail(
                 "invocation.help_present",
                 "documented CLI is installed and runnable",
@@ -241,95 +240,54 @@ fn run_help(cmd: &[String], root: &Path, debug: bool, report: &mut VerifyReport)
                     "To fix: build/install `{program}` so it's on PATH, then re-run `skillpack verify`."
                 ),
             ));
-            return Ok(String::new());
+            Ok(String::new())
         }
-        Err(e) => {
+        crate::spawn::SpawnOutcome::SpawnFailed(e) => {
             report.push(CheckResult::fail(
                 "invocation.help_present",
                 "documented CLI is installed and runnable",
                 format!("could not spawn `{program}`: {e}"),
                 "To fix: check that the binary path in skillpack.toml is correct.",
             ));
-            return Ok(String::new());
+            Ok(String::new())
         }
-    };
-
-    let deadline = Instant::now() + HELP_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {}
-            Err(_) => break,
-        }
-        if Instant::now() > deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+        crate::spawn::SpawnOutcome::TimedOut => {
             report.push(CheckResult::fail(
                 "invocation.help_present",
                 "CLI prints `--help` quickly",
                 format!("`{program} --help` exceeded {}s timeout", HELP_TIMEOUT.as_secs()),
                 "To fix: the CLI may hang waiting on input; guard it with `</dev/null` or fix the hang before shipping.",
             ));
-            return Ok(String::new());
+            Ok(String::new())
         }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-
-    // The poll loop established the child exited (or errored); `wait_with_output`
-    // drains the buffered stdout/stderr AND yields the exit status, so we use
-    // its status rather than the one `try_wait` probed — one wait, not two.
-    let (status, output) = match child.wait_with_output() {
-        Ok(o) => (
-            Some(o.status),
-            format!(
-                "{}{}",
-                String::from_utf8_lossy(&o.stdout),
-                String::from_utf8_lossy(&o.stderr)
-            ),
-        ),
-        Err(_) => (None, String::new()),
-    };
-
-    let Some(status) = status else {
-        // `wait_with_output` couldn't reap the child — surface it rather than
-        // silently treating an empty status as success.
-        if !report.has_critical_failure() {
+        crate::spawn::SpawnOutcome::RanNonZero => {
             report.push(CheckResult::fail(
                 "invocation.help_present",
                 "documented `--help` exits cleanly",
-                format!("`{program}` could not be waited on (killed or errored)"),
-                "To fix: ensure the CLI exits promptly when given `--help`.",
+                format!("`{program}` returned non-zero on `--help`"),
+                "To fix: make `--help` exit 0, or correct the command in skillpack.toml.",
             ));
+            Ok(String::new())
         }
-        return Ok(output);
-    };
+        crate::spawn::SpawnOutcome::RanClean(output) => {
+            if output.trim().is_empty() {
+                report.push(CheckResult::fail(
+                    "invocation.help_present",
+                    "documented `--help` produces output",
+                    format!("`{program} --help` printed nothing"),
+                    "To fix: implement/generate `--help` output so an agent knows the available flags.",
+                ));
+                return Ok(output);
+            }
 
-    if !status.success() {
-        report.push(CheckResult::fail(
-            "invocation.help_present",
-            "documented `--help` exits cleanly",
-            format!("`{program}` returned non-zero (exit {status})"),
-            "To fix: make `--help` exit 0, or correct the command in skillpack.toml.",
-        ));
-        return Ok(output);
+            report.push(CheckResult::pass(
+                "invocation.help_present",
+                "documented `--help` runs and produces output",
+                format!("`{program}` printed {} bytes of help", output.len()),
+            ));
+            Ok(output)
+        }
     }
-
-    if output.trim().is_empty() {
-        report.push(CheckResult::fail(
-            "invocation.help_present",
-            "documented `--help` produces output",
-            format!("`{program} --help` printed nothing"),
-            "To fix: implement/generate `--help` output so an agent knows the available flags.",
-        ));
-        return Ok(output);
-    }
-
-    report.push(CheckResult::pass(
-        "invocation.help_present",
-        "documented `--help` runs and produces output",
-        format!("`{program}` printed {} bytes of help", output.len()),
-    ));
-    Ok(output)
 }
 
 /// Compare documented flags in SKILL.md against those advertised in `--help`,
@@ -543,34 +501,11 @@ fn spawn_capture(cmd: &[String], root: &Path, timeout: Duration) -> Option<Strin
     for arg in &cmd[1..] {
         c.arg(arg);
     }
-    c.current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = c.spawn().ok()?;
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {}
-            Err(_) => return None,
-        }
-        if Instant::now() > deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(20));
+    c.current_dir(root);
+    match crate::spawn::run(&mut c, timeout) {
+        crate::spawn::SpawnOutcome::RanClean(out) => Some(out),
+        _ => None,
     }
-    let out = child.wait_with_output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    Some(format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    ))
 }
 
 /// For each subcommand the SKILL.md documents, spawn `<base> <sub> --help` and
