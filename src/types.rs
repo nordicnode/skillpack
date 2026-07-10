@@ -28,6 +28,12 @@ pub struct ProjectProfile {
     /// Captured `--help` output, if a CLI was spawned. `None` for pure
     /// libraries or when the spawn failed/timed out.
     pub cli_help_output: Option<String>,
+    /// Captured `<cli> <sub> --help` per subcommand, in declaration order.
+    /// `Vec` (not a map) so clap's declaration order survives into
+    /// deterministic snapshots. Empty for pure libraries, non-subcommand
+    /// CLIs, or when every per-sub spawn failed/timed out.
+    #[serde(default)]
+    pub cli_subcommand_help: Vec<(String, String)>,
     /// `git remote get-url origin`, best-effort.
     pub repo_url: Option<String>,
     /// SPDX identifier guessed from LICENSE file or manifest, e.g. `MIT`.

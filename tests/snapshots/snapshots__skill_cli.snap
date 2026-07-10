@@ -1,6 +1,5 @@
 ---
 source: tests/snapshots.rs
-assertion_line: 111
 expression: skill.contents
 ---
 ---
@@ -45,7 +44,6 @@ Run `chronicle --help` to discover the available flags. Documented flags (verifi
 
 - `--new`
 - `--verbose`
-
 
 
 ## Footguns / gotchas

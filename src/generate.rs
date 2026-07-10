@@ -67,6 +67,26 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         .map(crate::verify::invocation::extract_flags)
         .unwrap_or_default();
 
+    // Subcommands: each advertised subcommand + the flags its own `--help`
+    // exposes (parsed from the captured per-sub help). Order = declaration
+    // order (clap), preserved by the `Vec` on the profile → deterministic
+    // snapshots. Empty for non-subcommand CLIs and pure libraries.
+    let documented_subcommands: Vec<serde_json::Value> = profile
+        .cli_subcommand_help
+        .iter()
+        .map(|(name, help)| {
+            // Drop the universal --help/-h/--version/-V meta-flags (per
+            // invocation::is_meta_flag) so a subcommand bullet shows the
+            // tool-specific flags an agent would actually pass, not the
+            // help/version every CLI implicitly answers to.
+            let flags: Vec<String> = crate::verify::invocation::extract_flags(help)
+                .into_iter()
+                .filter(|f| !crate::verify::invocation::is_meta_flag(f))
+                .collect();
+            serde_json::json!({ "name": name, "flags": flags })
+        })
+        .collect();
+
     // Precompute the joined when-to-use list so the template stays a thin
     // presentation layer (no Tera filter syntax for non-Rust contributors to
     // trip over). Empty list -> empty string: we deliberately do NOT emit a
@@ -92,6 +112,7 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         "invocation_command": intent.invocation_command,
         "import_pattern": intent.import_pattern,
         "documented_flags": documented_flags,
+        "documented_subcommands": documented_subcommands,
         "category_hint": category_hint(profile.language),
         "allowed_tools": allowed_tools_hint(profile.language),
     }))
@@ -246,6 +267,7 @@ mod tests {
         p.has_cli = true;
         p.cli_command = Some(vec!["chronicle".to_string(), "--help".to_string()]);
         p.cli_help_output = Some("Usage: chronicle [OPTIONS]\n  --new <entry>   Create an entry\n  --verbose        verbose\n".into());
+        p.cli_subcommand_help = Vec::new();
         p.license = Some("MIT".into());
         p
     }

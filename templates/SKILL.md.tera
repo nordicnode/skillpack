@@ -46,8 +46,15 @@ The exact command an agent should run to use this tool:
 Run `{{ cli_binary }} --help` to discover the available flags. Documented flags (verified by `skillpack verify`):
 
 {% for flag in documented_flags %}- `{{ flag }}`
+{% endfor %}{% if documented_subcommands %}
+### Subcommands
+
+This CLI uses subcommands. Each one has its own flags (verified by `skillpack verify`):
+
+{% for sub in documented_subcommands %}- `{{ sub.name }}`{%- if sub.flags %} — flags: {% for f in sub.flags %}`{{ f }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
 {% endfor %}
-{% else %}
+Run `{{ cli_binary }} <subcommand> --help` for a subcommand's full options.
+{% endif %}{% else %}
 ## Usage
 
 There is no CLI to invoke. Use the import pattern above and call the relevant API surface directly from the task.

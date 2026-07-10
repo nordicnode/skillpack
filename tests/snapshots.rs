@@ -37,6 +37,7 @@ fn cli_profile() -> ProjectProfile {
              --verbose       Verbose output\n"
                 .to_string(),
         ),
+        cli_subcommand_help: Vec::new(),
         repo_url: Some("https://github.com/example/chronicle".to_string()),
         license: Some("MIT".to_string()),
         description_hint: None,
@@ -64,6 +65,7 @@ fn lib_profile() -> ProjectProfile {
         has_cli: false,
         cli_command: None,
         cli_help_output: None,
+        cli_subcommand_help: Vec::new(),
         repo_url: Some("https://github.com/example/fastcsv".to_string()),
         license: Some("MIT".to_string()),
         description_hint: None,

@@ -36,7 +36,11 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
     let repo_url = detect_repo_url(root);
     let license = detect_license(root).or_else(|| manifest_license(root, language));
     let description_hint = read_readme_hint(root);
-    let (has_cli, cli_command, cli_help_output) = detect_cli(root, language, manifest_name.clone());
+    let d = detect_cli(root, language, manifest_name.clone());
+    let has_cli = d.has_cli;
+    let cli_command = d.command;
+    let cli_help_output = d.help_output;
+    let cli_subcommand_help = d.subcommand_help;
 
     let name = manifest_name
         .or_else(|| repo_url_name(&repo_url))
@@ -61,6 +65,7 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
         has_cli,
         cli_command,
         cli_help_output,
+        cli_subcommand_help,
         repo_url,
         license,
         description_hint,
@@ -173,20 +178,22 @@ fn project_manifest_name(root: &Path, language: Language) -> Option<String> {
 }
 
 /// Detect whether the project ships an invokable CLI, and if so capture its
-/// `--help` output under a hard timeout. Returns `(has_cli, command, output)`.
+/// `--help` output under a hard timeout. Returns
+/// `(has_cli, command, output, subcommand_help)`.
 ///
 /// `command` is the full multi-token `--help` argv the verifier re-spawns (e.g.
 /// `["node","/abs/bin/cli.js","--help"]`, `["go","run",".","--help"]`). The
 /// bare human-facing invocation that SKILL.md publishes is derived separately
 /// from the profile name + interview — this is the internal, machine-specific
 /// spawn argv (design §5.1, §6.3).
-fn detect_cli(
-    root: &Path,
-    language: Language,
-    name: Option<String>,
-) -> (bool, Option<Vec<String>>, Option<String>) {
+///
+/// `subcommand_help` holds `<cli> <sub> --help` per subcommand (clap-style),
+/// in declaration order, so the generated SKILL.md can document the real
+/// command surface and `verify` can drift-check it. Empty for non-subcommand
+/// CLIs — a flat `--help` yields no `Commands:` section.
+fn detect_cli(root: &Path, language: Language, name: Option<String>) -> DetectCli {
     let Some(name) = name else {
-        return (false, None, None);
+        return DetectCli::none();
     };
 
     let Some(candidate) = primary_cli_candidate(root, language, &name) else {
@@ -194,7 +201,7 @@ fn detect_cli(
         // language runtime — `go`/`ruby` — isn't installed). We honestly
         // report `has_cli = false` rather than guessing; the maintainer gets
         // the pure-library interview path, which is the safe default.
-        return (false, None, None);
+        return DetectCli::none();
     };
 
     // Build the spawn command from the multi-token argv (program + args, minus
@@ -213,11 +220,85 @@ fn detect_cli(
         .stderr(Stdio::piped());
 
     match spawn_with_timeout(&mut cmd, HELP_TIMEOUT) {
-        SpawnOutcome::RanClean(output) => (true, Some(command), Some(output)),
-        SpawnOutcome::RanNonZero(_output) => (true, Some(command), None),
-        SpawnOutcome::TimedOut => (true, Some(command), None),
-        SpawnOutcome::NotFound => (false, None, None),
+        SpawnOutcome::RanClean(output) => {
+            // A subcommand CLI advertises its subcommands in the top-level
+            // `--help`; capture each one's `--help` so the generated SKILL.md
+            // documents the real surface (init/verify + their flags, not the
+            // global flags). Best-effort: a subcommand that fails/times out is
+            // omitted here — `verify` surfaces the gap if the skill documents
+            // a subcommand we couldn't capture.
+            let subs = capture_subcommand_help(&candidate, &output);
+            DetectCli {
+                has_cli: true,
+                command: Some(command),
+                help_output: Some(output),
+                subcommand_help: subs,
+            }
+        }
+        SpawnOutcome::RanNonZero => DetectCli {
+            has_cli: true,
+            command: Some(command),
+            help_output: None,
+            subcommand_help: Vec::new(),
+        },
+        SpawnOutcome::TimedOut => DetectCli {
+            has_cli: true,
+            command: Some(command),
+            help_output: None,
+            subcommand_help: Vec::new(),
+        },
+        SpawnOutcome::NotFound => DetectCli::none(),
     }
+}
+
+/// The captured CLI surface: `detect_cli`'s return. Named (not a bare 4-tuple)
+/// so the call site reads `d.has_cli` / `d.command` rather than decoding
+/// positional fields — and clippy's `type_complexity` stops firing on the
+/// `Option<Vec<...>>` pile.
+struct DetectCli {
+    has_cli: bool,
+    command: Option<Vec<String>>,
+    help_output: Option<String>,
+    subcommand_help: Vec<(String, String)>,
+}
+
+impl DetectCli {
+    fn none() -> Self {
+        Self {
+            has_cli: false,
+            command: None,
+            help_output: None,
+            subcommand_help: Vec::new(),
+        }
+    }
+}
+
+/// For a subcommand CLI, spawn `<candidate.argv> <sub> --help` per subcommand
+/// advertised in the top-level `--help`, returning `(sub, help)` in declaration
+/// order. Reuses the same guarded spawn + timeout as the top-level capture.
+/// Failures are omitted silently (introspect is best-effort).
+fn capture_subcommand_help(
+    candidate: &CliCandidate,
+    top_level_help: &str,
+) -> Vec<(String, String)> {
+    let subs = crate::verify::invocation::extract_subcommands(top_level_help);
+    let mut out = Vec::with_capacity(subs.len());
+    for sub in subs {
+        let mut cmd = Command::new(&candidate.argv[0]);
+        for arg in &candidate.argv[1..] {
+            cmd.arg(arg);
+        }
+        cmd.arg(&sub)
+            .arg("--help")
+            .current_dir(&candidate.spawn_cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let SpawnOutcome::RanClean(help) = spawn_with_timeout(&mut cmd, HELP_TIMEOUT) {
+            out.push((sub, help));
+        }
+    }
+    out
 }
 
 /// A resolved CLI invocation ready to spawn `--help`. The argv excludes the
@@ -438,8 +519,10 @@ fn ruby_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
 enum SpawnOutcome {
     /// Exited 0; output captured.
     RanClean(String),
-    /// Exited non-zero; partial output available but we treat help as unset.
-    RanNonZero(String),
+    /// Exited non-zero; help is treated as unset. (The partial stdout/stderr a
+    /// non-zero exit sometimes leaves is never consumed — readers only act on
+    /// `RanClean` — so this variant carries no payload.)
+    RanNonZero,
     /// Did not finish within the timeout (killed).
     TimedOut,
     /// Binary not found / could not be spawned.
@@ -463,20 +546,20 @@ fn spawn_with_timeout(cmd: &mut Command, timeout: Duration) -> SpawnOutcome {
                 // than the status we just probed — avoiding a second wait.
                 break match child.wait_with_output() {
                     Ok(o) => {
-                        let s = format!(
-                            "{}{}",
-                            String::from_utf8_lossy(&o.stdout),
-                            String::from_utf8_lossy(&o.stderr)
-                        );
                         if o.status.success() {
+                            let s = format!(
+                                "{}{}",
+                                String::from_utf8_lossy(&o.stdout),
+                                String::from_utf8_lossy(&o.stderr)
+                            );
                             SpawnOutcome::RanClean(s)
                         } else {
-                            SpawnOutcome::RanNonZero(s)
+                            // Non-zero exit: stdout/stderr never read for help.
+                            SpawnOutcome::RanNonZero
                         }
                     }
-                    // Pipes already drained by a prior reap; treat as
-                    // non-zero with no captured text.
-                    Err(_) => SpawnOutcome::RanNonZero(String::new()),
+                    // Pipes already drained by a prior reap; treat as non-zero.
+                    Err(_) => SpawnOutcome::RanNonZero,
                 };
             }
             Ok(None) => {
@@ -629,6 +712,7 @@ impl ProjectProfile {
             has_cli: false,
             cli_command: None,
             cli_help_output: None,
+            cli_subcommand_help: Vec::new(),
             repo_url: None,
             license: None,
             description_hint: None,
