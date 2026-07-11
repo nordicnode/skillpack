@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.6.1] - 2026-07-11
+
+### Fixed — CI
+
+- **Windows CI hard-failed on `unused_imports`**: `src/spawn.rs` test module
+  imported `use super::*` but every test fn inside is `#[cfg(unix)]`, so Windows
+  compiled the import with zero usages → `clippy -D warnings` turned the
+  `unused_imports` warning into a hard error. The new windows-latest matrix
+  entry surfaced this pre-existing bug (the 0.6.0 PATHEXT work was unrelated).
+  The import is now `#[cfg(unix)] use super::*` to match the tests it serves.
+
 ## [0.6.0] - 2026-07-11
 
 ### Added — Cross-platform CI matrix
