@@ -914,9 +914,11 @@ fn php_cli_init_then_verify_round_trip() {
     assert_eq!(v["plugins"][0]["name"], "sample-php");
 }
 
+#[cfg(unix)]
 fn jvm_available() -> bool {
-    // The JVM fixture ships a shell script as the Gradle `installDist` output.
-    // On Unix the script runs directly; on Windows there's no sh by default.
+    // Unix-only: the fixture ships a #!/bin/sh installDist script with no
+    // .bat sibling; the spawn round-trip is Unix-only. Structural Jvm
+    // coverage stays cross-OS via snapshot_jvm_cursor_globs.
     std::process::Command::new("sh")
         .arg("--version")
         .stdin(std::process::Stdio::null())
@@ -927,6 +929,7 @@ fn jvm_available() -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(unix)]
 #[test]
 #[ignore = "requires `sh` on PATH; runs on CI via --include-ignored"]
 fn jvm_cli_init_then_verify_round_trip() {
