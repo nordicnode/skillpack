@@ -1,9 +1,15 @@
 # CI gate for skillpack (design §7.4): fmt + clippy + full test suite on every
 # PR; no PR merges without green CI.
 #
-# `--include-ignored` runs the Go + Ruby `#[ignore]`-gated round trips here
-# because the ubuntu-latest runner ships those runtimes (the dev machine does
-# not). Each ignored test self-skips via a runtime probe, so a missing runtime
+# Matrix: ubuntu, macos, windows — verifies cross-OS compile + PATHEXT
+# resolution on Windows (cmd.exe appends PATHEXT; Rust's Command does not;
+# which_on_path probes name{ext} manually). Runtime prereqs (node, python,
+# go, ruby) installed via the official setup-* actions so each OS gets a
+# working runtime without hand-rolled apt/choco/brew logic.
+#
+# `--include-ignored` runs the Go + Ruby `#[ignore]`-gated round trips
+# because the runners ship those runtimes (the dev machine does not). Each
+# ignored test self-skips via a runtime probe, so a missing runtime
 # anywhere degrades the same way it does locally rather than failing.
 name: CI
 
@@ -17,7 +23,11 @@ env:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       # Install the exact toolchain pinned in rust-toolchain.toml so CI's
@@ -29,10 +39,23 @@ jobs:
           toolchain: '1.95.0'
           components: 'rustfmt,clippy'
       - uses: Swatinem/rust-cache@v2
-      - name: Install runtime prereqs (node, python, go, ruby)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y nodejs python3 golang ruby
+
+      # Runtime prereqs — one setup-* action per language, each works across
+      # all three OSes. The Go + Ruby installs let the `#[ignore]`-gated
+      # round-trip tests actually execute rather than self-skip.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
       - name: fmt --check
         run: cargo fmt --check
       - name: clippy --all-targets

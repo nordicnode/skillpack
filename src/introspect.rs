@@ -915,8 +915,8 @@ fn rust_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
     }
     // A package may rename its bin via [[bin]] name; falling back to the
     // directory-derived name on PATH is acceptable for introspection.
-    which_on_path(name).map(|_| CliCandidate {
-        argv: vec![name.to_string()],
+    which_on_path(name).map(|p| CliCandidate {
+        argv: vec![p.to_string_lossy().to_string()],
         spawn_cwd: root.to_path_buf(),
     })
 }
@@ -1025,9 +1025,9 @@ fn python_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
     }
 
     // Installed console script on PATH (e.g. `pip install -e .` already run).
-    if which_on_path(name).is_some() {
+    if let Some(script) = which_on_path(name) {
         return Some(CliCandidate {
-            argv: vec![name.to_string()],
+            argv: vec![script.to_string_lossy().to_string()],
             spawn_cwd: root.to_path_buf(),
         });
     }
@@ -1055,7 +1055,7 @@ fn python_script_package(root: &Path, name: &str) -> Option<String> {
 /// Ruby: structural only — an `exe/<name>` or `bin/<name>` binstub invoked as
 /// `ruby <abs path>`. Honest `None` when there's no binstub or no ruby runtime.
 fn ruby_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
-    which_on_path("ruby")
+    let ruby = which_on_path("ruby")
         .or_else(|| which_on_path("bundle"))
         .map(|b| b.to_string_lossy().to_string())?;
     for dir in &["exe", "bin"] {
@@ -1066,7 +1066,7 @@ fn ruby_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
                 .and_then(|c| c.to_str().map(|s| s.to_string()))
                 .unwrap_or_else(|| p.to_string_lossy().to_string());
             return Some(CliCandidate {
-                argv: vec!["ruby".to_string(), abs],
+                argv: vec![ruby.clone(), abs],
                 spawn_cwd: root.to_path_buf(),
             });
         }
@@ -1081,22 +1081,26 @@ fn spawn_with_timeout(cmd: &mut Command, timeout: Duration) -> SpawnOutcome {
 }
 
 fn which_on_path(name: &str) -> Option<PathBuf> {
-    // ponytail: this is a Unix-shaped PATH probe. Ceilings:
-    //  - a file that exists but lacks the exec bit (cataloged a fixture script
-    //    without +x, or a Windows .exe without PATHEXT matching) returns the
-    //    file here but `spawn()` then fails → mapped to `NotFound` upstream → an
-    //    honest `has_cli = false`, never a crash. Acceptable for V1.
-    //  - Windows: PATH lookups don't append PATHEXT, so probing bare "`node`"
-    //    misses `node.exe`. A Windows run needs `PATHEXT` enumeration + the
-    //    `is_file` test against each `name{ext}`. Add it when skillpack ships a
-    //    native-Windows build (V1 is unix-targeted; CI is ubuntu-latest). The
-    //    README "Platform" note documents this ceiling so a Windows run's
-    //    silent `has_cli=false` isn't a surprise.
+    // Windows only: cmd.exe appends PATHEXT to a bare name; Rust's
+    // Command::new does not. Probe `name` plus `name{ext}` for each ext in
+    // PATHEXT (e.g. .EXE;.CMD;.BAT) so a PATH lookup resolves `node` to
+    // `node.exe`. On Unix the uname-style probe is unchanged (no PATHEXT).
+    let exts: Vec<String> = std::env::var("PATHEXT")
+        .ok()
+        .map(|p| p.split(';').map(|s| s.to_string()).collect())
+        .unwrap_or_default();
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
+        let bare = dir.join(name);
+        if bare.is_file() {
+            return Some(bare);
+        }
+        for ext in &exts {
+            let with_ext = match dir.join(format!("{name}{ext}")) {
+                p if p.is_file() => p,
+                _ => continue,
+            };
+            return Some(with_ext);
         }
     }
     None
@@ -1606,5 +1610,22 @@ mod parse_tests {
             "m2 probed: {notes:?}"
         );
         cleanup(&root);
+    }
+
+    #[test]
+    fn which_on_path_returns_existing_file() {
+        // Real-exercise check: whatever PATH lookup finds must be an existing
+        // file. Probes a binary present on every CI OS we run. PATHEXT enum
+        // is exercised end-to-end by the windows-latest CI matrix entry
+        // (real `node.exe` / `cmd.exe` lookup), not a synthetic env mutation
+        // that would race other parallel tests mutating process-global PATH.
+        let probe = if cfg!(windows) {
+            which_on_path("cmd")
+        } else {
+            which_on_path("ls")
+        };
+        if let Some(p) = probe {
+            assert!(p.is_file(), "which_on_path returned non-file: {p:?}");
+        }
     }
 }

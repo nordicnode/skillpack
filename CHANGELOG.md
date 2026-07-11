@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.6.0] - 2026-07-11
+
+### Added — Cross-platform CI matrix
+
+- **CI now runs on ubuntu-latest, macos-latest, and windows-latest**, not
+  just ubuntu. The matrix uses the official `setup-node`, `setup-python`,
+  `setup-go`, and `ruby/setup-ruby` actions so every OS gets working runtimes
+  without hand-rolled apt/choco/brew logic. A previously-unchecked Windows
+  build regression would have shipped undetected.
+
+### Fixed — Windows PATH resolution (PATHEXT)
+
+- **`which_on_path` now enumerates `PATHEXT` on Windows**. `cmd.exe` appends
+  `PATHEXT` (`.EXE;.CMD;.BAT;…`) to a bare name; Rust's `Command::new` does
+  not, so probing `"node"` missed `node.exe` and `has_cli` silently reported
+  `false`. The probe now checks `name` plus `name{ext}` for each PATHEXT
+  entry on Windows; Unix path lookup is unchanged.
+- **Three CLI candidates discarded the resolved binary path and re-spawned
+  the bare name**, which defeats PATHEXT resolution even when `which_on_path`
+  finds the binary. `rust_cli_candidate`, `python_cli_candidate`, and
+  `ruby_cli_candidate` now use the resolved `PathBuf` as `argv[0]` (the
+  `node_cli_candidate` pattern), so the spawn finds the real
+  `node.exe`/`python.exe`/`ruby.exe` on Windows instead of failing with
+  `NotFound`. The README "Platform" caveat is retired — Windows now works.
+
+### Tests
+
+- `which_on_path_returns_existing_file` sanity-checks that a PATH lookup
+  returns a real file on every CI OS. The PATHEXT-specific branch is
+  exercised end-to-end by the new windows-latest CI matrix entry against
+  real `cmd.exe` / `node.exe` lookups, not a racy synthetic env mutation.
+
 ## [0.5.1] - 2026-07-11
 
 ### Fixed — Template correctness (BLOCKER)
