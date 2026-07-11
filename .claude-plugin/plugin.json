@@ -1,9 +1,9 @@
 {
   "name": "skillpack",
   "description": "Generate and verify the agent-distribution layer for any OSS project",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "author": {
-    "name": "Unspecified"
+    "name": "nordicnode"
   },
   "license": "MIT",
   "homepage": "https://github.com/nordicnode/skillpack.git",

@@ -42,6 +42,7 @@ fn cli_profile() -> ProjectProfile {
         license: Some("MIT".to_string()),
         description_hint: None,
         version: Some("0.1.0".to_string()),
+        authors: None,
     }
 }
 
@@ -71,6 +72,7 @@ fn lib_profile() -> ProjectProfile {
         license: Some("MIT".to_string()),
         description_hint: None,
         version: Some("0.1.0".to_string()),
+        authors: None,
     }
 }
 

@@ -257,11 +257,25 @@ fn check_plugin_json(root: &Path) -> Result<CheckResult> {
         ));
     }
 
+    let author = v
+        .get("author")
+        .and_then(|a| a.get("name"))
+        .and_then(|n| n.as_str())
+        .unwrap_or("");
+    if author.is_empty() || author == "Unspecified" {
+        return Ok(CheckResult::warn(
+            "discovery.plugin.author",
+            "plugin.json has a real `author`",
+            "plugin.json has no author (or defaults to \"Unspecified\")",
+            "To fix: set `authors` in your manifest (Cargo.toml [package].authors, package.json \"author\", pyproject.toml [project].authors, *.gemspec spec.authors), or pass --author; then re-run `skillpack init`.",
+        ));
+    }
+
     Ok(CheckResult::pass(
         "discovery.plugin",
         "plugin.json is structurally valid",
         format!(
-            "{} validates (name={name}, version={version})",
+            "{} validates (name={name}, version={version}, author={author})",
             schema::PLUGIN_JSON_PATH
         ),
     ))

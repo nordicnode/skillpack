@@ -36,6 +36,7 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
     let repo_url = detect_repo_url(root);
     let license = detect_license(root).or_else(|| manifest_license(root, language));
     let version = project_manifest_version(root, language);
+    let authors = project_manifest_authors(root, language).map(strip_author_email);
     let description_hint = read_readme_hint(root);
     let d = detect_cli(root, language, manifest_name.clone());
     let has_cli = d.has_cli;
@@ -70,6 +71,7 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
         repo_url,
         license,
         version,
+        authors,
         description_hint,
     })
 }
@@ -235,6 +237,92 @@ fn project_manifest_version(root: &Path, language: Language) -> Option<String> {
             None
         }
         Language::Go | Language::Unknown => None,
+    }
+}
+
+/// Pull the author(s) out of the language manifest, best-effort.
+/// Mirrors [`project_manifest_version`] per language. Returns the first
+/// author as a display string. `None` when the manifest has no author field
+/// or the language has no author-bearing manifest (e.g. Go `go.mod`).
+fn project_manifest_authors(root: &Path, language: Language) -> Option<String> {
+    match language {
+        Language::Rust => {
+            let raw = fs::read_to_string(root.join("Cargo.toml")).ok()?;
+            let v = toml::from_str::<toml::Value>(&raw).ok()?;
+            v.get("package")
+                .and_then(|p| p.get("authors"))
+                .and_then(|a| a.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string())
+        }
+        Language::Node => {
+            let raw = fs::read_to_string(root.join("package.json")).ok()?;
+            let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+            // package.json "author" is a string or { "name": "..." } object.
+            if let Some(a) = v.get("author") {
+                if let Some(s) = a.as_str() {
+                    return Some(s.to_string());
+                }
+                if let Some(name) = a.get("name").and_then(|n| n.as_str()) {
+                    return Some(name.to_string());
+                }
+            }
+            None
+        }
+        Language::Python => {
+            if let Ok(raw) = fs::read_to_string(root.join("pyproject.toml")) {
+                if let Ok(v) = toml::from_str::<toml::Value>(&raw) {
+                    // PEP 621: [project.authors] = [{ name = "..." }]
+                    if let Some(arr) = v
+                        .get("project")
+                        .and_then(|p| p.get("authors"))
+                        .and_then(|a| a.as_array())
+                    {
+                        if let Some(first) = arr.first() {
+                            if let Some(name) = first.get("name").and_then(|n| n.as_str()) {
+                                return Some(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Language::Ruby => {
+            if let Ok(entries) = fs::read_dir(root) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("gemspec") {
+                        if let Ok(raw) = fs::read_to_string(&p) {
+                            if let Some(line) = raw
+                                .lines()
+                                .find(|l| l.contains("spec.author") || l.contains(".author ="))
+                            {
+                                if let Some(author) = extract_ruby_string_value(line) {
+                                    return Some(author.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Language::Go | Language::Unknown => None,
+    }
+}
+
+/// Strip a trailing `<email>` from an author string. Cargo.toml's
+/// `[package].authors` format is `"Name <email@example.com>"`; the
+/// `plugin.json` `author.name` field wants a display name only, so we drop
+/// the angle-bracketed email suffix. npm/Python/gemspec authors can also
+/// carry the same convention.
+fn strip_author_email(author: String) -> String {
+    if let Some(idx) = author.rfind(" <") {
+        author[..idx].trim().to_string()
+    } else {
+        author.trim().to_string()
     }
 }
 
@@ -729,6 +817,7 @@ impl ProjectProfile {
             repo_url: None,
             license: None,
             version: None,
+            authors: None,
             description_hint: None,
         }
     }

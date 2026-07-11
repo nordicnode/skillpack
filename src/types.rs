@@ -43,6 +43,12 @@ pub struct ProjectProfile {
     /// the manifest has no version or the language has no version-bearing
     /// manifest (e.g. Go `go.mod`).
     pub version: Option<String>,
+    /// Author(s) parsed from the language manifest (`Cargo.toml`
+    /// `[package].authors`, `package.json` `"author"`, `pyproject.toml`
+    /// `[project].authors`, `*.gemspec spec.authors`). `None` when the
+    /// manifest has no author field. Used as a fallback when the interview
+    /// / `skillpack.toml` doesn't supply one.
+    pub authors: Option<String>,
     /// First paragraph of README, used as a description hint. May be empty.
     pub description_hint: Option<String>,
 }

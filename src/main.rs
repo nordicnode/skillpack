@@ -451,6 +451,7 @@ mod confirm_tests {
             repo_url: None,
             license: Some("MIT".into()),
             version: None,
+            authors: None,
             description_hint: Some(hint),
         };
         // Must not panic.

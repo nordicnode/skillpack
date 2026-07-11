@@ -102,7 +102,7 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         "one_line_description": one_line_description_yaml(&intent.one_line_description),
         "when_to_use_phrases": intent.when_to_use_phrases,
         "when_concat": escape_yaml(&when_concat),
-        "author": intent.author,
+        "author": intent.author.as_deref().or(profile.authors.as_deref()),
         "license": intent.license,
         "repo_url": profile.repo_url,
         "keywords": keywords,

@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-07-10
+
+### Fixed
+
+- **`plugin.json` author defaulted to `Unspecified`** — same drift class as
+  the version fix in 0.2.4: `generate` fell back to the template's
+  `"Unspecified"` sentinel whenever the interview / `skillpack.toml` didn't
+  supply an author, ignoring the manifest entirely. `introspect` now reads
+  the first author from `Cargo.toml [package].authors`, `package.json
+  "author"` (string or `{ name }` object), `pyproject.toml [project].authors`,
+  and `*.gemspec spec.authors`. `generate` resolves `intent.author` with
+  `profile.authors` as fallback, so a non-interactive `init` (the CI path,
+  where no interview happens) still emits a real author. The Cargo
+  `"Name <email>"` format is stripped to the display name only — `author.name`
+  in the plugin schema is a display name, not a contact record.
+
+### Added
+
+- **`discovery.plugin.author` verify check** — warns when `plugin.json` has
+  no author or defaults to `"Unspecified"`, with a suggestion pointing at
+  the manifest key to set. Parallel to `discovery.plugin.version` (0.2.4).
+
 ## [0.2.4] - 2026-07-10
 
 ### Fixed
