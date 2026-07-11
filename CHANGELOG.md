@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-10
+
+### Added — Multi-ecosystem emitter (design §3 Phase 4)
+
+- **`--target` flag on `init`** — generate distribution files for multiple
+  agent ecosystems in a single run. Repeatable: `--target claude --target
+  cursor --target codex`. Defaults to `claude` only (backward compatible).
+  New `Target` enum (`Claude`, `Cursor`, `Codex`) drives `render_targets`,
+  which dispatches per ecosystem:
+  - **Claude** (unchanged): `.claude-plugin/marketplace.json` +
+    `plugin.json` + `skills/<name>/SKILL.md`.
+  - **Cursor**: `.cursor/rules/<name>.mdc` — YAML frontmatter
+    (`description`, `alwaysApply: false`) + rule body. Matches the Cursor
+    `.mdc` format documented at cursor.com/docs/rules.
+  - **Codex**: `.codex/skills/<name>/SKILL.md` — same `SKILL.md` frontmatter
+    as Claude (cross-agent-compatible), different output path per Codex's
+    `.codex/skills/` convention.
+- **Self-dogfood** now generates all three: the repo is installable as a
+  Cursor rule (`@skillpack`) and a Codex skill (`.codex/skills/skillpack/`)
+  in addition to `claude plugin marketplace add nordicnode/skillpack`.
+
+### Notes
+
+- `verify` remains Claude-only for V1; cursor/codex files are emitted but
+  not yet checked by the discovery/invocation suite. Multi-ecosystem verify
+  is a follow-up.
+- `--target` is CLI-only (not persisted in `skillpack.toml`); targets are a
+  per-run choice, not project metadata.
+
 ## [0.2.5] - 2026-07-10
 
 ### Fixed

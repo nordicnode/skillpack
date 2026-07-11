@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use tera::{Context as TeraContext, Tera};
 
+use crate::cli::Target;
 use crate::types::{Intent, ProjectProfile};
 
 /// Name → template source. Embedded via `include_str!` so templates ship inside
@@ -19,6 +20,7 @@ use crate::types::{Intent, ProjectProfile};
 const MARKETPLACE_TPL: &str = include_str!("../templates/marketplace.json.tera");
 const PLUGIN_TPL: &str = include_str!("../templates/plugin.json.tera");
 const SKILL_TPL: &str = include_str!("../templates/SKILL.md.tera");
+const CURSOR_RULE_TPL: &str = include_str!("../templates/cursor-rule.mdc.tera");
 
 static TERA: Lazy<Tera> = Lazy::new(|| {
     let mut tera = Tera::default();
@@ -28,6 +30,8 @@ static TERA: Lazy<Tera> = Lazy::new(|| {
         .expect("plugin template is valid");
     tera.add_raw_template("SKILL.md", SKILL_TPL)
         .expect("SKILL template is valid");
+    tera.add_raw_template("cursor-rule.mdc", CURSOR_RULE_TPL)
+        .expect("cursor rule template is valid");
     // json_encode is built into Tera; nothing custom to register.
     tera
 });
@@ -162,6 +166,53 @@ pub fn render(profile: &ProjectProfile, intent: &Intent) -> Result<Vec<Generated
             contents: skill,
         },
     ])
+}
+
+/// Render distribution files for one or more agent ecosystems. Calls
+/// [`render`] for Claude (the three-file set) and emits additional files
+/// for each extra target in `targets`. Dedupes: if `targets` contains
+/// `Claude` plus others, Claude files are emitted once.
+pub fn render_targets(
+    profile: &ProjectProfile,
+    intent: &Intent,
+    targets: &[Target],
+) -> Result<Vec<GeneratedFileOutput>> {
+    let ctx = build_context(profile, intent);
+    let name = coerce_kebab(&profile.name);
+    let mut out = Vec::new();
+
+    // Dedupe: emit each target once.
+    let mut seen = std::collections::HashSet::new();
+    for &target in targets {
+        if !seen.insert(target) {
+            continue;
+        }
+        match target {
+            Target::Claude => out.extend(render(profile, intent)?),
+            Target::Cursor => {
+                let mdc = TERA
+                    .render("cursor-rule.mdc", &ctx)
+                    .context("rendering cursor-rule.mdc")?;
+                out.push(GeneratedFileOutput {
+                    rel_path: format!(".cursor/rules/{name}.mdc"),
+                    contents: mdc,
+                });
+            }
+            Target::Codex => {
+                // Codex reads SKILL.md with the same frontmatter as Claude —
+                // reuse the same template, different output path.
+                let skill = TERA
+                    .render("SKILL.md", &ctx)
+                    .context("rendering codex SKILL.md")?;
+                out.push(GeneratedFileOutput {
+                    rel_path: format!(".codex/skills/{name}/SKILL.md"),
+                    contents: skill,
+                });
+            }
+        }
+    }
+
+    Ok(out)
 }
 
 // ----- helpers --------------------------------------------------------------

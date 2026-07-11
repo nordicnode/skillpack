@@ -47,6 +47,12 @@ pub enum Commands {
         /// Override the license SPDX id for this run (writes it to skillpack.toml).
         #[arg(long, value_name = "SPDX")]
         license: Option<String>,
+
+        /// Agent ecosystem(s) to generate distribution files for. Repeat to
+        /// emit multiple: `--target claude --target cursor`. Defaults to
+        /// `claude` only (backward compatible).
+        #[arg(long, value_enum, num_args = 1.., value_name = "ECOSYSTEM")]
+        target: Vec<Target>,
     },
     /// Check the distribution files against the Claude Code schema + CLI drift.
     Verify {
@@ -58,4 +64,17 @@ pub enum Commands {
         #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
         format: crate::verify::OutputFormat,
     },
+}
+
+/// Which agent ecosystem to generate distribution files for.
+/// See design §3 (non-goals) and §10 (Phase 4: multi-ecosystem).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum, Default)]
+pub enum Target {
+    /// Claude Code: `.claude-plugin/` + `skills/<name>/SKILL.md`.
+    #[default]
+    Claude,
+    /// Cursor: `.cursor/rules/<name>.mdc` rule file.
+    Cursor,
+    /// Codex CLI: `.codex/skills/<name>/SKILL.md` + optional `openai.yaml`.
+    Codex,
 }

@@ -17,7 +17,7 @@ use clap::Parser;
 use skillpack::cli::{Cli, Commands};
 use skillpack::config::Config;
 use skillpack::exit;
-use skillpack::generate::{coerce_kebab, render, GeneratedFileOutput};
+use skillpack::generate::{coerce_kebab, render_targets, GeneratedFileOutput};
 use skillpack::interview;
 use skillpack::introspect;
 use skillpack::types;
@@ -32,6 +32,7 @@ fn main() {
             non_interactive,
             accept_warnings,
             license,
+            target,
         } => run_init(
             &root,
             cli.verbose,
@@ -39,6 +40,7 @@ fn main() {
             non_interactive,
             accept_warnings,
             license,
+            target,
         ),
         Commands::Verify { root, format } => run_verify(&root, cli.verbose, cli.debug, format),
     }) {
@@ -57,6 +59,7 @@ fn run_init(
     non_interactive: bool,
     accept_warnings: bool,
     license_override: Option<String>,
+    targets: Vec<skillpack::cli::Target>,
 ) -> i32 {
     match run_init_inner(
         root,
@@ -65,6 +68,7 @@ fn run_init(
         non_interactive,
         accept_warnings,
         license_override,
+        targets,
     ) {
         Ok(c) => c,
         Err(e) => {
@@ -83,6 +87,7 @@ fn run_init_inner(
     non_interactive: bool,
     accept_warnings: bool,
     license_override: Option<String>,
+    targets: Vec<skillpack::cli::Target>,
 ) -> Result<i32> {
     let profile = introspect::introspect(root).context("introspecting repo")?;
     if verbose {
@@ -132,7 +137,13 @@ fn run_init_inner(
     }
 
     // Step 3 — render in memory.
-    let files = render(&profile, &intent).context("rendering distribution files")?;
+    let targets = if targets.is_empty() {
+        vec![skillpack::cli::Target::Claude]
+    } else {
+        targets
+    };
+    let files =
+        render_targets(&profile, &intent, &targets).context("rendering distribution files")?;
 
     // Step 4 — pre-commit verify against the rendered output (design §5.3).
     let report = verify_rendered(&files, &profile, root, debug)?;
