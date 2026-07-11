@@ -5,6 +5,33 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.8.1] - 2026-07-11
+
+### Fixed — introspection + flag extraction (self-dogfood on fd-find)
+
+- `rust_cli_candidate` now parses `[[bin]].name` from `Cargo.toml` and probes
+  those artifact paths before the package-name fallback. Crates that rename
+  their binary (e.g. `fd-find` → `fd`, `ripgrep` → `rg`) were misdetected as
+  libraries — `has_cli=false`, template emitted "library not CLI" branch.
+  PATH fallback also extended to probe `[[bin]].name` candidates first.
+- `extract_flags` now strips clap-style `[=<value>]` optional-arg suffix
+  *before* punctuation trim. Previously raw `--help` tokens kept `[` (interior
+  → survived `trim_matches`) while backtick-wrapped SKILL.md tokens stripped
+  `[` (edge → punct) → same flag extracted differently → false flag-drift
+  failure on verify. Now produces consistent `--flag` both sides.
+- `extract_flags` now rejects prose tokens from rich clap help: multi-char
+  short flags (`-tf` from `fd -tf` examples), example patterns (`-foo`),
+  short/long pair separators (`-x'/'--exec`), and find(1) comparisons
+  (`-mount`, `-xdev`). Filters: reject tokens containing `/` or `'`; reject
+  single-dash flags with >1 char after dash (real clap short flags are single
+  letter).
+- `cli_binary` in generated SKILL.md now derives from the actual CLI command
+  argv (`Path::file_stem()`) rather than the package name. SKILL.md prose
+  now reads "Ensure `fd` is installed" (binary) instead of "Ensure `fd-find`
+  is installed" (crate) — correct binary name for agent invocation.
+- 4 new tests pin these fixes: `rust_candidate_probes_bin_name_not_package_name`,
+  `strips_clap_optional_arg_suffix_consistently`, `ignores_prose_examples_in_help_text`.
+
 ## [0.8.0] - 2026-07-11
 
 ### Added — C# / .NET ecosystem support
