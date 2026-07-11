@@ -5,6 +5,31 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.6.2] - 2026-07-11
+
+### Fixed — Windows build correctness
+
+- **Three lib tests failed on Windows** (introduced/exposed by the 0.6.1
+  matrix; the code was unix-only before). All three now cross-OS:
+  - `python_candidate_uses_m_module_when_importable` asserted
+    `argv[0].ends_with("python")`; the PATHEXT fix correctly resolves
+    `python.exe`, so the old assert rejected a valid Windows path. Replaced
+    with a `Path::file_stem().eq_ignore_ascii_case("python")` check that
+    accepts `python`, `python.exe`, `python3.exe`, etc.
+  - `node_cli_detected_via_bin_absolute_argv` had the same `ends_with("node")`
+    bug plus a string-suffix `script.ends_with("bin/cli.js")` that misses on
+    `\`-separated Windows paths. Now uses `Path::ends_with` (component-aware,
+    cross-OS) for the script tail + `file_stem` for the node binary stem.
+  - `skill_md_has_description_and_when_to_use_in_frontmatter` failed because
+    the repo had no `.gitattributes`: a Windows checkout with the default
+    `core.autocrlf=true` converted the `.tera` template sources to CRLF,
+    `include_str!` pulled CRLF bytes, Tera preserved them, and the generated
+    SKILL.md started with `---\r\n` instead of `---\n`. The real fix is not a
+    test-string patch — a generated SKILL.md shipping with CRLF on Windows
+    and LF on Unix violates byte-identical output. Added `.gitattributes`
+    pinning `*.tera` (and the rest of the source) to `eol=lf`, so templates
+    keep LF on every checkout regardless of the host's autocrlf setting.
+
 ## [0.6.1] - 2026-07-11
 
 ### Fixed — CI

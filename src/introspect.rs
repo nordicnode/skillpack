@@ -1282,13 +1282,23 @@ mod candidate_tests {
         ]);
         let cand = primary_cli_candidate(&root, Language::Node, "sample-node").unwrap();
         assert_eq!(cand.argv.len(), 2, "argv should be [node, <abs script>]");
-        assert!(cand.argv[0].ends_with("node"), "got: {:?}", cand.argv);
-        // the script path must be absolute so it survives a cwd change
-        let script = &cand.argv[1];
+        let node_stem = Path::new(&cand.argv[0])
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
         assert!(
-            Path::new(script).is_absolute() && script.ends_with("bin/cli.js"),
+            node_stem.eq_ignore_ascii_case("node"),
+            "got: {:?}",
+            cand.argv
+        );
+        // the script path must be absolute and end with `bin/cli.js`. Use
+        // Path component comparison (ends_with) so it holds cross-platform —
+        // Windows separators are `\` so a string suffix check would miss.
+        let script = Path::new(&cand.argv[1]);
+        assert!(
+            script.is_absolute() && script.ends_with("bin/cli.js"),
             "expected absolute script path, got {}",
-            script
+            cand.argv[1]
         );
         assert_eq!(cand.spawn_cwd, root);
         cleanup(&root);
@@ -1364,8 +1374,12 @@ mod candidate_tests {
         ]);
         let cand = primary_cli_candidate(&root, Language::Python, "sample-python").unwrap();
         assert_eq!(cand.argv.len(), 3, "got: {:?}", cand.argv);
+        let stem = Path::new(&cand.argv[0])
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
         assert!(
-            cand.argv[0].ends_with("python"),
+            stem.eq_ignore_ascii_case("python"),
             "expected python interpreter, got {}",
             cand.argv[0]
         );

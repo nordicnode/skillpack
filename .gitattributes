@@ -1,0 +1,16 @@
+# Normalize line endings to LF across all platforms. Without this, Windows
+# checkouts with default `core.autocrlf=true` convert template `.tera` sources
+# to CRLF; include_str! then pulls CRLF bytes and Tera preserves them in the
+# generated SKILL.md / plugin.json — so a Windows run ships CRLF artifacts
+# while Unix ships LF, breaking snapshot-byte-identity and any downstream
+# parser that expects LF. Pin source to LF; let git convert on the working
+# tree only for the rare text edit (default `text=auto` keeps that).
+*.tera  text eol=lf
+*.rs    text eol=lf
+*.toml  text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.lock  text eol=lf
+*.snap  text eol=lf
