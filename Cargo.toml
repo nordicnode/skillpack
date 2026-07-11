@@ -1,11 +1,11 @@
 [package]
 name = "skillpack"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.74"
 authors = ["nordicnode <128633122+nordicnode@users.noreply.github.com>"]
 license = "MIT"
-description = "Generate and verify the agent-distribution layer (Claude Code skill packs) for any OSS project."
+description = "Generate and verify the agent-distribution layer for any OSS project (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot)."
 homepage = "https://github.com/nordicnode/skillpack"
 repository = "https://github.com/nordicnode/skillpack"
 keywords = ["cli", "claude", "agent", "skills", "distribution"]

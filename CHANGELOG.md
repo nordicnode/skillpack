@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-07-10
+
+### Added — `doctor` subcommand
+
+- **`skillpack doctor`** — diagnose why introspection chose `has_cli` / language
+  as it did. Prints the detected profile + a chronological decision trace
+  (every falsy branch in `detect_cli` / `detect_language` pushes a `DiagNote`
+  explaining why a candidate was rejected). Read-only, exits 0. Answers the
+  user's "what happens with monorepos / workspaces / uv / poetry?" question
+  directly: the trace explains the workspace walk and the uv/poetry gap.
+
+### Added — Workspace member walking
+
+- **Cargo workspace support**: a workspace-only `Cargo.toml` (no `[package]`)
+  no longer silently reports `has_cli=false`. Introspection now walks
+  `[workspace].members`, probes each member crate's built/installed binary,
+  and derives the profile name from the member that ships the CLI.
+- **npm workspace support**: a root `package.json` with `workspaces` but no
+  `bin` walks member packages, probing each for a `bin` entry.
+- **uv / poetry**: explicitly diagnosed as "member walking not yet
+  implemented — run `skillpack init` in the member dir" (honest gap, no
+  false promise).
+
+### Added — OpenCode + GitHub Copilot targets
+
+- **`--target opencode`**: emits `.opencode/agents/<name>.md` with
+  `description` (required) + `mode` frontmatter per opencode.ai/docs/agents.
+  `verify` validates the frontmatter (`discovery.opencode.agent.*` check ids).
+- **`--target copilot`**: emits `.github/copilot-instructions.md` (plain
+  markdown, no frontmatter) per docs.github.com/copilot. `verify` checks
+  the file is non-empty and starts with a `#` heading
+  (`discovery.copilot.instructions` check id).
+- The repo's own committed distribution now dogfoods all 5 ecosystems.
+
+
 ## [0.4.0] - 2026-07-10
 
 ### Added — Multi-ecosystem verify (design §3 Phase 4)

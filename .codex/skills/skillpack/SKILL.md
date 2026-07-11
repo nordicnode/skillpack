@@ -50,8 +50,9 @@ Run `skillpack --help` to discover the available flags. Documented flags (verifi
 
 This CLI uses subcommands. Each one has its own flags (verified by `skillpack verify`):
 
-- `init` — flags: `--root`, `--non-interactive`, `--accept-warnings`, `--verbose`, `--debug`, `--license`, `--target`
+- `init` — flags: `--root`, `--non-interactive`, `--accept-warnings`, `--license`, `--verbose`, `--debug`, `--target`
 - `verify` — flags: `--root`, `--format`, `--verbose`, `--debug`
+- `doctor` — flags: `--root`, `--verbose`, `--debug`
 
 Run `skillpack <subcommand> --help` for a subcommand's full options.
 

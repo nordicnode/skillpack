@@ -54,7 +54,7 @@ pub enum Commands {
         #[arg(long, value_enum, num_args = 1.., value_name = "ECOSYSTEM")]
         target: Vec<Target>,
     },
-    /// Check the distribution files against the Claude Code schema + CLI drift.
+    /// Check the distribution files against the agent schemas + CLI drift.
     Verify {
         #[arg(long, value_name = "DIR", default_value = ".")]
         root: PathBuf,
@@ -63,6 +63,15 @@ pub enum Commands {
         /// prints a machine-readable object with per-check ids for CI gating.
         #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
         format: crate::verify::OutputFormat,
+    },
+    /// Diagnose why introspection chose `has_cli` / language as it did.
+    /// Prints the detected profile + a chronological trace of the decision
+    /// branches that fired (which candidate was tried, why it was rejected,
+    /// what would make it succeed). Read-only — never writes files.
+    Doctor {
+        /// Project root to operate on. Defaults to the current directory.
+        #[arg(long, value_name = "DIR", default_value = ".")]
+        root: PathBuf,
     },
 }
 
@@ -75,6 +84,13 @@ pub enum Target {
     Claude,
     /// Cursor: `.cursor/rules/<name>.mdc` rule file.
     Cursor,
-    /// Codex CLI: `.codex/skills/<name>/SKILL.md` + optional `openai.yaml`.
     Codex,
+    /// OpenCode: `.opencode/agents/<name>.md` agent definition file.
+    /// Per opencode.ai/docs/agents — frontmatter (`description` required,
+    /// `mode`/`temperature`/`permissions` optional); no `.claude-plugin/`.
+    #[clap(name = "opencode")]
+    OpenCode,
+    /// GitHub Copilot: `.github/copilot-instructions.md` custom instructions.
+    /// Per docs.github.com/copilot — plain markdown, no frontmatter.
+    Copilot,
 }

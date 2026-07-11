@@ -43,6 +43,7 @@ fn main() {
             target,
         ),
         Commands::Verify { root, format } => run_verify(&root, cli.verbose, cli.debug, format),
+        Commands::Doctor { root } => run_doctor(&root, cli.verbose, cli.debug),
     }) {
         code
     } else {
@@ -425,6 +426,67 @@ fn run_verify_inner(
         exit::VERIFY_OK
     })
 }
+/// `skillpack doctor` — diagnose why introspection chose what it did.
+/// Read-only: prints the detected profile + the decision trace (`diag`),
+/// never writes files. The trace is empty until candidate fns push notes
+/// (the `detect_*` falsy branches); doctor surfaces exactly why `has_cli`
+/// came out false so the maintainer can act.
+fn run_doctor(root: &Path, verbose: bool, debug: bool) -> i32 {
+    match run_doctor_inner(root, verbose, debug) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("fatal: {e:#}");
+            std::process::exit(exit::INIT_FATAL);
+        }
+    }
+}
+
+fn run_doctor_inner(root: &Path, verbose: bool, debug: bool) -> Result<i32> {
+    let profile = introspect::introspect(root).context("introspecting repo for doctor")?;
+    if debug {
+        eprintln!(
+            "[debug] detected name={} language={} has_cli={} diag_notes={}",
+            profile.name,
+            profile.language.as_str(),
+            profile.has_cli,
+            profile.diag.0.len()
+        );
+    }
+    // Reuse the same profile block --verbose prints so doctor's output starts
+    // from a known place.
+    if verbose {
+        print_profile(&profile);
+    } else {
+        println!("— skillpack doctor —");
+        println!("  name:     {}", profile.name);
+        println!("  language: {}", profile.language.as_str());
+        println!("  has_cli:  {}", profile.has_cli);
+        if let Some(cmd) = &profile.cli_command {
+            println!("  cli:      {}", cmd.join(" "));
+        }
+    }
+
+    println!();
+    if profile.diag.0.is_empty() {
+        if profile.has_cli {
+            println!("decision trace: (empty — CLI detected cleanly, no falsy branches fired)");
+        } else {
+            println!("decision trace: (empty — no candidate notes were pushed)");
+            println!();
+            println!("hint: candidate fns only push notes on falsy branches, so an empty trace");
+            println!("      means either detection succeeded silently or this language has no");
+            println!("      probed candidate. Check --verbose for the raw profile.");
+        }
+    } else {
+        println!("decision trace ({}):", profile.diag.0.len());
+        for note in &profile.diag.0 {
+            println!("  [{}] {}", note.stage, note.note);
+        }
+    }
+
+    // Doctor never writes; always exits 0.
+    Ok(exit::VERIFY_OK)
+}
 
 #[cfg(test)]
 mod confirm_tests {
@@ -464,6 +526,7 @@ mod confirm_tests {
             version: None,
             authors: None,
             description_hint: Some(hint),
+            diag: types::DiagTrace::default(),
         };
         // Must not panic.
         print_profile(&profile);

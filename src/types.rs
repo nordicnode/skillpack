@@ -34,6 +34,12 @@ pub struct ProjectProfile {
     /// CLIs, or when every per-sub spawn failed/timed out.
     #[serde(default)]
     pub cli_subcommand_help: Vec<(String, String)>,
+    /// Introspection decision trace for `skillpack doctor`. Empty when every
+    /// detection branch succeeded (or when `doctor` wasn't run); each falsy
+    /// branch in a candidate fn pushes one decision note here so `doctor` can
+    /// explain why `has_cli = false` rather than silently reporting it.
+    #[serde(default, skip_serializing_if = "DiagTrace::is_empty")]
+    pub diag: DiagTrace,
     /// `git remote get-url origin`, best-effort.
     pub repo_url: Option<String>,
     /// SPDX identifier guessed from LICENSE file or manifest, e.g. `MIT`.
@@ -51,6 +57,37 @@ pub struct ProjectProfile {
     pub authors: Option<String>,
     /// First paragraph of README, used as a description hint. May be empty.
     pub description_hint: Option<String>,
+}
+
+/// One decision point recorded during introspection for `skillpack doctor`.
+/// `stage` is the function/phase that recorded the note; `note` is a short
+/// human-readable string doctor prints.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiagNote {
+    pub stage: &'static str,
+    pub note: String,
+}
+
+/// A chronological trace of introspection decisions, surfaced by
+/// `skillpack doctor` to explain why `has_cli` came out the way it did
+/// (e.g. "python candidate: scripts entry `foo` points at `foo.cli:main`
+/// but no importable dir `foo/` at root — try src-layout or `pip install -e .`").
+/// The trace is best-effort: every falsy branch in a candidate fn pushes one
+/// note before returning `None`; happy paths push nothing (doctor's signal
+/// is the negative branches, the success is reflected in `has_cli` itself).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct DiagTrace(pub Vec<DiagNote>);
+
+impl DiagTrace {
+    pub fn push(&mut self, stage: &'static str, note: impl Into<String>) {
+        self.0.push(DiagNote {
+            stage,
+            note: note.into(),
+        });
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

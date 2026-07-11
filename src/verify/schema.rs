@@ -75,6 +75,20 @@ pub const CURSOR_RULES_DIR: &str = ".cursor/rules";
 /// convention — same `SKILL.md` frontmatter shape as Claude, installed under
 /// `.codex/skills/`. Verified July 2026.
 pub const CODEX_SKILLS_DIR: &str = ".codex/skills";
+/// OpenCode agent definitions live under `.opencode/agents/<name>.md`. Source:
+/// opencode.ai/docs/agents — "Place them in: Per-project:
+/// `.opencode/agents/`". The markdown file name becomes the agent name.
+/// Frontmatter: `description` (required), `mode`/`temperature`/`permissions`
+/// (optional). Verified July 2026.
+pub const OPENCODE_AGENTS_DIR: &str = ".opencode/agents";
+
+/// GitHub Copilot custom instructions live at
+/// `.github/copilot-instructions.md`. Source:
+/// docs.github.com/copilot/how-tos/copilot-on-github/customize-copilot/
+/// add-repository-instructions — "The path is always
+/// `.github/copilot-instructions.md`." Plain markdown, no frontmatter.
+/// Verified July 2026.
+pub const COPILOT_INSTRUCTIONS_PATH: &str = ".github/copilot-instructions.md";
 
 // Action-verb heuristic: the first word of a good skill description is an
 // action verb (e.g. "Lint", "Generate", "Format"). We don't enforce grammar —

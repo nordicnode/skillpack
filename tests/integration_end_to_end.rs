@@ -1159,3 +1159,349 @@ fn self_dogfood_verify_on_repos_committed_files() {
     assert!(s.contains(".codex/skills/skillpack/SKILL.md validates"));
     assert!(s.contains(".cursor/rules/skillpack.mdc validates"));
 }
+
+// --- workspace member walks -------------------------------------------------
+//
+// `walk_cargo_workspace` and `walk_npm_workspace` silently change which target
+// `has_cli` resolves to: the binary lives in a *member*, not the root. If a
+// regression turns the walk off, doctor must still honestly report
+// `has_cli=false` with a trace — it must NOT claim `true` and then leave the
+// agent unable to spawn. These pin both directions: a member that exists
+// yields `true`; a workspace with no matching member yields `false`.
+
+/// Scratch a cargo workspace root + one member crate with a `[[bin]]`.
+/// Returns the temp dir path (kept alive via `tempdir().keep()`).
+fn cargo_workspace_scratch() -> PathBuf {
+    let root = tempfile::tempdir().unwrap().keep();
+    // Workspace-only Cargo.toml (no [package]).
+    fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"cli-crate\"]\n",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("cli-crate")).unwrap();
+    fs::create_dir_all(root.join("cli-crate/src")).unwrap();
+    fs::write(
+        root.join("cli-crate/Cargo.toml"),
+        "[package]\nname = \"cli-crate\"\nversion = \"0.1.0\"\n[[bin]]\nname = \"cli-crate\"\npath = \"src/main.rs\"\n",
+    )
+    .unwrap();
+    // Trivial main.rs so the crate is runnable.
+    fs::write(root.join("cli-crate/src/main.rs"), "fn main() {}\n").unwrap();
+    root
+}
+
+/// Build the member crate's binary so `rust_cli_candidate` resolves it, then
+/// `doctor` against the workspace root and assert `has_cli: true`.
+///
+/// Cargo hoists member artifacts to the workspace-root `target/`, so
+/// `primary_cli_candidate` finds the binary at the root level — the
+/// member-walk trace may or may not fire (it only fires when the binary
+/// isn't hoisted/on PATH). Assert `has_cli: true` + the language note; don't
+/// over-assert on which code path found it.
+#[test]
+fn doctor_cargo_workspace_finds_member_cli() {
+    let root = cargo_workspace_scratch();
+
+    // Build the member crate's binary; cargo hoists it to the workspace-root
+    // target/release/cli-crate.
+    Command::new("cargo")
+        .args(["build", "--release", "--quiet"])
+        .current_dir(root.join("cli-crate"))
+        .assert()
+        .success();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["doctor", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "doctor must exit 0 (read-only), got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        s.contains("has_cli:  true"),
+        "workspace with a member bin must report has_cli=true, got:\n{s}"
+    );
+    // The workspace detection note must fire (explains why detection probed
+    // member artifacts at all). The CLI-walk trace only fires when the binary
+    // isn't found at the hoist point — so assert the language note, not the
+    // walk path.
+    assert!(
+        s.contains("workspace"),
+        "doctor trace must reference the workspace detection, got:\n{s}"
+    );
+}
+
+/// A cargo workspace whose member has NO built/installed binary must report
+/// `has_cli=false` with a trace ending "no workspace member yielded a
+/// runnable CLI" — the honest no-promise path.
+#[test]
+fn doctor_cargo_workspace_no_member_cli_reports_false() {
+    let root = cargo_workspace_scratch();
+    // Do NOT build — no target/ artifact, no PATH bin → candidate None.
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["doctor", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "doctor is read-only (exit 0)");
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        s.contains("has_cli:  false"),
+        "workspace with unbuilt member must report has_cli=false, got:\n{s}"
+    );
+    assert!(
+        s.contains("no workspace member yielded a runnable CLI"),
+        "trace must explain the false, got:\n{s}"
+    );
+}
+
+/// Scratch an npm workspace root + one member package with a `bin`.
+/// Requires `node` on PATH (the test skips otherwise — mirrors
+/// `node_available()` above).
+fn npm_workspace_scratch() -> PathBuf {
+    let root = tempfile::tempdir().unwrap().keep();
+    // Workspace-only package.json (no root `bin`).
+    fs::write(
+        root.join("package.json"),
+        "{ \"name\": \"ws-root\", \"workspaces\": [\"cli-pkg\"] }\n",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("cli-pkg/bin")).unwrap();
+    fs::write(
+        root.join("cli-pkg/package.json"),
+        "{ \"name\": \"cli-pkg\", \"bin\": { \"cli-pkg\": \"./bin/cli.js\" } }\n",
+    )
+    .unwrap();
+    // Trivial cli.js with shebang so node runs it cleanly.
+    fs::write(
+        root.join("cli-pkg/bin/cli.js"),
+        "#!/usr/bin/env node\nconsole.log('cli-pkg help');\n",
+    )
+    .unwrap();
+    root
+}
+
+/// npm workspace: doctor must find the member's `bin` and report
+/// `has_cli=true` with a `detect_cli.node.workspace` trace entry.
+#[test]
+fn doctor_npm_workspace_finds_member_cli() {
+    if !node_available() {
+        return;
+    }
+    let root = npm_workspace_scratch();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["doctor", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "doctor must exit 0, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        s.contains("has_cli:  true"),
+        "npm workspace with a member bin must report has_cli=true, got:\n{s}"
+    );
+    assert!(
+        s.contains("detect_cli.node.workspace"),
+        "trace must mention the npm workspace walk, got:\n{s}"
+    );
+}
+
+/// npm workspace whose member has no `bin` must report `has_cli=false`.
+#[test]
+fn doctor_npm_workspace_no_member_bin_reports_false() {
+    if !node_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap().keep();
+    fs::write(
+        root.join("package.json"),
+        "{ \"name\": \"ws-root\", \"workspaces\": [\"lib-pkg\"] }\n",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("lib-pkg")).unwrap();
+    fs::write(
+        root.join("lib-pkg/package.json"),
+        "{ \"name\": \"lib-pkg\" }\n",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["doctor", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        s.contains("has_cli:  false"),
+        "npm workspace with no member bin must report has_cli=false, got:\n{s}"
+    );
+}
+
+// --- OpenCode + Copilot init+verify round trips ----------------------------
+
+/// `init --target opencode --target copilot` writes both ecosystem files,
+/// and `verify` passes its discovery checks against them. Asserts the
+/// OpenCode agent file has `---` frontmatter with `description:` and the
+/// Copilot file starts with a `#` heading.
+#[test]
+fn opencode_copilot_init_then_verify_round_trip() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--target",
+            "opencode",
+            "--target",
+            "copilot",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let opencode_path = root.join(".opencode/agents/sample-rust.md");
+    let copilot_path = root.join(".github/copilot-instructions.md");
+    assert!(opencode_path.exists(), "OpenCode agent file must exist");
+    assert!(
+        copilot_path.exists(),
+        "Copilot instructions file must exist"
+    );
+
+    // Structural assertions: OpenCode file has `---` frontmatter with a
+    // `description:` key; Copilot file starts with a `#` heading.
+    let opencode_raw = fs::read_to_string(&opencode_path).unwrap();
+    assert!(
+        opencode_raw.starts_with("---\n"),
+        "OpenCode agent file must start with frontmatter, got:\n{opencode_raw}"
+    );
+    assert!(
+        opencode_raw.contains("description:"),
+        "OpenCode frontmatter must have description, got:\n{opencode_raw}"
+    );
+
+    let copilot_raw = fs::read_to_string(&copilot_path).unwrap();
+    assert!(
+        copilot_raw.starts_with("# "),
+        "Copilot instructions must start with a `#` heading, got:\n{copilot_raw}"
+    );
+
+    // Verify passes and emits the discovery checks for both ecosystems.
+    let json_out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        json_out.status.success(),
+        "verify must exit 0, got:\n{}",
+        String::from_utf8_lossy(&json_out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&json_out.stdout).unwrap();
+    assert_eq!(json["ok"], serde_json::Value::Bool(true));
+
+    let results = json["results"].as_array().unwrap();
+    for check_id in ["discovery.opencode.agent", "discovery.copilot.instructions"] {
+        let matches: Vec<&serde_json::Value> = results
+            .iter()
+            .filter(|r| r["check_id"] == check_id)
+            .collect();
+        assert!(
+            !matches.is_empty(),
+            "verify must emit {check_id} result, got:\n{json}"
+        );
+        for r in &matches {
+            assert_eq!(r["severity"], "pass", "{check_id} must pass, got:\n{json}");
+        }
+    }
+}
+
+/// An OpenCode agent file with no `---` frontmatter fails verify with
+/// `discovery.opencode.agent.frontmatter`. Regression guard for the
+/// frontmatter-present check.
+#[test]
+fn opencode_missing_frontmatter_fails_verify() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--target",
+            "opencode",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Overwrite with a file missing the `---` frontmatter block entirely.
+    fs::write(
+        root.join(".opencode/agents/sample-rust.md"),
+        "# sample-rust\n\nNo frontmatter here, just markdown.\n",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "verify must exit non-zero on missing frontmatter, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let results = json["results"].as_array().unwrap();
+    let name = "discovery.opencode.agent.frontmatter";
+    let matches: Vec<&serde_json::Value> =
+        results.iter().filter(|r| r["check_id"] == name).collect();
+    assert!(
+        !matches.is_empty(),
+        "verify must emit {name} result, got:\n{json}"
+    );
+    for r in &matches {
+        assert_eq!(
+            r["severity"], "fail",
+            "{name} must be fail severity, got:\n{json}"
+        );
+    }
+}

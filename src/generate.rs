@@ -21,6 +21,8 @@ const MARKETPLACE_TPL: &str = include_str!("../templates/marketplace.json.tera")
 const PLUGIN_TPL: &str = include_str!("../templates/plugin.json.tera");
 const SKILL_TPL: &str = include_str!("../templates/SKILL.md.tera");
 const CURSOR_RULE_TPL: &str = include_str!("../templates/cursor-rule.mdc.tera");
+const OPENCODE_AGENT_TPL: &str = include_str!("../templates/opencode-agent.md.tera");
+const COPILOT_INSTRUCTIONS_TPL: &str = include_str!("../templates/copilot-instructions.md.tera");
 
 static TERA: Lazy<Tera> = Lazy::new(|| {
     let mut tera = Tera::default();
@@ -32,6 +34,10 @@ static TERA: Lazy<Tera> = Lazy::new(|| {
         .expect("SKILL template is valid");
     tera.add_raw_template("cursor-rule.mdc", CURSOR_RULE_TPL)
         .expect("cursor rule template is valid");
+    tera.add_raw_template("opencode-agent.md", OPENCODE_AGENT_TPL)
+        .expect("opencode agent template is valid");
+    tera.add_raw_template("copilot-instructions.md", COPILOT_INSTRUCTIONS_TPL)
+        .expect("copilot instructions template is valid");
     // json_encode is built into Tera; nothing custom to register.
     tera
 });
@@ -207,6 +213,28 @@ pub fn render_targets(
                 out.push(GeneratedFileOutput {
                     rel_path: format!(".codex/skills/{name}/SKILL.md"),
                     contents: skill,
+                });
+            }
+            Target::OpenCode => {
+                // OpenCode: .opencode/agents/<name>.md with `description`
+                // (required) + `mode` frontmatter. Per opencode.ai/docs/agents.
+                let agent = TERA
+                    .render("opencode-agent.md", &ctx)
+                    .context("rendering opencode-agent.md")?;
+                out.push(GeneratedFileOutput {
+                    rel_path: format!(".opencode/agents/{name}.md"),
+                    contents: agent,
+                });
+            }
+            Target::Copilot => {
+                // GitHub Copilot: .github/copilot-instructions.md — plain
+                // markdown, no frontmatter. Per docs.github.com/copilot.
+                let instr = TERA
+                    .render("copilot-instructions.md", &ctx)
+                    .context("rendering copilot-instructions.md")?;
+                out.push(GeneratedFileOutput {
+                    rel_path: ".github/copilot-instructions.md".to_string(),
+                    contents: instr,
                 });
             }
         }

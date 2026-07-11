@@ -1,8 +1,6 @@
 ---
-name: skillpack
 description: "Generate and verify the agent-distribution layer for any OSS project"
-when_to_use: "generate a claude code skill pack, verify agent-discoverability of a CLI or library, scaffold claude plugin distribution files"
-allowed-tools: Read Bash
+mode: subagent
 ---
 
 # skillpack
@@ -11,7 +9,7 @@ Generate and verify the agent-distribution layer for any OSS project
 
 ## When to use
 
-Invoke this skill when the user's task matches any of these triggers:
+Invoke this agent when the user's task matches any of these triggers:
 
 - generate a claude code skill pack
 - verify agent-discoverability of a CLI or library
@@ -19,8 +17,8 @@ Invoke this skill when the user's task matches any of these triggers:
 
 ## When NOT to use
 
-- Do not use this skill if the user only wants to *read* or *inspect* skillpack without performing an action — prefer reading docs directly.
-- Do not use this skill for tasks outside the Rust tooling it was built for.
+- Do not use this agent if the user only wants to *read* or *inspect* skillpack without performing an action — prefer reading docs directly.
+- Do not use this agent for tasks outside the Rust tooling it was built for.
 
 ## Installation
 

@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::types::{Language, ProjectProfile};
+use crate::types::{DiagTrace, Language, ProjectProfile};
 
 /// Hard cap on the `--help` spawn. A CLI that can't print its help in 5s is
 /// not something we want an agent invoking anyway, so this protects both the
@@ -31,14 +31,29 @@ const README_HEAD_LINES: usize = 500;
 pub fn introspect(root: &Path) -> Result<ProjectProfile> {
     anyhow::ensure!(root.is_dir(), "{} is not a directory", root.display());
 
-    let language = detect_language(root);
-    let manifest_name = project_manifest_name(root, language);
+    let mut diag = DiagTrace::default();
+
+    let language = detect_language(root, &mut diag);
+    let mut manifest_name = project_manifest_name(root, language);
+    // A workspace-only root (no [package]) has no name of its own; its CLI
+    // lives in a member. Probe the first member with a name so `detect_cli`
+    // (which needs a name to probe candidates) actually walks the workspace
+    // rather than bailing at the name gate. The member name also becomes the
+    // profile name — the tool the agent discovers — so downstream files key
+    // off the right binary.
+    if manifest_name.is_none() {
+        if language == Language::Rust && is_cargo_workspace_only(root) {
+            manifest_name = first_cargo_member_name(root, &mut diag);
+        } else if language == Language::Node && is_npm_workspace_only(root) {
+            manifest_name = first_npm_member_name(root, &mut diag);
+        }
+    }
     let repo_url = detect_repo_url(root);
     let license = detect_license(root).or_else(|| manifest_license(root, language));
     let version = project_manifest_version(root, language);
     let authors = project_manifest_authors(root, language).map(strip_author_email);
     let description_hint = read_readme_hint(root);
-    let d = detect_cli(root, language, manifest_name.clone());
+    let d = detect_cli(root, language, manifest_name.clone(), &mut diag);
     let has_cli = d.has_cli;
     let cli_command = d.command;
     let cli_help_output = d.help_output;
@@ -68,6 +83,7 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
         cli_command,
         cli_help_output,
         cli_subcommand_help,
+        diag,
         repo_url,
         license,
         version,
@@ -76,11 +92,32 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
     })
 }
 
-/// Detect the dominant language by checking for known manifests.
-pub fn detect_language(root: &Path) -> Language {
+/// Detect the dominant language by checking for known manifests. Each falsy
+/// branch (manifest absent) pushes a `DiagNote` so `skillpack doctor` can
+/// explain why an `Unknown` language came out, and the workspace-only edge
+/// case (a `Cargo.toml` with `[workspace]` members but no `[package]`)
+/// surfaces as a note pointing at member walking.
+fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
     if root.join("Cargo.toml").exists() {
+        // A workspace-only `Cargo.toml` (no `[package]`) has no binary of its
+        // own; its members may. Push a note so doctor explains the walk below.
+        let is_workspace_only = is_cargo_workspace_only(root);
+        if is_workspace_only {
+            diag.push(
+                "detect_language.rust",
+                "Cargo.toml found but it is workspace-only (no [package]); ".to_string()
+                    + "CLI detection will probe workspace members next",
+            );
+        }
         Language::Rust
     } else if root.join("package.json").exists() {
+        if is_npm_workspace_only(root) {
+            diag.push(
+                "detect_language.node",
+                "package.json found but it declares `workspaces` with no root bin; ".to_string()
+                    + "CLI detection will probe workspace packages next",
+            );
+        }
         Language::Node
     } else if root.join("pyproject.toml").exists()
         || root.join("setup.py").exists()
@@ -92,8 +129,268 @@ pub fn detect_language(root: &Path) -> Language {
     } else if root.join("Gemfile").exists() || has_gemspec(root) {
         Language::Ruby
     } else {
+        diag.push(
+            "detect_language",
+            "no known manifest found (none of: Cargo.toml, package.json, ".to_string()
+                + "pyproject.toml, setup.py, setup.cfg, go.mod, Gemfile, *.gemspec); "
+                + "language detected as Unknown",
+        );
         Language::Unknown
     }
+}
+
+/// True iff `Cargo.toml` at `root` has a `[workspace]` table but no
+/// `[package]` table. A pure workspace root ships no binary of its own;
+/// its members may. Used by the diag-trace path, not detection itself.
+fn is_cargo_workspace_only(root: &Path) -> bool {
+    let Ok(raw) = fs::read_to_string(root.join("Cargo.toml")) else {
+        return false;
+    };
+    let Ok(v) = toml::from_str::<toml::Value>(&raw) else {
+        return false;
+    };
+    v.get("workspace").is_some() && v.get("package").is_none()
+}
+
+/// True iff `package.json` at `root` has a `workspaces` field but no `bin`.
+fn is_npm_workspace_only(root: &Path) -> bool {
+    let Some(raw) = fs::read_to_string(root.join("package.json")).ok() else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    v.get("workspaces").is_some() && v.get("bin").is_none()
+}
+/// True iff `pyproject.toml` at `root` has a `[tool.<name>]` table.
+/// Detects uv (`[tool.uv]`) and poetry (`[tool.poetry]`) managed monorepos
+/// so doctor can explain the "not yet walked" gap.
+fn pyproject_has_tool(root: &Path, name: &str) -> bool {
+    let Some(raw) = fs::read_to_string(root.join("pyproject.toml")).ok() else {
+        return false;
+    };
+    let Ok(v) = toml::from_str::<toml::Value>(&raw) else {
+        return false;
+    };
+    v.get("tool").and_then(|t| t.get(name)).is_some()
+}
+/// First `[package].name` from a Cargo workspace member dir. Mirrors the
+/// parse in [`walk_cargo_workspace`] but stops at name resolution (no
+/// candidate/spawn probe) — used by [`introspect`] so `detect_cli` gets a
+/// name to probe. Returns `None` if no member has a `[package].name`.
+fn first_cargo_member_name(root: &Path, diag: &mut DiagTrace) -> Option<String> {
+    let raw = fs::read_to_string(root.join("Cargo.toml")).ok()?;
+    let v = toml::from_str::<toml::Value>(&raw).ok()?;
+    let members = v.get("workspace")?.get("members")?.as_array()?;
+    for m in members {
+        let Some(rel) = m.as_str() else { continue };
+        let member_root = root.join(rel);
+        let name = fs::read_to_string(member_root.join("Cargo.toml"))
+            .ok()
+            .and_then(|r| toml::from_str::<toml::Value>(&r).ok())
+            .and_then(|mv| {
+                mv.get("package")
+                    .and_then(|p| p.get("name"))
+                    .and_then(|n| n.as_str())
+                    .map(String::from)
+            });
+        if let Some(n) = name {
+            diag.push(
+                "detect_language.rust.workspace",
+                format!("workspace member `{rel}` supplied tool name `{n}`"),
+            );
+            return Some(n);
+        }
+    }
+    diag.push(
+        "detect_language.rust.workspace",
+        "no workspace member has a [package].name — name fell back to dir tail".to_string(),
+    );
+    None
+}
+
+/// First `name` from an npm workspace member `package.json`. Mirrors
+/// [`walk_npm_workspace`] but stops at name resolution. Returns `None` if no
+/// member has a `name` field.
+fn first_npm_member_name(root: &Path, diag: &mut DiagTrace) -> Option<String> {
+    let raw = fs::read_to_string(root.join("package.json")).ok()?;
+    let v = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    let ws = v.get("workspaces")?;
+    let paths: Vec<String> = match ws {
+        serde_json::Value::String(s) => vec![s.clone()],
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|e| e.as_str().map(String::from))
+            .collect(),
+        _ => return None,
+    };
+    for rel in paths {
+        let pkg = root.join(&rel).join("package.json");
+        let name = fs::read_to_string(&pkg)
+            .ok()
+            .and_then(|r| serde_json::from_str::<serde_json::Value>(&r).ok())
+            .and_then(|mv| mv.get("name").and_then(|n| n.as_str()).map(String::from));
+        if let Some(n) = name {
+            diag.push(
+                "detect_language.node.workspace",
+                format!("workspace member `{rel}` supplied tool name `{n}`"),
+            );
+            return Some(n);
+        }
+    }
+    diag.push(
+        "detect_language.node.workspace",
+        "no workspace member has a package.json `name` — name fell back to dir tail".to_string(),
+    );
+    None
+}
+
+/// Walk a Cargo workspace's members looking for a crate with a CLI binary.
+/// Parses `Cargo.toml` `[workspace].members` (literal paths only — globs
+/// not expanded, keeping V1 simple), then for each `members/<m>` probes
+/// `primary_cli_candidate` against the member's `[package].name`. Pushes a
+/// diag note per member tried so doctor explains the walk; returns `Some`
+/// on the first member that yields a runnable CLI, `None` if none do.
+fn walk_cargo_workspace(root: &Path, _name: &str, diag: &mut DiagTrace) -> Option<DetectCli> {
+    let raw = fs::read_to_string(root.join("Cargo.toml")).ok()?;
+    let v = toml::from_str::<toml::Value>(&raw).ok()?;
+    let members = v.get("workspace")?.get("members")?.as_array()?;
+    diag.push(
+        "detect_cli.rust.workspace",
+        format!(
+            "Cargo workspace root — {} member(s) to probe",
+            members.len()
+        ),
+    );
+    for m in members {
+        let Some(member_rel) = m.as_str() else {
+            continue;
+        };
+        let member_root = root.join(member_rel);
+        if !member_root.join("Cargo.toml").is_file() {
+            diag.push(
+                "detect_cli.rust.workspace",
+                format!("member `{member_rel}` has no Cargo.toml — skipped"),
+            );
+            continue;
+        }
+        // Prefer the member's own [package].name; fall back to the dir tail.
+        let member_name = fs::read_to_string(member_root.join("Cargo.toml"))
+            .ok()
+            .and_then(|r| toml::from_str::<toml::Value>(&r).ok())
+            .and_then(|v| {
+                v.get("package")
+                    .and_then(|p| p.get("name"))
+                    .and_then(|n| n.as_str())
+                    .map(String::from)
+            })
+            .or_else(|| {
+                member_root
+                    .file_name()
+                    .map(|f| f.to_string_lossy().into_owned())
+            })?;
+        match primary_cli_candidate(&member_root, Language::Rust, &member_name) {
+            Some(candidate) => {
+                diag.push(
+                    "detect_cli.rust.workspace",
+                    format!(
+                        "member `{member_rel}` yielded candidate `{}`",
+                        candidate.argv.join(" ")
+                    ),
+                );
+                return Some(spawn_candidate(&candidate, diag));
+            }
+            None => diag.push(
+                "detect_cli.rust.workspace",
+                format!("member `{member_rel}` (`{member_name}`): no built/installed artifact"),
+            ),
+        }
+    }
+    diag.push(
+        "detect_cli.rust.workspace",
+        "no workspace member yielded a runnable CLI — has_cli=false \
+         (run `skillpack init` inside the member crate that ships the binary)"
+            .to_string(),
+    );
+    None
+}
+
+/// Walk an npm workspace's members (literal `workspaces` paths, no globs)
+/// looking for a package with a `bin`. Parses `package.json` `workspaces`
+/// (string or array of strings). Returns `Some` on the first member that
+/// yields a runnable CLI; `None` otherwise. Pushes a diag note per member.
+fn walk_npm_workspace(root: &Path, _name: &str, diag: &mut DiagTrace) -> Option<DetectCli> {
+    let raw = fs::read_to_string(root.join("package.json")).ok()?;
+    let v = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    let ws = v.get("workspaces")?;
+    let paths: Vec<String> = match ws {
+        serde_json::Value::String(s) => vec![s.clone()],
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|e| e.as_str().map(String::from))
+            .collect(),
+        _ => return None,
+    };
+    diag.push(
+        "detect_cli.node.workspace",
+        format!("npm workspace root — {} member(s) to probe", paths.len()),
+    );
+    for member_rel in paths {
+        let member_root = root.join(&member_rel);
+        let pkg_json = member_root.join("package.json");
+        if !pkg_json.is_file() {
+            diag.push(
+                "detect_cli.node.workspace",
+                format!("member `{member_rel}` has no package.json — skipped"),
+            );
+            continue;
+        }
+        let Ok(mraw) = fs::read_to_string(&pkg_json) else {
+            continue;
+        };
+        let Ok(mv) = serde_json::from_str::<serde_json::Value>(&mraw) else {
+            continue;
+        };
+        let member_name = mv
+            .get("name")
+            .and_then(|n| n.as_str())
+            .map(String::from)
+            .or_else(|| {
+                member_root
+                    .file_name()
+                    .map(|f| f.to_string_lossy().into_owned())
+            })?;
+        if mv.get("bin").is_none() {
+            diag.push(
+                "detect_cli.node.workspace",
+                format!("member `{member_rel}` (`{member_name}`): no `bin` field — skipped"),
+            );
+            continue;
+        }
+        match primary_cli_candidate(&member_root, Language::Node, &member_name) {
+            Some(candidate) => {
+                diag.push(
+                    "detect_cli.node.workspace",
+                    format!(
+                        "member `{member_rel}` yielded candidate `{}`",
+                        candidate.argv.join(" ")
+                    ),
+                );
+                return Some(spawn_candidate(&candidate, diag));
+            }
+            None => diag.push(
+                "detect_cli.node.workspace",
+                format!("member `{member_rel}` (`{member_name}`): candidate None (node missing?)"),
+            ),
+        }
+    }
+    diag.push(
+        "detect_cli.node.workspace",
+        "no workspace member yielded a runnable CLI — has_cli=false \
+         (run `skillpack init` inside the member package that ships the bin)"
+            .to_string(),
+    );
+    None
 }
 
 /// True if the root contains any `*.gemspec` file.
@@ -340,19 +637,78 @@ fn strip_author_email(author: String) -> String {
 /// in declaration order, so the generated SKILL.md can document the real
 /// command surface and `verify` can drift-check it. Empty for non-subcommand
 /// CLIs — a flat `--help` yields no `Commands:` section.
-fn detect_cli(root: &Path, language: Language, name: Option<String>) -> DetectCli {
+///
+/// Every falsy branch (no name, no root candidate, spawn failure) pushes a
+/// `DiagNote` so `skillpack doctor` explains why `has_cli=false` rather than
+/// silently reporting it. Workspace-only roots (Cargo `[workspace]` only,
+/// npm `workspaces` no `bin`) trigger a member walk before giving up.
+fn detect_cli(
+    root: &Path,
+    language: Language,
+    name: Option<String>,
+    diag: &mut DiagTrace,
+) -> DetectCli {
     let Some(name) = name else {
+        diag.push(
+            "detect_cli",
+            "no tool name derivable from the manifest or repo; ".to_string()
+                + "cannot probe for a CLI without a name",
+        );
         return DetectCli::none();
     };
 
     let Some(candidate) = primary_cli_candidate(root, language, &name) else {
-        // No runnable CLI could be established on this machine (e.g. the
-        // language runtime — `go`/`ruby` — isn't installed). We honestly
-        // report `has_cli = false` rather than guessing; the maintainer gets
-        // the pure-library interview path, which is the safe default.
+        // The root didn't yield a runnable CLI. For workspace roots the binary
+        // lives in a member crate/package; walk members before reporting a
+        // final `has_cli=false`. uv/poetry monorepos are NOT walked yet —
+        // doctor notes the gap so the maintainer can run init in the member.
+        if language == Language::Rust && is_cargo_workspace_only(root) {
+            if let Some(d) = walk_cargo_workspace(root, &name, diag) {
+                return d;
+            }
+        }
+        if language == Language::Node && is_npm_workspace_only(root) {
+            if let Some(d) = walk_npm_workspace(root, &name, diag) {
+                return d;
+            }
+        }
+        diag.push(
+            "detect_cli",
+            format!(
+                "primary_cli_candidate for language `{}` returned None — \
+                 runtime may be missing, no build artifact present, or no bin \
+                 entry point. Run `skillpack doctor --verbose` to see the raw \
+                 profile; if this is a monorepo member, try running \
+                 `skillpack init` inside the member directory.",
+                language.as_str()
+            ),
+        );
+        // uv / poetry Python monorepo: explicitly NOT walked yet.
+        if language == Language::Python
+            && (root.join("uv.toml").exists()
+                || pyproject_has_tool(root, "uv")
+                || pyproject_has_tool(root, "poetry"))
+        {
+            diag.push(
+                "detect_cli.python",
+                "uv/poetry workspace detected; member walking not yet \
+                 implemented — run `skillpack init` in the member package dir"
+                    .to_string(),
+            );
+        }
         return DetectCli::none();
     };
+    spawn_candidate(&candidate, diag)
+}
 
+/// Build the `--help` command from `candidate`, spawn it under the hard
+/// timeout, and map the outcome to a `DetectCli`. Pushes a diag note on
+/// every non-clean outcome so `doctor` explains timeouts/non-zero/missing.
+/// Returns `DetectCli::none()` when the spawn can't run at all (NotFound /
+/// SpawnFailed), `has_cli=true` with `help_output=None` on a RanNonZero or
+/// TimedOut result (the binary exists and responded — it's a CLI — but the
+/// help text wasn't captured).
+fn spawn_candidate(candidate: &CliCandidate, diag: &mut DiagTrace) -> DetectCli {
     // Build the spawn command from the multi-token argv (program + args, minus
     // `--help`), then append `--help` for the help capture.
     let mut command = candidate.argv.clone();
@@ -376,7 +732,7 @@ fn detect_cli(root: &Path, language: Language, name: Option<String>) -> DetectCl
             // global flags). Best-effort: a subcommand that fails/times out is
             // omitted here — `verify` surfaces the gap if the skill documents
             // a subcommand we couldn't capture.
-            let subs = capture_subcommand_help(&candidate, &output);
+            let subs = capture_subcommand_help(candidate, &output);
             DetectCli {
                 has_cli: true,
                 command: Some(command),
@@ -384,24 +740,58 @@ fn detect_cli(root: &Path, language: Language, name: Option<String>) -> DetectCl
                 subcommand_help: subs,
             }
         }
-        SpawnOutcome::RanNonZero => DetectCli {
-            has_cli: true,
-            command: Some(command),
-            help_output: None,
-            subcommand_help: Vec::new(),
-        },
-        SpawnOutcome::TimedOut => DetectCli {
-            has_cli: true,
-            command: Some(command),
-            help_output: None,
-            subcommand_help: Vec::new(),
-        },
-        SpawnOutcome::NotFound => DetectCli::none(),
+        SpawnOutcome::RanNonZero => {
+            diag.push(
+                "detect_cli",
+                format!(
+                    "`{} --help` exited non-zero; help output not captured",
+                    command.join(" ")
+                ),
+            );
+            DetectCli {
+                has_cli: true,
+                command: Some(command),
+                help_output: None,
+                subcommand_help: Vec::new(),
+            }
+        }
+        SpawnOutcome::TimedOut => {
+            diag.push(
+                "detect_cli",
+                format!(
+                    "`{} --help` timed out after {HELP_TIMEOUT:?}",
+                    command.join(" ")
+                ),
+            );
+            DetectCli {
+                has_cli: true,
+                command: Some(command),
+                help_output: None,
+                subcommand_help: Vec::new(),
+            }
+        }
+        SpawnOutcome::NotFound => {
+            diag.push(
+                "detect_cli",
+                format!(
+                    "spawn failed — `{}` binary not found on PATH",
+                    command.first().unwrap_or(&candidate.argv[0])
+                ),
+            );
+            DetectCli::none()
+        }
         // ponytail: permission-denied etc. are rare; mapping to `none()`
         // means `has_cli=false` (pure-library path) rather than crashing.
         // verify's spawn will then surface the gap downstream if the CLI IS
         // documented. The honest path for V1 — doesn't crash.
-        SpawnOutcome::SpawnFailed(_) => DetectCli::none(),
+        SpawnOutcome::SpawnFailed(_) => {
+            diag.push(
+                "detect_cli",
+                "spawn failed (permission-denied or OS error); treated as has_cli=false"
+                    .to_string(),
+            );
+            DetectCli::none()
+        }
     }
 }
 
@@ -814,6 +1204,7 @@ impl ProjectProfile {
             cli_command: None,
             cli_help_output: None,
             cli_subcommand_help: Vec::new(),
+            diag: DiagTrace::default(),
             repo_url: None,
             license: None,
             version: None,
