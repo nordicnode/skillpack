@@ -897,8 +897,16 @@ fn primary_cli_candidate(root: &Path, language: Language, name: &str) -> Option<
 /// verify spawns from a temp dir). Falls back to a PATH probe for an installed
 /// bin, then to the dir-derived name.
 fn rust_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    // On Windows `cargo build` writes `<name>.exe`, not bare `<name>`, so a
+    // plain `join(name)` misses the artifact. Probe the platform-appropriate
+    // filename; Unix has no executable extension.
+    let bin_name = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    };
     for profile in &["release", "debug"] {
-        let p = root.join("target").join(profile).join(name);
+        let p = root.join("target").join(profile).join(&bin_name);
         if p.exists() {
             // Canonicalize so the stored argv survives a later cwd change (the
             // pre-commit verify spawns from a temp dir). Falls back to the
@@ -914,7 +922,8 @@ fn rust_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
         }
     }
     // A package may rename its bin via [[bin]] name; falling back to the
-    // directory-derived name on PATH is acceptable for introspection.
+    // dir-derived name on PATH is acceptable for introspection. which_on_path
+    // already appends PATHEXT on Windows so the PATH probe resolves `.exe`.
     which_on_path(name).map(|p| CliCandidate {
         argv: vec![p.to_string_lossy().to_string()],
         spawn_cwd: root.to_path_buf(),

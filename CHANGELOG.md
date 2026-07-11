@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.6.3] - 2026-07-11
+
+### Fixed — Windows rust CLI detection
+
+- **`rust_cli_candidate` missed built artifacts on Windows**. The fn joined
+  `target/{release,debug}/<name>` with the bare name, but `cargo build` on
+  Windows writes `<name>.exe`. `p.exists()` returned false → `has_cli=false`
+  on a real built CLI → `doctor` falsely reported no CLI and `verify`'s
+  invocation checks descended into the `not_runnable_here` warning path +
+  critical gate failure, refusing to write init output on Windows. Now
+  appends `.exe` on Windows (`cfg!`), leaves Unix untouched. The PATH
+  fallback already handles PATHEXT via `which_on_path`.
+
 ## [0.6.2] - 2026-07-11
 
 ### Fixed — Windows build correctness
