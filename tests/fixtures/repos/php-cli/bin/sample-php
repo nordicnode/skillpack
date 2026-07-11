@@ -1,0 +1,8 @@
+#!/usr/bin/env php
+<?php
+$opts = array_slice($argv, 1);
+if (in_array("--help", $opts)) {
+    echo "Usage: sample-php [--new <entry>] [--verbose]\n";
+    exit(0);
+}
+echo "sample-php\n";

@@ -844,6 +844,76 @@ fn ruby_cli_init_then_verify_round_trip() {
     assert_eq!(v["plugins"][0]["name"], "sample-ruby");
 }
 
+fn php_available() -> bool {
+    std::process::Command::new("php")
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[test]
+#[ignore = "requires `php` on PATH; runs on CI via --include-ignored"]
+fn php_cli_init_then_verify_round_trip() {
+    if !php_available() {
+        eprintln!("skipped: php not on PATH");
+        return;
+    }
+    let root = copy_fixture("php-cli");
+    let toml = "[skill]\n\
+        name = \"sample-php\"\n\
+        one_line_description = \"Print a journal entry from PHP\"\n\
+        when_to_use_phrases = [\"log a php entry\", \"record a quick note\"]\n\
+        invocation_command = \"sample-php --new \\\"entry\\\"\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".claude-plugin/plugin.json").exists());
+    assert!(root.join("skills/sample-php/SKILL.md").exists());
+
+    let skill = fs::read_to_string(root.join("skills/sample-php/SKILL.md")).unwrap();
+    assert!(skill.contains("## Invocation"));
+    assert!(!skill.contains("## Usage"));
+
+    // verify must pass — the real `php <abs script> --help` invocation
+    // check spawned from the project root.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify OK"))
+        .stdout(predicate::str::contains(
+            "documented `--help` runs and produces output",
+        ))
+        .stdout(predicate::str::contains(
+            "every documented flag exists in `--help`",
+        ));
+
+    let mp = fs::read_to_string(root.join(".claude-plugin/marketplace.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
+    assert_eq!(v["plugins"][0]["source"], "./");
+    assert_eq!(v["plugins"][0]["name"], "sample-php");
+}
+
 // Subcommand-drift e2e: the subcommand-cli fixture prints a clap-shaped
 // `Commands:` section in `--help` and per-subcommand `--help` with distinct
 // flags. `capture_subcommand_help` (introspect) captures each sub's help;

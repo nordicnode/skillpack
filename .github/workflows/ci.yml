@@ -55,6 +55,9 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
 
       - name: fmt --check
         run: cargo fmt --check

@@ -190,3 +190,13 @@ fn snapshot_cli_copilot_instructions() {
         .unwrap();
     insta::assert_snapshot!("copilot_cli", instr.contents);
 }
+
+// PHP: verify Cursor globs derive from Language::Php (locks *.php + composer.json).
+#[test]
+fn snapshot_php_cursor_globs() {
+    let mut p = cli_profile();
+    p.language = Language::Php;
+    let files = render_targets(&p, &cli_intent(), &[Target::Cursor]).unwrap();
+    let mdc = files.iter().find(|f| f.rel_path.ends_with(".mdc")).unwrap();
+    insta::assert_snapshot!("cursor_php", mdc.contents);
+}

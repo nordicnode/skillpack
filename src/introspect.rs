@@ -122,13 +122,15 @@ fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
         Language::Python
     } else if root.join("go.mod").exists() {
         Language::Go
+    } else if root.join("composer.json").exists() {
+        Language::Php
     } else if root.join("Gemfile").exists() || has_gemspec(root) {
         Language::Ruby
     } else {
         diag.push(
             "detect_language",
             "no known manifest found (none of: Cargo.toml, package.json, ".to_string()
-                + "pyproject.toml, setup.py, setup.cfg, go.mod, Gemfile, *.gemspec); "
+                + "pyproject.toml, setup.py, setup.cfg, go.mod, composer.json, Gemfile, *.gemspec); "
                 + "language detected as Unknown",
         );
         Language::Unknown
@@ -488,6 +490,13 @@ fn project_manifest_name(root: &Path, language: Language) -> Option<String> {
             }
             None
         }
+        Language::Php => {
+            let raw = fs::read_to_string(root.join("composer.json")).ok()?;
+            let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+            v.get("name")?
+                .as_str()
+                .map(std::string::ToString::to_string)
+        }
         Language::Unknown => None,
     }
 }
@@ -546,6 +555,13 @@ fn project_manifest_version(root: &Path, language: Language) -> Option<String> {
                 }
             }
             None
+        }
+        Language::Php => {
+            let raw = fs::read_to_string(root.join("composer.json")).ok()?;
+            let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+            v.get("version")?
+                .as_str()
+                .map(std::string::ToString::to_string)
         }
         Language::Go | Language::Unknown => None,
     }
@@ -619,6 +635,20 @@ fn project_manifest_authors(root: &Path, language: Language) -> Option<String> {
                 }
             }
             None
+        }
+        Language::Php => {
+            let raw = fs::read_to_string(root.join("composer.json")).ok()?;
+            let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+            // composer.json "authors" is [{"name": "...", "email": "..."}]
+            v.get("authors")
+                .and_then(|a| a.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|e| {
+                    e.get("name")
+                        .and_then(|n| n.as_str())
+                        .or_else(|| e.as_str())
+                })
+                .map(|s| s.to_string())
         }
         Language::Go | Language::Unknown => None,
     }
@@ -885,6 +915,7 @@ fn primary_cli_candidate(root: &Path, language: Language, name: &str) -> Option<
         Language::Go => go_cli_candidate(root, name),
         Language::Python => python_cli_candidate(root, name),
         Language::Ruby => ruby_cli_candidate(root, name),
+        Language::Php => php_cli_candidate(root, name),
         Language::Unknown => which_on_path(name).map(|_| CliCandidate {
             argv: vec![name.to_string()],
             spawn_cwd: root.to_path_buf(),
@@ -1072,6 +1103,42 @@ fn ruby_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
         }
     }
     None
+}
+
+/// PHP: a `composer.json` `bin` field (string or object) points at a PHP
+/// script. Resolve to an absolute path and run `php <abs script>` so the
+/// project's CLI works uninstalled and survives a cwd change. Requires `php`
+/// on PATH (honest `None` otherwise). Mirrors [`node_cli_candidate`].
+fn php_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let php = which_on_path("php")?;
+    let php_bin = php.to_string_lossy().to_string();
+    let raw = fs::read_to_string(root.join("composer.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let bin = v.get("bin")?;
+    // `bin` may be a string ("./bin/cli.php") or an object mapping name → script.
+    // Pick the entry keyed by the tool name if present, otherwise the first script.
+    let script = match bin {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Object(map) => map
+            .get(name)
+            .and_then(|v| v.as_str())
+            .or_else(|| map.iter().next().and_then(|(_, v)| v.as_str()))?
+            .to_string(),
+        // composer.json `bin` may also be an array of paths; pick the first.
+        serde_json::Value::Array(arr) => arr.first()?.as_str()?.to_string(),
+        _ => return None,
+    };
+    if script.trim().is_empty() {
+        return None;
+    }
+    // Resolve to an absolute path so `php <abs script> --help` works whether
+    // or not the package is installed, and survives the temp-dir spawn cwd.
+    let script_path = root.join(&script);
+    let abs_script = canonicalize_for_argv(&script_path);
+    Some(CliCandidate {
+        argv: vec![php_bin, abs_script],
+        spawn_cwd: root.to_path_buf(),
+    })
 }
 
 /// Canonicalize a path and strip the `\\?\` verbatim-UNC prefix that

@@ -98,6 +98,7 @@ pub enum Language {
     Python,
     Go,
     Ruby,
+    Php,
     Unknown,
 }
 
@@ -109,6 +110,7 @@ impl Language {
             Self::Python => "python",
             Self::Go => "go",
             Self::Ruby => "ruby",
+            Self::Php => "php",
             Self::Unknown => "unknown",
         }
     }
