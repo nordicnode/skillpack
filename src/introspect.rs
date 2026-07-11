@@ -1731,6 +1731,31 @@ mod candidate_tests {
         assert!(cand.is_none());
         cleanup(&root);
     }
+
+    #[test]
+    fn csharp_candidate_uses_dotnet_run_with_dash_dash_separator() {
+        if which_on_path("dotnet").is_none() {
+            return;
+        }
+        let csproj = r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+"#;
+        let root = scratch_root(&[("sample.csproj", csproj)]);
+        let cand = primary_cli_candidate(&root, Language::CSharp, "sample").unwrap();
+        // The trailing "--" separates dotnet's flags from the app's argv
+        // so an appended --help reaches the app, not dotnet.
+        assert_eq!(cand.argv[0], "dotnet");
+        assert_eq!(cand.argv[1], "run");
+        assert_eq!(cand.argv[2], "--project");
+        assert!(cand.argv[3].ends_with("sample.csproj"));
+        assert_eq!(cand.argv[4], "--");
+        assert_eq!(cand.spawn_cwd, root);
+        cleanup(&root);
+    }
 }
 
 #[cfg(test)]
