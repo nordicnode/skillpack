@@ -5,6 +5,40 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.7.0] - 2026-07-11
+
+### Added — multi-ecosystem depth + language coverage
+
+- Two new **language** ecosystems: PHP (`composer.json`) and JVM (Maven
+  `pom.xml` + Gradle `build.gradle`/`.kts`). Introspection detects manifests,
+  extracts name/version/authors, and resolves CLI candidates (`php_cli_candidate`
+  mirrors `node_cli_candidate` with `php` runtime + `bin` script resolution;
+  `jvm_cli_candidate` probes pre-built Gradle `installDist` scripts + Maven/
+  Gradle shaded jars — no build invocation, pure filesystem reads per design
+  §6.3). Cursor globs derive from language: PHP `["*.php", "composer.json"]`,
+  JVM `["*.java", "*.kt", "*.scala", "pom.xml", "build.gradle",
+  "build.gradle.kts"]`.
+- **Cursor `globs` frontmatter** now derived from detected language for
+  auto-attach (was missing entirely — generated Cursor rules wouldn't
+  trigger on real work).
+- **OpenCode `mode` frontmatter** now derived from project shape (`primary`
+  for CLI tools, `subagent` for libraries); previously hardcoded `subagent`.
+- **Template refactor**: 4 near-identical ecosystem templates → shared
+  `skill_body.md.tera` partial + per-target frontmatter-only wrappers.
+  Adding a 6th `Target` is now ~10 lines instead of ~60.
+- New insta snapshots for Cursor, OpenCode, Copilot, PHP-Cursor, JVM-Cursor
+  lock rendered output from regression.
+- CI matrix adds `setup-php` and `setup-java` for cross-OS runtime coverage
+  on `--include-ignored` round-trip tests.
+
+### Changed
+
+- `Language::Php`, `Language::Jvm` variants extend the `Language` enum and
+  every match site (`category_hint`, `cursor_globs_hint`, introspect
+  `detect_language`, manifest name/version/authors, `primary_cli_candidate`).
+- `cli.rs` `about` string updated to name all 5 agent ecosystems (was
+  leaking "Claude Code skill packs" into `--help`).
+
 ## [0.6.4] - 2026-07-11
 
 ### Fixed — Windows spawn + report normalization

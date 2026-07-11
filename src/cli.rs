@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
     name = "skillpack",
     bin_name = "skillpack",
     version,
-    about = "Generate and verify the agent-distribution layer (Claude Code skill packs) for any OSS project."
+    about = "Generate and verify the agent-distribution layer for any OSS project (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot)."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -76,7 +76,7 @@ pub enum Commands {
 }
 
 /// Which agent ecosystem to generate distribution files for.
-/// See design §3 (non-goals) and §10 (Phase 4: multi-ecosystem).
+/// Per design §10 (Phase 4: multi-ecosystem delivery).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum, Default)]
 pub enum Target {
     /// Claude Code: `.claude-plugin/` + `skills/<name>/SKILL.md`.
