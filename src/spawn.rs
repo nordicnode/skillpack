@@ -16,6 +16,11 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Hard cap on the `--help` spawn shared by `introspect` and `verify::invocation`.
+/// A CLI that can't print its help in 8s is not something we want an agent
+/// invoking anyway, so this protects both the tool and the agent downstream.
+pub const HELP_TIMEOUT: Duration = Duration::from_secs(8);
+
 /// Outcome of a guarded spawn — mirrors the old `SpawnOutcome` in
 /// `introspect.rs`, shared so both call sites agree on semantics.
 #[derive(Debug, Clone, PartialEq, Eq)]

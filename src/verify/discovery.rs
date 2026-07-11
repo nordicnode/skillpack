@@ -53,25 +53,55 @@ pub fn run(root: &Path) -> Result<Vec<CheckResult>> {
 
     // Codex CLI: `.codex/skills/<name>/SKILL.md` — same frontmatter shape as
     // Claude, different output path and check_id prefix.
-    for skill_path in find_codex_skill_files(root) {
-        out.push(check_one_skill_md(
-            root,
-            &skill_path,
-            "discovery.codex.skill",
-        )?);
+    let codex_skills = find_codex_skill_files(root);
+    if codex_skills.is_empty() && root.join(schema::CODEX_SKILLS_DIR).is_dir() {
+        out.push(CheckResult::fail(
+            "discovery.codex.skill.missing",
+            "at least one Codex skill exists",
+            ".codex/skills/ exists but contains no SKILL.md",
+            "To fix: run `skillpack init --target codex` or add a skill under .codex/skills/<name>/SKILL.md.",
+        ));
+    } else {
+        for skill_path in codex_skills {
+            out.push(check_one_skill_md(
+                root,
+                &skill_path,
+                "discovery.codex.skill",
+            )?);
+        }
     }
 
     // Cursor: `.cursor/rules/<name>.mdc` — distinct frontmatter
     // (`description` / `alwaysApply` / `globs`).
-    for mdc_path in find_cursor_mdc_files(root) {
-        out.push(check_one_mdc(root, &mdc_path)?);
+    let cursor_mdcs = find_cursor_mdc_files(root);
+    if cursor_mdcs.is_empty() && root.join(schema::CURSOR_RULES_DIR).is_dir() {
+        out.push(CheckResult::fail(
+            "discovery.cursor.mdc.missing",
+            "at least one Cursor rule exists",
+            ".cursor/rules/ exists but contains no .mdc file",
+            "To fix: run `skillpack init --target cursor` or add a rule under .cursor/rules/<name>.mdc.",
+        ));
+    } else {
+        for mdc_path in cursor_mdcs {
+            out.push(check_one_mdc(root, &mdc_path)?);
+        }
     }
 
     // OpenCode: `.opencode/agents/<name>.md` — frontmatter `description`
     // (required), `mode` (optional). Reuses the same `---`-delimited YAML
     // parser as Cursor.mdc; the per-key struct differs.
-    for agent_path in find_opencode_agent_files(root) {
-        out.push(check_one_opencode_agent(root, &agent_path)?);
+    let opencode_agents = find_opencode_agent_files(root);
+    if opencode_agents.is_empty() && root.join(schema::OPENCODE_AGENTS_DIR).is_dir() {
+        out.push(CheckResult::fail(
+            "discovery.opencode.agent.missing",
+            "at least one OpenCode agent exists",
+            ".opencode/agents/ exists but contains no agent file",
+            "To fix: run `skillpack init --target opencode` or add an agent under .opencode/agents/<name>.md.",
+        ));
+    } else {
+        for agent_path in opencode_agents {
+            out.push(check_one_opencode_agent(root, &agent_path)?);
+        }
     }
 
     // GitHub Copilot: `.github/copilot-instructions.md` — plain markdown,
@@ -914,6 +944,16 @@ fn check_copilot_instructions(root: &Path, path: &Path) -> Result<CheckResult> {
     let check_id = "discovery.copilot.instructions";
     let rel = path.strip_prefix(root).unwrap_or(path);
 
+    // The Copilot spec (see schema.rs) says "Plain markdown, no frontmatter."
+    // A file starting with `---` is a hard spec violation.
+    if raw.trim_start().starts_with("---") {
+        return Ok(CheckResult::fail(
+            check_id,
+            "Copilot instructions are plain markdown (no frontmatter)",
+            "file starts with a `---` frontmatter block",
+            "To fix: remove the frontmatter block. Copilot instructions are plain markdown.",
+        ));
+    }
     if raw.trim().is_empty() {
         return Ok(CheckResult::fail(
             check_id,

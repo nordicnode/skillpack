@@ -1505,3 +1505,303 @@ fn opencode_missing_frontmatter_fails_verify() {
         );
     }
 }
+
+/// A Copilot instructions file that starts with a `---` frontmatter block
+/// fails verify with `discovery.copilot.instructions` at fail severity.
+/// The Copilot spec (schema.rs) says "Plain markdown, no frontmatter."
+#[test]
+fn copilot_frontmatter_fails_verify() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--target",
+            "copilot",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Overwrite with a file that has a `---` frontmatter block.
+    fs::write(
+        root.join(".github/copilot-instructions.md"),
+        "---\ndescription: x\n---\n# Foo\n",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "verify must exit non-zero on frontmatter present, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let results = json["results"].as_array().unwrap();
+    let name = "discovery.copilot.instructions";
+    let matches: Vec<&serde_json::Value> =
+        results.iter().filter(|r| r["check_id"] == name).collect();
+    assert!(
+        !matches.is_empty(),
+        "verify must emit {name} result, got:\n{json}"
+    );
+    for r in &matches {
+        assert_eq!(
+            r["severity"], "fail",
+            "{name} must be fail severity, got:\n{json}"
+        );
+    }
+}
+
+/// An empty `.codex/skills/` directory (dir present, no SKILL.md) emits
+/// `discovery.codex.skill.missing` at fail severity. Regression guard for the
+/// empty-dir sentinel added alongside the existing Claude `discovery.skill.missing`.
+#[test]
+fn codex_empty_skills_dir_fails_verify() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--target",
+            "codex",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join(".codex/skills").is_dir());
+
+    // Wipe the generated SKILL.md, leaving `.codex/skills/` as an empty dir.
+    let skill_dir = root.join(".codex/skills/sample-rust");
+    fs::remove_file(skill_dir.join("SKILL.md")).unwrap();
+    fs::remove_dir(&skill_dir).unwrap();
+    assert!(root.join(".codex/skills").exists());
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "verify must exit non-zero on empty .codex/skills/, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let results = json["results"].as_array().unwrap();
+    let name = "discovery.codex.skill.missing";
+    let matches: Vec<&serde_json::Value> =
+        results.iter().filter(|r| r["check_id"] == name).collect();
+    assert!(
+        !matches.is_empty(),
+        "verify must emit {name} result, got:\n{json}"
+    );
+    for r in &matches {
+        assert_eq!(
+            r["severity"], "fail",
+            "{name} must be fail severity, got:\n{json}"
+        );
+    }
+}
+
+// --- All-5-targets round trip ------------------------------------------------
+
+#[test]
+fn all_five_targets_init_then_verify_round_trip() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--target",
+            "claude",
+            "--target",
+            "cursor",
+            "--target",
+            "codex",
+            "--target",
+            "opencode",
+            "--target",
+            "copilot",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // All 5 file types exist.
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".cursor/rules/sample-rust.mdc").exists());
+    assert!(root.join(".codex/skills/sample-rust/SKILL.md").exists());
+    assert!(root.join(".opencode/agents/sample-rust.md").exists());
+    assert!(root.join(".github/copilot-instructions.md").exists());
+
+    // Verify all 5 discovery check_ids have severity pass.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "verify must pass, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let results = json["results"].as_array().unwrap();
+    let expected_ids = [
+        "discovery.skill",
+        "discovery.codex.skill",
+        "discovery.cursor.mdc",
+        "discovery.opencode.agent",
+        "discovery.copilot.instructions",
+    ];
+    for id in &expected_ids {
+        let matches: Vec<&serde_json::Value> =
+            results.iter().filter(|r| r["check_id"] == *id).collect();
+        assert!(!matches.is_empty(), "verify must emit {id}, got:\n{json}");
+        for r in &matches {
+            assert_eq!(r["severity"], "pass", "{id} must be pass, got:\n{json}");
+        }
+    }
+}
+
+// --- discovery.empty on a bare repo -------------------------------------------
+
+#[test]
+fn verify_on_empty_repo_fails_with_discovery_empty() {
+    let root = copy_fixture("rust-cli");
+    // Build the binary so it exists, but do NOT run init.
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "verify on empty repo must fail");
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let results = json["results"].as_array().unwrap();
+    let matches: Vec<&serde_json::Value> = results
+        .iter()
+        .filter(|r| r["check_id"] == "discovery.empty")
+        .collect();
+    assert!(
+        !matches.is_empty(),
+        "must emit discovery.empty, got:\n{json}"
+    );
+    assert_eq!(matches[0]["severity"], "fail");
+}
+
+// --- Self-dogfood verifies all 5 ecosystems -----------------------------------
+
+#[test]
+fn self_dogfood_verify_asserts_all_five_ecosystems() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "self-dogfood verify must pass, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let results = json["results"].as_array().unwrap();
+
+    let check_expectations = [
+        ("discovery.marketplace", "pass"),
+        ("discovery.skill", "pass"),
+        ("discovery.cursor.mdc", "pass"),
+        ("discovery.codex.skill", "pass"),
+        ("discovery.opencode.agent", "pass"),
+        ("discovery.copilot.instructions", "pass"),
+    ];
+
+    for (id, severity) in &check_expectations {
+        let matches: Vec<&serde_json::Value> =
+            results.iter().filter(|r| r["check_id"] == *id).collect();
+        assert!(
+            !matches.is_empty(),
+            "self-dogfood must emit {id}, got:\n{json}"
+        );
+        assert_eq!(
+            matches[0]["severity"], *severity,
+            "{id} must be {severity}, got:\n{json}"
+        );
+    }
+}
+
+// --- Doctor on non-workspace project with built binary ------------------------
+
+#[test]
+fn doctor_on_plain_rust_cli_reports_has_cli_true() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["doctor", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "doctor must exit 0");
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        s.contains("has_cli:  true"),
+        "doctor should report has_cli: true, got:\n{s}"
+    );
+}

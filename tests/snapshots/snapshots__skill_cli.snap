@@ -20,6 +20,7 @@ Invoke this skill when the user's task matches any of these triggers:
 - log a journal entry
 - record an incident
 
+
 ## When NOT to use
 
 - Do not use this skill if the user only wants to *read* or *inspect* chronicle without performing an action — prefer reading docs directly.
@@ -27,10 +28,7 @@ Invoke this skill when the user's task matches any of these triggers:
 
 ## Installation
 
-
 Ensure `chronicle` is installed and available on PATH before invoking the examples below.
-
-
 
 ## Invocation
 

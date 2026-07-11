@@ -1,6 +1,6 @@
 {
   "name": {{ name | json_encode | safe }},
-  "description": {{ one_line_description | json_encode | safe }},
+  "description": {{ one_line_description_raw | json_encode | safe }},
   "version": {{ version | json_encode | safe }},
   "author": {
     "name": {{ author | default(value="Unspecified") | json_encode | safe }}

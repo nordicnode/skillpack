@@ -1,6 +1,5 @@
 ---
 source: tests/snapshots.rs
-assertion_line: 141
 expression: skill.contents
 ---
 ---
@@ -21,13 +20,13 @@ Invoke this skill when the user's task matches any of these triggers:
 - ingest csv
 - convert rows
 
+
 ## When NOT to use
 
 - Do not use this skill if the user only wants to *read* or *inspect* fastcsv without performing an action — prefer reading docs directly.
 - Do not use this skill for tasks outside the JavaScript/Node tooling it was built for.
 
 ## Installation
-
 
 This is a library, not a CLI. The agent uses it by importing from the host project, not by spawning a binary.
 
@@ -37,12 +36,9 @@ Import pattern:
 import { parse } from 'fastcsv'
 ```
 
-
-
 ## Usage
 
 There is no CLI to invoke. Use the import pattern above and call the relevant API surface directly from the task.
-
 
 ## Footguns / gotchas
 

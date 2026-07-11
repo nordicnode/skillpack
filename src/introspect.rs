@@ -19,10 +19,6 @@ use anyhow::Result;
 
 use crate::types::{DiagTrace, Language, ProjectProfile};
 
-/// Hard cap on the `--help` spawn. A CLI that can't print its help in 5s is
-/// not something we want an agent invoking anyway, so this protects both the
-/// tool and the agent downstream.
-const HELP_TIMEOUT: Duration = Duration::from_secs(5);
 /// We only read the first slice of the README to bound cost.
 const README_HEAD_LINES: usize = 500;
 
@@ -275,7 +271,7 @@ fn walk_cargo_workspace(root: &Path, _name: &str, diag: &mut DiagTrace) -> Optio
             continue;
         }
         // Prefer the member's own [package].name; fall back to the dir tail.
-        let member_name = fs::read_to_string(member_root.join("Cargo.toml"))
+        let manifest_name = fs::read_to_string(member_root.join("Cargo.toml"))
             .ok()
             .and_then(|r| toml::from_str::<toml::Value>(&r).ok())
             .and_then(|v| {
@@ -283,12 +279,18 @@ fn walk_cargo_workspace(root: &Path, _name: &str, diag: &mut DiagTrace) -> Optio
                     .and_then(|p| p.get("name"))
                     .and_then(|n| n.as_str())
                     .map(String::from)
-            })
-            .or_else(|| {
-                member_root
-                    .file_name()
-                    .map(|f| f.to_string_lossy().into_owned())
-            })?;
+            });
+        let Some(member_name) = manifest_name.or_else(|| {
+            member_root
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+        }) else {
+            diag.push(
+                "detect_cli.rust.workspace",
+                format!("member `{member_rel}` has no name in manifest, skipping"),
+            );
+            continue;
+        };
         match primary_cli_candidate(&member_root, Language::Rust, &member_name) {
             Some(candidate) => {
                 diag.push(
@@ -351,7 +353,7 @@ fn walk_npm_workspace(root: &Path, _name: &str, diag: &mut DiagTrace) -> Option<
         let Ok(mv) = serde_json::from_str::<serde_json::Value>(&mraw) else {
             continue;
         };
-        let member_name = mv
+        let Some(member_name) = mv
             .get("name")
             .and_then(|n| n.as_str())
             .map(String::from)
@@ -359,7 +361,14 @@ fn walk_npm_workspace(root: &Path, _name: &str, diag: &mut DiagTrace) -> Option<
                 member_root
                     .file_name()
                     .map(|f| f.to_string_lossy().into_owned())
-            })?;
+            })
+        else {
+            diag.push(
+                "detect_cli.node.workspace",
+                format!("member `{member_rel}` has no name in manifest, skipping"),
+            );
+            continue;
+        };
         if mv.get("bin").is_none() {
             diag.push(
                 "detect_cli.node.workspace",
@@ -446,11 +455,16 @@ fn project_manifest_name(root: &Path, language: Language) -> Option<String> {
             let module_line = raw
                 .lines()
                 .find(|l| l.trim_start().starts_with("module "))?;
-            let path = module_line
+            let last = module_line
                 .trim()
                 .strip_prefix("module ")
-                .map(|s| s.trim().to_string())?;
-            let last = path.rsplit('/').next()?.to_string();
+                // Take only the first whitespace-delimited token so a trailing
+                // `// ...` line comment cannot bleed into the module path
+                // (e.g. `module github.com/foo/bar // bar tool` → "bar").
+                .map(|s| s.split_whitespace().next().unwrap_or("").to_string())?
+                .rsplit('/')
+                .next()?
+                .to_string();
             Some(last)
         }
         Language::Ruby => {
@@ -1060,7 +1074,7 @@ fn ruby_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
     None
 }
 
-use crate::spawn::{self, SpawnOutcome};
+use crate::spawn::{self, SpawnOutcome, HELP_TIMEOUT};
 
 fn spawn_with_timeout(cmd: &mut Command, timeout: Duration) -> SpawnOutcome {
     spawn::run(cmd, timeout)
@@ -1090,18 +1104,12 @@ fn which_on_path(name: &str) -> Option<PathBuf> {
 
 /// `git remote get-url origin`, best-effort. Never errors the caller.
 fn detect_repo_url(root: &Path) -> Option<String> {
-    let out = Command::new("git")
-        .args(["remote", "get-url", "origin"])
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
+    let mut cmd = Command::new("git");
+    cmd.args(["remote", "get-url", "origin"]).current_dir(root);
+    match spawn_with_timeout(&mut cmd, Duration::from_secs(3)) {
+        SpawnOutcome::RanClean(out) => Some(out.trim().to_string()),
+        _ => None,
     }
-    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// Heuristic: read LICENSE, look for the SPDX id text.
@@ -1461,6 +1469,23 @@ mod parse_tests {
         assert_eq!(manifest_license(&root, Language::Rust), None);
         cleanup(&root);
     }
+    // go.mod `module` line may carry a trailing `// ...` comment. The old
+    // parser only trimmed outer whitespace, so the comment bled into the
+    // path and the last `/`-segment became a comment fragment (e.g.
+    // `github.com/foo/bar // bar tool` → "tool" or worse). Now the first
+    // whitespace token is taken before splitting, so the name is "bar".
+    #[test]
+    fn go_module_name_strips_trailing_line_comment() {
+        let root = scratch(&[(
+            "go.mod",
+            "module github.com/acme/widget // widget CLI\n\ngo 1.21\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Go).as_deref(),
+            Some("widget")
+        );
+        cleanup(&root);
+    }
 
     // Bug #3: a manifest with no name field and no git remote used to fall back
     // to the directory tail via `Path::new(".").file_name()` — which returns
@@ -1489,5 +1514,97 @@ mod parse_tests {
             .and_then(|c| c.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_default();
         assert_eq!(p.name, cwd_tail);
+    }
+    // ponytail: walk_*_workspace skip branch (member with no name in manifest
+    // AND dir-tail file_name() None) is unreachable for non-root member paths —
+    // the path-tail fallback always yields a name. These tests assert the
+    // observable contract we DO hit: the walk continues past every member to the
+    // end, not aborting on the first no-artifact member. Skip-and-continue vs
+    // early-return-None is indistinguishable here only if a name resolution
+    // failure occured; the `?`→`continue` fix guards that pathological case.
+    #[test]
+    fn walk_cargo_workspace_continues_past_no_artifact_member() {
+        let root = std::env::temp_dir().join(format!(
+            "skillpack-walk-cargo-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("members/m1")).unwrap();
+        std::fs::create_dir_all(root.join("members/m2")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"members/m1\", \"members/m2\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("members/m1/Cargo.toml"),
+            "[package]\nname = \"m1\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("members/m2/Cargo.toml"),
+            "[package]\nname = \"m2\"\n",
+        )
+        .unwrap();
+        let mut diag = DiagTrace::default();
+        let res = walk_cargo_workspace(&root, "ws", &mut diag);
+        assert!(res.is_none(), "no member has a built artifact → None");
+        let notes: Vec<&str> = diag.0.iter().map(|d| d.note.as_str()).collect();
+        assert!(
+            notes.iter().any(|n| n.contains("m1")),
+            "m1 probed: {notes:?}"
+        );
+        assert!(
+            notes.iter().any(|n| n.contains("m2")),
+            "m2 probed: {notes:?}"
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn walk_npm_workspace_continues_past_no_cli_member() {
+        let root = std::env::temp_dir().join(format!(
+            "skillpack-walk-npm-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("members/m1")).unwrap();
+        std::fs::create_dir_all(root.join("members/m2")).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            "{ \"workspaces\": [\"members/m1\", \"members/m2\"] }",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("members/m1/package.json"),
+            "{ \"name\": \"m1\", \"bin\": {} }",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("members/m2/package.json"),
+            "{ \"name\": \"m2\", \"bin\": {} }",
+        )
+        .unwrap();
+        let mut diag = DiagTrace::default();
+        let res = walk_npm_workspace(&root, "ws", &mut diag);
+        assert!(res.is_none(), "bin:{{}} → both candidate None → walk None");
+        let notes: Vec<&str> = diag.0.iter().map(|d| d.note.as_str()).collect();
+        assert!(
+            notes.iter().any(|n| n.contains("m1")),
+            "m1 probed: {notes:?}"
+        );
+        assert!(
+            notes.iter().any(|n| n.contains("m2")),
+            "m2 probed: {notes:?}"
+        );
+        cleanup(&root);
     }
 }

@@ -10,6 +10,7 @@ Invoke this tool when the user's task matches any of these triggers:
 - verify agent-discoverability of a CLI or library
 - scaffold claude plugin distribution files
 
+
 ## When NOT to use
 
 - Do not use this tool if the user only wants to *read* or *inspect* skillpack without performing an action — prefer reading docs directly.
@@ -17,10 +18,7 @@ Invoke this tool when the user's task matches any of these triggers:
 
 ## Installation
 
-
 Ensure `skillpack` is installed and available on PATH before invoking the examples below.
-
-
 
 ## Invocation
 
@@ -39,6 +37,7 @@ Run `skillpack --help` to discover the available flags. Documented flags (verifi
 - `-V`
 - `--version`
 
+
 ### Subcommands
 
 This CLI uses subcommands. Each one has its own flags (verified by `skillpack verify`):
@@ -48,7 +47,6 @@ This CLI uses subcommands. Each one has its own flags (verified by `skillpack ve
 - `doctor` — flags: `--root`, `--verbose`, `--debug`
 
 Run `skillpack <subcommand> --help` for a subcommand's full options.
-
 
 ## Footguns / gotchas
 

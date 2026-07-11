@@ -13,8 +13,7 @@ use std::time::Duration;
 use anyhow::Result;
 
 use super::result::{CheckResult, VerifyReport};
-
-const HELP_TIMEOUT: Duration = Duration::from_secs(8);
+use crate::spawn::HELP_TIMEOUT;
 
 /// Inputs the invocation checker needs. Kept as a plain struct so the caller
 /// (`verify` dispatcher) reads the SKILL.md + holds the spawn command, while

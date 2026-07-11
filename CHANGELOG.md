@@ -4,6 +4,87 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-07-11
+
+### Fixed — Template correctness (BLOCKER)
+
+- **Double-escaped `one_line_description` in generated output**: the YAML-escaped
+  value was reused in markdown bodies and JSON templates, producing literal `\"`
+  in skill files and marketplace/plugin JSON. The render context now exposes two
+  keys: `one_line_description` (YAML-escaped, frontmatter only) and
+  `one_line_description_raw` (raw, used in markdown bodies + JSON). Both JSON
+  templates pipe through `json_encode | safe`; the markdown templates emit raw.
+- **Dangling sentences from `{%-` trim markers**: all four markdown templates
+  (`SKILL.md`, `cursor-rule.mdc`, `opencode-agent.md`, `copilot-instructions.md`)
+  used Tera `{%-`/`-%}` whitespace-trim markers that over-trimmed and glued
+  headings to preceding content. Rewritten to bare `{% if %}` tags on own lines
+  (no trim markers); the tag emits nothing but its source-line `\n` survives as
+  exactly one blank line. Inline tags (`{% if cond %}content{% endif %}`) on the
+  same line as content emit no extra newlines.
+- **Empty sections rendered when phrases/flags absent**: the "When to use"
+  section now wraps in `{% if when_to_use_phrases %}...{% endif %}` and the
+  flags intro+loop wraps in `{% if documented_flags %}...{% endif %}` across
+  all four markdown templates. A library with no `when_to_use_phrases` no longer
+  emits a "When to use" heading with an empty bullet list.
+
+### Fixed — Introspection bugs
+
+- **`HELP_TIMEOUT` divergence**: `introspect.rs` used 5s while
+  `verify::invocation` used 8s — a CLI that printed help in 6s passed verify but
+  had its flags dropped during `init` introspection (silent false-negative).
+  Unified to a single `pub const HELP_TIMEOUT: Duration = Duration::from_secs(8)`
+  in `spawn.rs`; both call sites import it.
+- **Go module line trailing comment bleed**: `project_manifest_name` for Go
+  trimmed outer whitespace only, so `module github.com/foo/bar // bar tool`
+  produced a module name of "tool" (or worse) by taking the last `/`-segment
+  of the comment-bleeded path. Now takes the first whitespace-delimited token
+  before splitting, correctly yielding "bar". New test:
+  `go_module_name_strips_trailing_line_comment`.
+- **Workspace walk early-return on nameless member**: `walk_cargo_workspace`
+  and `walk_npm_workspace` used `?` on the `member_name` resolution, so a
+  single member manifest with no resolvable name aborted the entire walk —
+  hiding CLI detection for every *other* member and silently reporting
+  `has_cli=false`. Replaced with `let ... else { diag.push(...); continue; }`
+  so the walk skips the pathological member and continues. New tests:
+  `walk_cargo_workspace_continues_past_no_artifact_member`,
+  `walk_npm_workspace_continues_past_no_cli_member`.
+- **`detect_repo_url` git hang**: spawned `git remote get-url origin` with no
+  timeout — a credential-prompt stall (`git@github.com` with no SSH agent on a
+  fresh host) blocked introspection indefinitely. Routed through
+  `spawn_with_timeout(&mut cmd, Duration::from_secs(3))`; `RanClean` returns
+  the trimmed URL, all other `SpawnOutcome` variants return `None`.
+
+### Fixed — Verify discovery sentinels
+
+- **Empty ecosystem directories passed silently**: a `.codex/skills/` directory
+  that existed but contained no `SKILL.md` (e.g. files removed after init)
+  passed verify with no check emitted — a silent false-negative. Added
+  `.missing` fail sentinels for empty `.codex/skills/`, `.cursor/rules/`, and
+  `.opencode/agents/` directories. New check ids:
+  `discovery.codex.skill.missing`, `discovery.cursor.mdc.missing`,
+  `discovery.opencode.agent.missing`. New test:
+  `codex_empty_skills_dir_fails_verify`.
+- **Copilot frontmatter passed verify**: a `.github/copilot-instructions.md`
+  starting with a `---` frontmatter block passed verify (the existing heading
+  check fired on the YAML content). The Copilot spec says "plain markdown, no
+  frontmatter" — now a `---` prefix triggers
+  `discovery.copilot.instructions` at fail severity before the heading check.
+  New test: `copilot_frontmatter_fails_verify`.
+
+### Added — Test coverage
+
+- **All-5-targets round trip**: `all_five_targets_init_then_verify_round_trip`
+  asserts `init --target claude --target cursor --target codex --target opencode --target copilot`
+  emits all 5 files and `verify` passes with all 5 `discovery.*` check ids at
+  `pass` severity.
+- **Discovery.empty on bare repo**: `verify_on_empty_repo_fails_with_discovery_empty`
+  asserts a repo with no ecosystem files emits `discovery.empty` at fail severity.
+- **Self-dogfood all 5 ecosystems**: `self_dogfood_verify_asserts_all_five_ecosystems`
+  runs `verify` against the skillpack repo itself and asserts all 6 check ids
+  (marketplace, skill, cursor.mdc, codex.skill, opencode.agent, copilot.instructions) pass.
+- **Doctor on plain Rust CLI**: `doctor_on_plain_rust_cli_reports_has_cli_true`
+  builds the `rust-cli` fixture, runs `doctor`, and asserts `has_cli:  true`.
+
 ## [0.5.0] - 2026-07-10
 
 ### Added — `doctor` subcommand

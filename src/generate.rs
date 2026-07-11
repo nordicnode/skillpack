@@ -110,6 +110,7 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         "name": name,
         "display_name": display_name,
         "one_line_description": one_line_description_yaml(&intent.one_line_description),
+        "one_line_description_raw": &intent.one_line_description,
         "when_to_use_phrases": intent.when_to_use_phrases,
         "when_concat": escape_yaml(&when_concat),
         "author": intent.author.as_deref().or(profile.authors.as_deref()),

@@ -5,14 +5,15 @@ mode: subagent
 
 # {{ name }}
 
-{{ one_line_description }}
-
+{{ one_line_description_raw }}
+{% if when_to_use_phrases %}
 ## When to use
 
 Invoke this agent when the user's task matches any of these triggers:
 
 {% for phrase in when_to_use_phrases %}- {{ phrase }}
 {% endfor %}
+{% endif %}
 ## When NOT to use
 
 - Do not use this agent if the user only wants to *read* or *inspect* {{ display_name }} without performing an action — prefer reading docs directly.
@@ -20,10 +21,8 @@ Invoke this agent when the user's task matches any of these triggers:
 
 ## Installation
 
-{% if has_cli %}
-Ensure `{{ cli_binary }}` is installed and available on PATH before invoking the examples below.
-{% else %}
-This is a library, not a CLI. The agent uses it by importing from the host project, not by spawning a binary.
+{% if has_cli %}Ensure `{{ cli_binary }}` is installed and available on PATH before invoking the examples below.
+{% else %}This is a library, not a CLI. The agent uses it by importing from the host project, not by spawning a binary.
 
 Import pattern:
 
@@ -31,9 +30,7 @@ Import pattern:
 {{ import_pattern }}
 ```
 {% endif %}
-
-{% if has_cli %}
-## Invocation
+{% if has_cli %}## Invocation
 
 The exact command an agent should run to use this tool:
 
@@ -41,10 +38,11 @@ The exact command an agent should run to use this tool:
 {{ invocation_command }}
 ```
 
-Run `{{ cli_binary }} --help` to discover the available flags. Documented flags (verified by `skillpack verify`):
+{% if documented_flags %}Run `{{ cli_binary }} --help` to discover the available flags. Documented flags (verified by `skillpack verify`):
 
 {% for flag in documented_flags %}- `{{ flag }}`
-{% endfor %}{% if documented_subcommands %}
+{% endfor %}
+{% endif %}{% if documented_subcommands %}
 ### Subcommands
 
 This CLI uses subcommands. Each one has its own flags (verified by `skillpack verify`):
@@ -52,12 +50,10 @@ This CLI uses subcommands. Each one has its own flags (verified by `skillpack ve
 {% for sub in documented_subcommands %}- `{{ sub.name }}`{%- if sub.flags %} — flags: {% for f in sub.flags %}`{{ f }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
 {% endfor %}
 Run `{{ cli_binary }} <subcommand> --help` for a subcommand's full options.
-{% endif %}{% else %}
-## Usage
+{% endif %}{% else %}## Usage
 
 There is no CLI to invoke. Use the import pattern above and call the relevant API surface directly from the task.
 {% endif %}
-
 ## Footguns / gotchas
 
 - Verify the tool is installed before relying on it; do not assume availability.

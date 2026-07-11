@@ -9,7 +9,7 @@
     {
       "name": {{ name | json_encode | safe }},
       "source": "./",
-      "description": {{ one_line_description | json_encode | safe }},
+      "description": {{ one_line_description_raw | json_encode | safe }},
       "license": {{ license | default(value="MIT") | json_encode | safe }},
       "repository": {{ repo_url | default(value="") | json_encode | safe }},
       "keywords": [{% for kw in keywords %}{{ kw | json_encode | safe }}{% if not loop.last %}, {% endif %}{% endfor %}],
