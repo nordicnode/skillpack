@@ -1,6 +1,6 @@
 # skillpack
 
-> Turn any OSS library or CLI into an agent-discoverable skill pack for Claude Code.
+> Turn any OSS library or CLI into an agent-discoverable skill pack for Claude Code, Cursor, and Codex.
 
 [![CI](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml/badge.svg)](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/skillpack.svg)](https://crates.io/crates/skillpack)
@@ -14,17 +14,30 @@ autonomously invoke the tool. That wiring around a library or CLI is the **distr
 layer**, and `skillpack` generates it for you — then verifies that a coding agent coming
 in cold could actually use what you shipped.
 
-`skillpack` takes any OSS project and generates the three Claude Code distribution files,
-then runs a verification suite that simulates an agent's first read and actually invokes
+`skillpack` takes any OSS project and generates the agent distribution files for
+one or more coding-agent ecosystems (Claude Code, Cursor, Codex), then runs a
+verification suite that simulates an agent's first read and actually invokes
 the documented CLI to catch drift before it reaches a user.
 
 ## What it generates
 
-From your repo, `skillpack init` writes (purely additive — nothing existing is touched):
+From your repo, `skillpack init` writes (purely additive — nothing existing is touched).
+By default it targets Claude Code; pass `--target cursor` / `--target codex` to emit
+for additional agents (repeatable):
+
+**Claude Code** (`--target claude`, default):
 
 - `.claude-plugin/marketplace.json` — a single-plugin marketplace entry pointing at your project root
 - `.claude-plugin/plugin.json` — the plugin manifest (name, version, author, repo URL)
 - `skills/<tool-name>/SKILL.md` — the operational knowledge file an agent reads (frontmatter + body, including a `### Subcommands` block for CLIs with subcommands)
+
+**Cursor** (`--target cursor`):
+
+- `.cursor/rules/<tool-name>.mdc` — a Cursor project rule with `description` / `alwaysApply` frontmatter and the same invocation body
+
+**Codex CLI** (`--target codex`):
+
+- `.codex/skills/<tool-name>/SKILL.md` — same `SKILL.md` frontmatter and body as Claude (cross-agent compatible), installed under Codex's `.codex/skills/` convention
 
 A `skillpack.toml` at your project root captures your answers so re-runs are deterministic
 and CI-friendly.
@@ -65,6 +78,9 @@ Requires Rust 1.74+. Published on [crates.io](https://crates.io/crates/skillpack
 # In your OSS project root:
 skillpack init            # introspect → interview → generate → pre-commit verify
 
+# Generate for multiple agent ecosystems at once:
+skillpack init --target claude --target cursor --target codex
+
 # Re-run anywhere / in CI (deterministic, non-interactive):
 skillpack init --non-interactive --accept-warnings
 
@@ -85,6 +101,8 @@ caught up front.
   1,536-character listing cap
 - `when_to_use` carries trigger phrases an agent can match on
 - marketplace `source` paths use the `./` prefix and forward slashes only
+- `version` is present in `plugin.json` (warns on missing/empty)
+- `author` is present in `plugin.json` (warns on missing or `"Unspecified"`)
 
 **Invocation** — actually runs the documented CLI:
 
@@ -113,14 +131,18 @@ Exits non-zero on any critical failure, so it drops straight into CI as a PR gat
 | `init --non-interactive` | skip prompts; requires a `skillpack.toml` (for CI)             |
 | `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
 | `init --license <SPDX>`  | override the license for this run                              |
+| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`. Repeatable. |
 | `verify --format human\|json` | human report (default) or machine-readable JSON for CI   |
 | `--verbose`             | print what `skillpack` detected in the repo (introspection)      |
 | `--debug`             | print every subprocess call                                       |
 
 ## Status
 
-V1: `init` + `verify`, Claude Code only, across the five ecosystems above. MIT-licensed.
-Multi-ecosystem targets (Cursor, Codex) and a bundled skill-pack marketplace are later.
+`init` + `verify` across the five language ecosystems above. Generates
+distribution files for **Claude Code** (default), **Cursor** (`.cursor/rules/*.mdc`),
+and **Codex CLI** (`.codex/skills/`). MIT-licensed. `verify` currently checks
+the Claude distribution files only; multi-ecosystem verify is follow-up work.
+A bundled skill-pack marketplace is a later phase.
 
 ## Contributing
 
