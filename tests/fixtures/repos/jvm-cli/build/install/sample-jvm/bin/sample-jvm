@@ -1,0 +1,5 @@
+#!/bin/sh
+case "$1" in
+  --help) echo "Usage: sample-jvm [--new <entry>] [--verbose]"; exit 0;;
+esac
+echo "sample-jvm"

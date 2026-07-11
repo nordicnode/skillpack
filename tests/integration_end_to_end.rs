@@ -914,6 +914,78 @@ fn php_cli_init_then_verify_round_trip() {
     assert_eq!(v["plugins"][0]["name"], "sample-php");
 }
 
+fn jvm_available() -> bool {
+    // The JVM fixture ships a shell script as the Gradle `installDist` output.
+    // On Unix the script runs directly; on Windows there's no sh by default.
+    std::process::Command::new("sh")
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[test]
+#[ignore = "requires `sh` on PATH; runs on CI via --include-ignored"]
+fn jvm_cli_init_then_verify_round_trip() {
+    if !jvm_available() {
+        eprintln!("skipped: sh not on PATH");
+        return;
+    }
+    let root = copy_fixture("jvm-cli");
+    let toml = "[skill]\n\
+        name = \"sample-jvm\"\n\
+        one_line_description = \"Print a journal entry from the JVM\"\n\
+        when_to_use_phrases = [\"log a jvm entry\", \"record a quick note\"]\n\
+        invocation_command = \"sample-jvm --new \\\"entry\\\"\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".claude-plugin/plugin.json").exists());
+    assert!(root.join("skills/sample-jvm/SKILL.md").exists());
+
+    let skill = fs::read_to_string(root.join("skills/sample-jvm/SKILL.md")).unwrap();
+    assert!(skill.contains("## Invocation"));
+    assert!(!skill.contains("## Usage"));
+
+    // verify must pass — the installDist script's `--help` handler
+    // produces output for the invocation check.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify OK"))
+        .stdout(predicate::str::contains(
+            "documented `--help` runs and produces output",
+        ))
+        .stdout(predicate::str::contains(
+            "every documented flag exists in `--help`",
+        ));
+
+    let mp = fs::read_to_string(root.join(".claude-plugin/marketplace.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
+    assert_eq!(v["plugins"][0]["source"], "./");
+    assert_eq!(v["plugins"][0]["name"], "sample-jvm");
+}
+
 // Subcommand-drift e2e: the subcommand-cli fixture prints a clap-shaped
 // `Commands:` section in `--help` and per-subcommand `--help` with distinct
 // flags. `capture_subcommand_help` (introspect) captures each sub's help;

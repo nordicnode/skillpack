@@ -1,0 +1,10 @@
+plugins {
+    application
+}
+
+application {
+    mainClass = "com.example.SampleJvm"
+}
+
+group = "com.example"
+version = "0.1.0"

@@ -200,3 +200,14 @@ fn snapshot_php_cursor_globs() {
     let mdc = files.iter().find(|f| f.rel_path.ends_with(".mdc")).unwrap();
     insta::assert_snapshot!("cursor_php", mdc.contents);
 }
+
+// JVM: verify Cursor globs derive from Language::Jvm (locks *.java, *.kt,
+// *.scala, pom.xml, build.gradle, build.gradle.kts).
+#[test]
+fn snapshot_jvm_cursor_globs() {
+    let mut p = cli_profile();
+    p.language = Language::Jvm;
+    let files = render_targets(&p, &cli_intent(), &[Target::Cursor]).unwrap();
+    let mdc = files.iter().find(|f| f.rel_path.ends_with(".mdc")).unwrap();
+    insta::assert_snapshot!("cursor_jvm", mdc.contents);
+}

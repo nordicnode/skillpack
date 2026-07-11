@@ -301,6 +301,7 @@ fn category_hint(lang: Language) -> &'static str {
         Language::Go => "the Go tooling",
         Language::Ruby => "the Ruby tooling",
         Language::Php => "the PHP tooling",
+        Language::Jvm => "the JVM tooling",
         Language::Unknown => "the tooling",
     }
 }
@@ -334,6 +335,14 @@ fn cursor_globs_hint(lang: Language) -> Vec<String> {
         Language::Go => vec!["*.go".into(), "go.mod".into()],
         Language::Ruby => vec!["*.rb".into(), "*.gemspec".into(), "Gemfile".into()],
         Language::Php => vec!["*.php".into(), "composer.json".into()],
+        Language::Jvm => vec![
+            "*.java".into(),
+            "*.kt".into(),
+            "*.scala".into(),
+            "pom.xml".into(),
+            "build.gradle".into(),
+            "build.gradle.kts".into(),
+        ],
         Language::Unknown => vec![],
     }
 }

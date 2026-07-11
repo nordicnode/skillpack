@@ -124,6 +124,11 @@ fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
         Language::Go
     } else if root.join("composer.json").exists() {
         Language::Php
+    } else if root.join("pom.xml").exists()
+        || root.join("build.gradle").exists()
+        || root.join("build.gradle.kts").exists()
+    {
+        Language::Jvm
     } else if root.join("Gemfile").exists() || has_gemspec(root) {
         Language::Ruby
     } else {
@@ -497,6 +502,26 @@ fn project_manifest_name(root: &Path, language: Language) -> Option<String> {
                 .as_str()
                 .map(std::string::ToString::to_string)
         }
+        Language::Jvm => {
+            // pom.xml: <name>...</name> or <artifactId>...</artifactId>;
+            // build.gradle: rootProject.name = '...' or rootProject.name = "..."
+            if let Ok(raw) = fs::read_to_string(root.join("pom.xml")) {
+                if let Some(n) = extract_xml_tag(&raw, "name") {
+                    return Some(n);
+                }
+                if let Some(n) = extract_xml_tag(&raw, "artifactId") {
+                    return Some(n);
+                }
+            }
+            for gradle in &["build.gradle", "build.gradle.kts"] {
+                if let Ok(raw) = fs::read_to_string(root.join(gradle)) {
+                    if let Some(n) = extract_gradle_string(&raw, "rootProject.name") {
+                        return Some(n);
+                    }
+                }
+            }
+            None
+        }
         Language::Unknown => None,
     }
 }
@@ -562,6 +587,22 @@ fn project_manifest_version(root: &Path, language: Language) -> Option<String> {
             v.get("version")?
                 .as_str()
                 .map(std::string::ToString::to_string)
+        }
+        Language::Jvm => {
+            // pom.xml: <version>...</version>; build.gradle: version = '...'
+            if let Ok(raw) = fs::read_to_string(root.join("pom.xml")) {
+                if let Some(v) = extract_xml_tag(&raw, "version") {
+                    return Some(v);
+                }
+            }
+            for gradle in &["build.gradle", "build.gradle.kts"] {
+                if let Ok(raw) = fs::read_to_string(root.join(gradle)) {
+                    if let Some(v) = extract_gradle_string(&raw, "version") {
+                        return Some(v);
+                    }
+                }
+            }
+            None
         }
         Language::Go | Language::Unknown => None,
     }
@@ -649,6 +690,18 @@ fn project_manifest_authors(root: &Path, language: Language) -> Option<String> {
                         .or_else(|| e.as_str())
                 })
                 .map(|s| s.to_string())
+        }
+        Language::Jvm => {
+            // pom.xml: <developers><developer><name>...</name></developer></developers>
+            if let Ok(raw) = fs::read_to_string(root.join("pom.xml")) {
+                if let Some(devs) = extract_xml_tag(&raw, "developers") {
+                    if let Some(name) = extract_xml_tag(&devs, "name") {
+                        return Some(name);
+                    }
+                }
+            }
+            // build.gradle has no standard authors field.
+            None
         }
         Language::Go | Language::Unknown => None,
     }
@@ -916,6 +969,7 @@ fn primary_cli_candidate(root: &Path, language: Language, name: &str) -> Option<
         Language::Python => python_cli_candidate(root, name),
         Language::Ruby => ruby_cli_candidate(root, name),
         Language::Php => php_cli_candidate(root, name),
+        Language::Jvm => jvm_cli_candidate(root, name),
         Language::Unknown => which_on_path(name).map(|_| CliCandidate {
             argv: vec![name.to_string()],
             spawn_cwd: root.to_path_buf(),
@@ -1141,6 +1195,56 @@ fn php_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
     })
 }
 
+/// JVM: probe for pre-built Gradle `installDist` script, Maven shaded jar, or
+/// Gradle shadow jar. No build invocation — only reads existing artifacts
+/// (design: "Pure filesystem reads"). Requires `java` on PATH for jar-based
+/// invocations; the `installDist` script is self-contained. Honest `None`
+/// when no artifact present — same posture as other languages.
+fn jvm_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    // Gradle `application` plugin: build/install/<name>/bin/<name> (script
+    // form; `.bat` variant on Windows is handled by `canonicalize_for_argv`).
+    // Present only after `gradle installDist`; we never run it here.
+    let install_bin = root.join("build/install").join(name).join("bin").join(name);
+    if install_bin.exists() {
+        let abs = canonicalize_for_argv(&install_bin);
+        return Some(CliCandidate {
+            argv: vec![abs],
+            spawn_cwd: root.to_path_buf(),
+        });
+    }
+
+    let java = which_on_path("java")?;
+    let java_bin = java.to_string_lossy().to_string();
+
+    // Maven shade/spring-boot: target/<name>-*.jar (shaded, runnable).
+    // Glob by prefix to avoid hardcoding the version.
+    for dir in &["target", "build/libs"] {
+        if let Ok(entries) = fs::read_dir(root.join(dir)) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.extension().and_then(|s| s.to_str()) != Some("jar") {
+                    continue;
+                }
+                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                    if stem.starts_with(name) {
+                        let abs = canonicalize_for_argv(&p);
+                        return Some(CliCandidate {
+                            argv: vec![java_bin.clone(), "-jar".to_string(), abs],
+                            spawn_cwd: root.to_path_buf(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback to PATH probe for an installed JAR/script on PATH.
+    which_on_path(name).map(|p| CliCandidate {
+        argv: vec![p.to_string_lossy().to_string()],
+        spawn_cwd: root.to_path_buf(),
+    })
+}
+
 /// Canonicalize a path and strip the `\\?\` verbatim-UNC prefix that
 /// `std::fs::canonicalize` emits on Windows. Node's module loader rejects
 /// `\\?\` paths (ESM resolve / fs.readFile error out), and a `\\?\C:\foo`
@@ -1282,6 +1386,41 @@ fn repo_url_name(repo_url: &Option<String>) -> Option<String> {
     let last = url.rsplit('/').next()?.trim_end();
     let stem = last.strip_suffix(".git").unwrap_or(last);
     Some(stem.to_string())
+}
+
+/// Extract the first `<tag>...</tag>` content from raw XML. Best-effort
+/// string find — avoids pulling in an XML parser for scalar field extraction
+/// (pom.xml name, version, artifactId). Trims whitespace around the value.
+fn extract_xml_tag(raw: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = raw.find(&open)? + open.len();
+    let rest = &raw[start..];
+    let end = rest.find(&close)?;
+    Some(rest[..end].trim().to_string())
+}
+
+/// Extract a `key = "value"` or `key = 'value'` string from a Gradle build
+/// file. Best-effort line scan mirroring [`extract_ruby_string_value`].
+/// Handles both `rootProject.name = '...'` and `version = '...'` forms.
+fn extract_gradle_string(raw: &str, key: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix(key) {
+            let rest = rest.trim_start();
+            if let Some(rest) = rest.strip_prefix('=') {
+                let rest = rest.trim();
+                if let Some(s) = rest
+                    .strip_prefix('"')
+                    .and_then(|r| r.strip_suffix('"'))
+                    .or_else(|| rest.strip_prefix('\'').and_then(|r| r.strip_suffix('\'')))
+                {
+                    return Some(s.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 fn extract_ruby_string_value(line: &str) -> Option<String> {
