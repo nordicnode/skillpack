@@ -1052,31 +1052,70 @@ fn primary_cli_candidate(root: &Path, language: Language, name: &str) -> Option<
 /// to an absolute path so it survives a later cwd change (the pre-commit
 /// verify spawns from a temp dir). Falls back to a PATH probe for an installed
 /// bin, then to the dir-derived name.
-fn rust_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
-    // On Windows `cargo build` writes `<name>.exe`, not bare `<name>`, so a
-    // plain `join(name)` misses the artifact. Probe the platform-appropriate
-    // filename; Unix has no executable extension.
-    let bin_name = if cfg!(windows) {
-        format!("{name}.exe")
-    } else {
-        name.to_string()
+/// Parse `[[bin]].name` entries from `Cargo.toml`. Returns bin names in
+/// declaration order; empty when no `[[bin]]` tables (implicit single-bin
+/// crate where the artifact matches the package name).
+fn cargo_bin_names(root: &Path) -> Vec<String> {
+    let Ok(raw) = fs::read_to_string(root.join("Cargo.toml")) else {
+        return Vec::new();
     };
-    for profile in &["release", "debug"] {
-        let p = root.join("target").join(profile).join(&bin_name);
-        if p.exists() {
-            // Canonicalize so the stored argv survives a later cwd change (the
-            // pre-commit verify spawns from a temp dir). Falls back to the
-            // joined path if canonicalize fails on some platforms.
-            let abs = canonicalize_for_argv(&p);
+    let Ok(v) = toml::from_str::<toml::Value>(&raw) else {
+        return Vec::new();
+    };
+    v.get("bin")
+        .and_then(|b| b.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn rust_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    // Build the list of artifact filenames to probe. `cargo build` writes
+    // `<bin_name>.exe` on Windows, bare `<bin_name>` on Unix. A crate may
+    // rename its binary via `[[bin]] name = "..."` (e.g. `fd-find` → `fd`),
+    // so probe `[[bin]].name` entries first, then the package-name fallback
+    // for implicit single-bin crates where artifact == package name.
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    let mut candidates: Vec<String> = cargo_bin_names(root);
+    if !candidates.iter().any(|c| c == name) {
+        candidates.push(name.to_string());
+    }
+    let probe_names: Vec<String> = candidates
+        .into_iter()
+        .map(|n| format!("{n}{suffix}"))
+        .collect();
+    for bin in &probe_names {
+        for profile in &["release", "debug"] {
+            let p = root.join("target").join(profile).join(bin);
+            if p.exists() {
+                // Canonicalize so the stored argv survives a later cwd change
+                // (the pre-commit verify spawns from a temp dir). Falls back to
+                // the joined path if canonicalize fails on some platforms.
+                let abs = canonicalize_for_argv(&p);
+                return Some(CliCandidate {
+                    argv: vec![abs],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+    }
+    // PATH fallback: probe `[[bin]].name` candidates first (a renamed binary
+    // like `fd` may be installed even though the crate is `fd-find`), then
+    // the package name. which_on_path appends PATHEXT on Windows.
+    for cand_name in cargo_bin_names(root) {
+        if cand_name == name {
+            continue;
+        }
+        if let Some(p) = which_on_path(&cand_name) {
             return Some(CliCandidate {
-                argv: vec![abs],
+                argv: vec![p.to_string_lossy().to_string()],
                 spawn_cwd: root.to_path_buf(),
             });
         }
     }
-    // A package may rename its bin via [[bin]] name; falling back to the
-    // dir-derived name on PATH is acceptable for introspection. which_on_path
-    // already appends PATHEXT on Windows so the PATH probe resolves `.exe`.
     which_on_path(name).map(|p| CliCandidate {
         argv: vec![p.to_string_lossy().to_string()],
         spawn_cwd: root.to_path_buf(),
@@ -1729,6 +1768,33 @@ mod candidate_tests {
         let root = scratch_root(&[("Cargo.toml", "[package]\nname = \"totally-fake-bin-xyz\"\n")]);
         let cand = primary_cli_candidate(&root, Language::Rust, "totally-fake-bin-xyz");
         assert!(cand.is_none());
+        cleanup(&root);
+    }
+
+    /// A crate may rename its binary via `[[bin]] name = "..."` (e.g. fd-find
+    /// publishes the `fd` binary). `rust_cli_candidate` must probe the
+    /// `[[bin]].name` artifact, not just the package-name artifact.
+    #[test]
+    fn rust_candidate_probes_bin_name_not_package_name() {
+        let root = scratch_root(&[(
+            "Cargo.toml",
+            "[package]\nname = \"fd-find\"\n[[bin]]\nname = \"fd\"\n",
+        )]);
+        // Pre-built artifact named after [[bin]].name, NOT package name.
+        let bin_dir = root.join("target").join("release");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let bin_name = if cfg!(windows) { "fd.exe" } else { "fd" };
+        std::fs::write(bin_dir.join(bin_name), "#!/bin/sh\necho fd\n").unwrap();
+        let cand = primary_cli_candidate(&root, Language::Rust, "fd-find");
+        assert!(cand.is_some(), "expected [[bin]].name artifact probed");
+        let cand = cand.unwrap();
+        assert!(
+            cand.argv[0].ends_with(bin_name),
+            "expected argv to target [[bin]] artifact, got {}",
+            cand.argv[0]
+        );
+        // Package-name artifact must NOT be probed first when [[bin]] differs.
+        assert!(!cand.argv[0].ends_with("fd-find"));
         cleanup(&root);
     }
 

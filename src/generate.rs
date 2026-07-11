@@ -67,11 +67,21 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
     let display_name = name.clone();
     let has_cli = profile.has_cli;
     // `cli_binary` is the bare name agents/users would type to invoke the tool
-    // (e.g. `chronicle`). The actual *spawn* path (which may be absolute, for
-    // the verifier) lives in `cli_command` and is never used in the generated
-    // prose — that keeps machine-specific absolute paths out of the published
-    // SKILL.md.
-    let cli_binary = name.clone();
+    // (e.g. `fd`, not the crate name `fd-find`). Derive from the actual CLI
+    // command argv (the built binary path) so a `[[bin]].name` rename surfaces
+    // in the invocation prose. Falls back to the skill `name` for libraries.
+    let cli_binary = profile
+        .cli_command
+        .as_ref()
+        .and_then(|c| c.first())
+        .and_then(|cmd| {
+            std::path::Path::new(cmd)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string())
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| name.clone());
     // `documented_flags` come from the captured --help output: the flags a
     // user can actually pass. Used to populate the "Documented flags" list.
     let documented_flags = profile

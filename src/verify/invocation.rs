@@ -626,9 +626,18 @@ fn subcommand_bullet(skill_md: &str, sub: &str) -> String {
 pub fn extract_flags(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for tok in text.split_whitespace() {
+        // Strip clap-style optional-arg suffix early so `--flag[=<when>]`
+        // normalizes consistently regardless of surrounding punctuation
+        // (raw --help token has `[` interior → survives trim; backtick-wrapped
+        // SKILL.md token has `[` at edge → stripped by trim → asymmetry bug).
+        let t = if let Some(i) = tok.find("[=") {
+            tok[..i].to_string()
+        } else {
+            tok.to_string()
+        };
         // Strip surrounding punctuation we don't care about (commas, quotes),
         // but keep interior/leading dashes since flags begin with them.
-        let t = tok
+        let t = t
             .trim_matches(|c: char| c.is_ascii_punctuation() && c != '-')
             .to_string();
         if !t.starts_with('-') || t.len() < 2 {
@@ -641,6 +650,19 @@ pub fn extract_flags(text: &str) -> Vec<String> {
             None => continue,
         };
         if !first_letter.is_ascii_alphabetic() {
+            continue;
+        }
+        // Reject prose tokens: `/` and `'` are never inside a real flag
+        // (e.g. `-x'/'--exec` is prose explaining the short/long pair, not a
+        // flag). Catches separators in examples that single-letter rule misses.
+        if t.contains('/') || t.contains('\'') {
+            continue;
+        }
+        // Short flags (`-x`) are exactly one letter after the dash; multi-char
+        // (`-tf`, `-foo`, `-mount`) are prose examples like `fd -tf` documenting
+        // `--type f` shorthand, not real flags.
+        let dash_count = t.chars().take_while(|c| *c == '-').count();
+        if dash_count == 1 && t.len() > 2 {
             continue;
         }
         // Strip a trailing `=value` (`--foo=bar` -> `--foo`) and trailing
@@ -677,6 +699,55 @@ mod checks {
         // `-` alone and `-2` are filtered; `two-step` is not a flag.
         assert!(!f.iter().any(|s| s == "-2"));
         assert!(!f.iter().any(|s| s == "two-step"));
+    }
+
+    /// clap emits `--flag[=<value>]` for optional args. `extract_flags` must
+    /// strip the `[=...]` suffix *before* punctuation trim, otherwise the raw
+    /// `--help` token (interior `[`) and the backtick-wrapped SKILL.md token
+    /// (edge `[`) normalize differently — the asymmetry that broke fd.
+    #[test]
+    fn strips_clap_optional_arg_suffix_consistently() {
+        // Raw --help form: `[=<when>]` glued, `[` interior → survives trim.
+        assert_eq!(
+            extract_flags("--hyperlink[=<when>]"),
+            vec!["--hyperlink".to_string()]
+        );
+        // Backtick-wrapped SKILL.md form: `[` at edge → stripped by trim.
+        // Both must yield the SAME clean flag (this is the fd regression).
+        assert_eq!(
+            extract_flags("`--hyperlink`"),
+            vec!["--hyperlink".to_string()]
+        );
+        // Multi-word flag name with optional-arg suffix.
+        assert_eq!(
+            extract_flags("--strip-cwd-prefix[=<when>]"),
+            vec!["--strip-cwd-prefix".to_string()]
+        );
+    }
+
+    /// Rich rust\\ clap help (fd, rg, bat) contains prose examples that
+    /// `extract_flags` must NOT swallow as documented flags. Three classes:
+    /// multi-letter short flags (`-tf` documenting `--type f`), example
+    /// patterns (`-foo` from "fd -- '-foo'"), and short/long pair prose
+    /// (`-x'/'--exec` from "place the -x/--exec option last"), and find(1)
+    /// comparisons (`-mount`, `-xdev`).
+    #[test]
+    fn ignores_prose_examples_in_help_text() {
+        // Multi-letter short flags are prose, not real clap flags.
+        let f = extract_flags("fd -tf -tl -tx -te -td");
+        assert!(f.is_empty(), "multi-char short flags from prose: got {f:?}");
+        // Example pattern from help prose.
+        let f = extract_flags("fd -- '-foo' pattern");
+        assert!(
+            !f.iter().any(|s| s == "-foo"),
+            "example pattern leaked: got {f:?}"
+        );
+        // Short/long pair separators with `/` or `'` are prose.
+        let f = extract_flags("place the -x'/\u{27}--exec option last");
+        assert!(f.is_empty(), "prose separators leaked: got {f:?}");
+        // find(1) comparison prose.
+        let f = extract_flags("Comparable to the -mount or -xdev filters of find(1)");
+        assert!(f.is_empty(), "find(1) prose leaked: got {f:?}");
     }
 
     #[test]
