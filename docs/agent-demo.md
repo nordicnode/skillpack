@@ -2,6 +2,8 @@
 
 > How we showed, not asserted, the difference skillpack makes to a real AI agent.
 
+On a four-task real-world fd CLI exercise, a skillpack-generated OpenCode agent finished the same correct task set in **5 rather than 20** agent steps, **27 rather than 130** seconds, and **42% fewer** final tokens. This is one controlled run, not a general benchmark; the skill reduced detours but did not eliminate semantic mistakes.
+
 ## Demo setup
 
 - **Repo**: [fd](https://github.com/sharkdp/fd) (`fd-find` crate, `fd` binary). Real popular Rust CLI.
@@ -52,8 +54,7 @@ This means the agent in Condition B started Q1-Q4 already knowing:
 1. `fd` is the binary it can run (not `fd-find`, which is the crate name).
 2. The set of flags that are confirmed-current in this repository's build, not clap help-text prose.
 3. That this file is *authoritative* and *self-verifying*.
-
-The agent's faster Q4 path is directly attributable to the skill: `-x` is in the verified flag list with its `--exec` long name in the same bullet, and the file doesn't waste the agent's attention on `-tf` or `-mount` (prose examples our v0.8.1 fix now filters out).
+The generated skill surfaced the verified `-x` / `--exec` mapping directly, which plausibly removed the help-search and recovery detour observed in the baseline run. The file doesn't waste the agent's attention on `-tf` or `-mount` (prose examples our v0.8.1 fix now filters out). A single run cannot prove per-flag causality — the agent may have known fd already — but the baseline recovery steps are visible in the transcript.
 
 ## What it cost to produce
 
@@ -79,6 +80,7 @@ Output: `.opencode/agents/fd-find.md`, `skills/fd-find/SKILL.md`, `.cursor/rules
 1. **Condition B was less accurate on Q3** — it claimed `Cargo.lock` is gitignored in fd, which it is not. Condition A correctly identified `.codegraph/` as ignored via `.git/info/exclude`. The SKILL.md doesn't carry a complete ignore-behavior model; it carries the flag list. Agents that need runtime semantics still benefit from running the tool itself.
 2. **OpenCode's `--agent fd-find` requires the user to know the agent name.** A "natural" user prompt ("use fd to find X") does not auto-invoke the skill — the user must `--agent fd-find` or mention the agent appropriately. This is an OpenCode affordance, not a skillpack limitation; Claude Code's `--plugin-dir` has the same property.
 3. **Both conditions reached the correct final answers.** skillpack does not add knowledge the agent couldn't eventually reach; it removes detours. Demonstrating questions where Condition A would have produced a *wrong* answer requires more adversarial prompting (Q4 from the earlier completion-based round 2 did this — the README-only agent asserted `-tf` is reliable, which is wrong).
+4. **Experiment confound: B also changed the agent wrapper, not just the skill body.** Condition B is invoked via `opencode run --agent fd-find`, giving it a specialized agent identity and system-prompt context; Condition A runs as a general agent in the same repo. This is fair for demonstrating the OpenCode artifact skillpack generates, but the conclusion should be phrased precisely: *when the generated OpenCode agent is explicitly selected, it reduced execution overhead on this task suite.* A stronger follow-up would hold the agent wrapper constant in both conditions and vary only whether it contains the generated/verified skill body — that would isolate the informational value of skillpack's output from the benefit of routing into a purpose-built subagent.
 
 ## Reproducing
 

@@ -109,7 +109,7 @@ caught up front.
 ## Does it actually help agents? (measured)
 
 Four fd search tasks, run with [OpenCode](https://opencode.ai) on a plain
-clone of `sharkdp/fd` versus the same clone + `skillpack init --target opencode`.
+clone of `sharkdp/fd` versus the same clone + `skillpack init --target opencode --target claude --target cursor`.
 Same model, same questions, same capture format:
 
 | Metric | plain clone | clone + skillpack | delta |
@@ -121,8 +121,7 @@ Same model, same questions, same capture format:
 Both conditions got all four answers right; the delta is **efficiency and fewer
 detours**, not capability the agent couldn't otherwise reach. The biggest win was
 Q4: the plain-clone agent hit fd's `--max-results`/`-x` incompatibility error and
-retried four times; the skillpack agent knew both flags up front from the
-verified flag list in `.opencode/agents/fd-find.md` and answered in one step.
+retried four times; the generated OpenCode agent (invoked via `--agent fd-find`) had the verified `-x`/`--exec` mapping in `.opencode/agents/fd-find.md` and answered in one step.
 
 Full methodology, per-question analysis, and honest limitations (including one
 spot where the skillpack agent was *less* accurate than the baseline) are in
