@@ -106,6 +106,28 @@ skillpack doctor
 the worst case — a broken skill pack that looks fine until an agent tries to use it — is
 caught up front.
 
+## Does it actually help agents? (measured)
+
+Four fd search tasks, run with [OpenCode](https://opencode.ai) on a plain
+clone of `sharkdp/fd` versus the same clone + `skillpack init --target opencode`.
+Same model, same questions, same capture format:
+
+| Metric | plain clone | clone + skillpack | delta |
+|---|---|---|---|
+| Agent step rounds | 20 | 5 | **-75%** |
+| Token total | 38,134 | 22,248 | **-42%** |
+| Wall clock | 130 s | 27 s | **-79%** |
+
+Both conditions got all four answers right; the delta is **efficiency and fewer
+detours**, not capability the agent couldn't otherwise reach. The biggest win was
+Q4: the plain-clone agent hit fd's `--max-results`/`-x` incompatibility error and
+retried four times; the skillpack agent knew both flags up front from the
+verified flag list in `.opencode/agents/fd-find.md` and answered in one step.
+
+Full methodology, per-question analysis, and honest limitations (including one
+spot where the skillpack agent was *less* accurate than the baseline) are in
+[`docs/agent-demo.md`](docs/agent-demo.md).
+
 ## What `verify` checks
 
 **Discovery** — structural validation per ecosystem. Claude Code (the
