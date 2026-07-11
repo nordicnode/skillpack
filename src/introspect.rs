@@ -911,10 +911,7 @@ fn rust_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
             // Canonicalize so the stored argv survives a later cwd change (the
             // pre-commit verify spawns from a temp dir). Falls back to the
             // joined path if canonicalize fails on some platforms.
-            let abs = std::fs::canonicalize(&p)
-                .ok()
-                .and_then(|c| c.to_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| p.to_string_lossy().to_string());
+            let abs = canonicalize_for_argv(&p);
             return Some(CliCandidate {
                 argv: vec![abs],
                 spawn_cwd: root.to_path_buf(),
@@ -961,10 +958,7 @@ fn node_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
     // Resolve to an absolute path so `node <abs script> --help` works whether
     // or not the package is installed, and survives the temp-dir spawn cwd.
     let script_path = root.join(&script);
-    let abs_script = std::fs::canonicalize(&script_path)
-        .ok()
-        .and_then(|c| c.to_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| script_path.to_string_lossy().to_string());
+    let abs_script = canonicalize_for_argv(&script_path);
     Some(CliCandidate {
         argv: vec![node_bin, abs_script],
         spawn_cwd: root.to_path_buf(),
@@ -1070,10 +1064,7 @@ fn ruby_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
     for dir in &["exe", "bin"] {
         let p = root.join(dir).join(name);
         if p.is_file() {
-            let abs = std::fs::canonicalize(&p)
-                .ok()
-                .and_then(|c| c.to_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| p.to_string_lossy().to_string());
+            let abs = canonicalize_for_argv(&p);
             return Some(CliCandidate {
                 argv: vec![ruby.clone(), abs],
                 spawn_cwd: root.to_path_buf(),
@@ -1081,6 +1072,25 @@ fn ruby_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
         }
     }
     None
+}
+
+/// Canonicalize a path and strip the `\\?\` verbatim-UNC prefix that
+/// `std::fs::canonicalize` emits on Windows. Node's module loader rejects
+/// `\\?\` paths (ESM resolve / fs.readFile error out), and a `\\?\C:\foo`
+/// argv survives as a literal string an embedded V8 refuses to load. The
+/// kernel's CreateProcess accepts `\\?\` for native exes, so the removed
+/// prefix is cosmetic for Rust binaries — but keeping it consistent across
+/// the rust/node/ruby argvs avoids node-side load failures. Unix is a no-op.
+fn canonicalize_for_argv(p: &Path) -> String {
+    let path = std::fs::canonicalize(p)
+        .ok()
+        .and_then(|c| c.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| p.to_string_lossy().to_string());
+    if cfg!(windows) && path.starts_with(r"\\?\") {
+        path[4..].to_string()
+    } else {
+        path
+    }
 }
 
 use crate::spawn::{self, SpawnOutcome, HELP_TIMEOUT};

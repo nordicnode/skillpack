@@ -5,6 +5,31 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.6.4] - 2026-07-11
+
+### Fixed — Windows spawn + report normalization
+
+- **`\\?\` UNC prefix from `std::fs::canonicalize` broke node module loading
+  on Windows**. `canonicalize` returns `\\?\C:\path\bin\cli.js` on Windows; the
+  kernel's `CreateProcess` accepts that for native exes, but Node's V8 module
+  loader rejects `\\?\` paths — `node \\?\C:\foo\cli.js --help` exits non-zero
+  → `verify`'s `invocation.help_present` fired `RanNonZero` → init's critical
+  gate failed → init refused to write on Windows. New `canonicalize_for_argv`
+  helper strips the `\\?\` prefix post-canonicalize, applied at the rust,
+  node, and ruby CLI candidate sites. Unix is a no-op.
+- **`HELP_TIMEOUT` raised 8s → 15s**. Windows CI's cold-cache `go run .
+  --help` first-compile cost (GOCACHE build + AV scan) exceeded 8s, false-
+  timing-out the go round-trip test. 15s covers CI cold-cache compile
+  while still bounding hung CLIs (a CLI that can't print `--help` in 15s is
+  not one an agent should invoke anyway, so the cap doubles as fail-safe).
+- **`verify` report paths normalized to forward slashes**. `discovery.rs`
+  rendered relative paths via `path.strip_prefix(root).to_string_lossy()`,
+  which on Windows emits `skills\skillpack\SKILL.md` — but the marketplace
+  schema requires forward-slash-only paths, snapshot tests pin forward
+  slashes, and downstream tools grep the report on `/`. New `rel_unix`
+  helper (replace `\` with `/`) applied at the SKILL.md, .mdc, OpenCode
+  agent, and Copilot instructions check sites. Unix unchanged.
+
 ## [0.6.3] - 2026-07-11
 
 ### Fixed — Windows rust CLI detection

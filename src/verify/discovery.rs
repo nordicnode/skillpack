@@ -19,6 +19,16 @@ use super::schema;
 static NAME_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(schema::NAME_KEBAB_REGEX).expect("compiled constant regex"));
 
+/// Render `path` as a forward-slash-separated string relative-ish to `root`.
+/// Windows `Path` uses `\`, but the verify report and snapshot paths are
+/// cross-OS canonical — marketplace.json schema requires `./` + forward
+/// slashes only, and a `\` in the human/JSON report would break downstream
+/// tools + snapshot equality. Strips `root` prefix when present.
+fn rel_unix(root: &Path, path: &Path) -> String {
+    let stripped = path.strip_prefix(root).unwrap_or(path);
+    stripped.to_string_lossy().replace('\\', "/")
+}
+
 /// Run every discovery check, returning one [`CheckResult`] per check.
 ///
 /// `root` is the plugin root (e.g. the dir containing `.claude-plugin/`,
@@ -461,11 +471,7 @@ fn check_one_skill_md(root: &Path, path: &Path, prefix: &str) -> Result<CheckRes
     let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let fm = parse_skill_frontmatter(&raw).unwrap_or_default();
 
-    let rel = path
-        .strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string();
+    let rel = rel_unix(root, path);
 
     // description present.
     let Some(description) = fm.description.as_deref() else {
@@ -640,11 +646,7 @@ fn check_one_mdc(root: &Path, path: &Path) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let fm = parse_cursor_mdc_frontmatter(&raw).unwrap_or_default();
 
-    let rel = path
-        .strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string();
+    let rel = rel_unix(root, path);
 
     let Some(description) = fm.description.as_deref() else {
         return Ok(CheckResult::fail(
@@ -891,10 +893,7 @@ fn check_one_opencode_agent(root: &Path, path: &Path) -> Result<CheckResult> {
         Ok(CheckResult::pass(
             check_id,
             "OpenCode agent file validates against opencode.ai/docs/agents",
-            format!(
-                "{} validates",
-                path.strip_prefix(root).unwrap_or(path).display()
-            ),
+            format!("{} validates", rel_unix(root, path)),
         ))
     } else {
         Ok(CheckResult::warn(
@@ -942,7 +941,7 @@ pub(crate) fn find_copilot_instructions(root: &Path) -> Option<std::path::PathBu
 fn check_copilot_instructions(root: &Path, path: &Path) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let check_id = "discovery.copilot.instructions";
-    let rel = path.strip_prefix(root).unwrap_or(path);
+    let rel = rel_unix(root, path);
 
     // The Copilot spec (see schema.rs) says "Plain markdown, no frontmatter."
     // A file starting with `---` is a hard spec violation.
@@ -970,7 +969,7 @@ fn check_copilot_instructions(root: &Path, path: &Path) -> Result<CheckResult> {
         Some(line) if line.trim_start().starts_with('#') => Ok(CheckResult::pass(
             check_id,
             "Copilot instructions file validates",
-            format!("{} validates", rel.display()),
+            format!("{} validates", rel),
         )),
         Some(_) => Ok(CheckResult::warn(
             check_id,
