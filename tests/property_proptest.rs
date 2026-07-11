@@ -8,7 +8,7 @@
 
 use proptest::prelude::*;
 
-use skillpack::verify::discovery::parse_skill_frontmatter;
+use skillpack::verify::discovery::{parse_cursor_mdc_frontmatter, parse_skill_frontmatter};
 use skillpack::verify::invocation::extract_flags;
 
 proptest! {
@@ -47,6 +47,13 @@ proptest! {
     #[test]
     fn parse_frontmatter_never_panics(blob in "[\x20-\x7E\n]{0,4000}") {
         let fm = parse_skill_frontmatter(&blob);
+        let _ = fm; // the property is "returns in bounded time without panicking"
+    }
+    /// Parsing cursor `.mdc` frontmatter out of arbitrary text must never
+    /// panic — the parser is total, returning `Option<CursorFrontmatter>`.
+    #[test]
+    fn parse_cursor_mdc_frontmatter_never_panics(blob in "[\x20-\x7E\n]{0,4000}") {
+        let fm = parse_cursor_mdc_frontmatter(&blob);
         let _ = fm; // the property is "returns in bounded time without panicking"
     }
 }

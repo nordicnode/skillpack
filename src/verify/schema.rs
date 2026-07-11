@@ -59,10 +59,22 @@ pub const RESERVED_NAMES: &[&str] = &[
 /// anthropics/claude-code manifest-reference.md — "Required path:
 /// `.claude-plugin/plugin.json`."
 pub const PLUGIN_JSON_PATH: &str = ".claude-plugin/plugin.json";
+/// The `.claude-plugin/` directory houses the marketplace + plugin manifests.
+/// Source: anthropics/claude-code plugin-reference.md. Verified July 2026.
+pub const CLAUDE_PLUGIN_DIR: &str = ".claude-plugin";
 
 /// `marketplace.json` lives at `.claude-plugin/marketplace.json`. Source:
 /// plugin-marketplaces — "Create `.claude-plugin/marketplace.json`."
 pub const MARKETPLACE_JSON_PATH: &str = ".claude-plugin/marketplace.json";
+/// Cursor project rules live under `.cursor/rules/<name>.mdc`. Source:
+/// cursor.com/docs/rules — "Project rules are stored as `.mdc` files in
+/// `.cursor/rules/`." Verified July 2026.
+pub const CURSOR_RULES_DIR: &str = ".cursor/rules";
+/// Codex CLI skills live under `.codex/skills/<name>/SKILL.md`. Source:
+/// the AgentSkills open standard (agskills.dev) and the Codex CLI skill
+/// convention — same `SKILL.md` frontmatter shape as Claude, installed under
+/// `.codex/skills/`. Verified July 2026.
+pub const CODEX_SKILLS_DIR: &str = ".codex/skills";
 
 // Action-verb heuristic: the first word of a good skill description is an
 // action verb (e.g. "Lint", "Generate", "Format"). We don't enforce grammar —

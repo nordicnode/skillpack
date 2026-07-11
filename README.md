@@ -94,7 +94,9 @@ caught up front.
 
 ## What `verify` checks
 
-**Discovery** — structural validation against the documented Claude Code schema:
+**Discovery** — structural validation per ecosystem. Claude Code (the
+`.claude-plugin/` + `skills/` set) is checked against the documented plugin
+schema:
 
 - plugin / marketplace names are kebab-case and not reserved
 - `description` is present and the combined description + `when_to_use` stays under the
@@ -103,6 +105,15 @@ caught up front.
 - marketplace `source` paths use the `./` prefix and forward slashes only
 - `version` is present in `plugin.json` (warns on missing/empty)
 - `author` is present in `plugin.json` (warns on missing or `"Unspecified"`)
+
+**Cursor** (`.cursor/rules/<name>.mdc`) — frontmatter is parsed and
+validated against cursor.com/docs/rules: `description` present, non-empty,
+under the 1,536-char listing cap; `alwaysApply` present and boolean
+(missing or non-boolean warns). **Codex** (`.codex/skills/<name>/SKILL.md`)
+reuses the same `SKILL.md` frontmatter schema as Claude (fields, length
+caps, name validation), namespaced under `discovery.codex.skill.*`. A
+`--target cursor`-only pack (legitimately without `.claude-plugin/`)
+passes `verify` without a false-positive Claude-side failure.
 
 **Invocation** — actually runs the documented CLI:
 
@@ -138,10 +149,11 @@ Exits non-zero on any critical failure, so it drops straight into CI as a PR gat
 
 ## Status
 
-`init` + `verify` across the five language ecosystems above. Generates
-distribution files for **Claude Code** (default), **Cursor** (`.cursor/rules/*.mdc`),
-and **Codex CLI** (`.codex/skills/`). MIT-licensed. `verify` currently checks
-the Claude distribution files only; multi-ecosystem verify is follow-up work.
+`init` + `verify` across the five language ecosystems above. Generates and
+verifies distribution files for **Claude Code** (default), **Cursor**
+(`.cursor/rules/*.mdc`), and **Codex CLI** (`.codex/skills/`). MIT-licensed.
+`verify` runs the discovery suite against every ecosystem `init` targets —
+a broken `.mdc` or Codex `SKILL.md` fails CI alongside a Claude-side defect.
 A bundled skill-pack marketplace is a later phase.
 
 ## Contributing

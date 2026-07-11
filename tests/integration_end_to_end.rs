@@ -944,3 +944,218 @@ fn subcommand_cli_init_then_verify_round_trip() {
         );
     }
 }
+
+#[test]
+fn multi_target_init_then_verify_round_trip() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--target",
+            "claude",
+            "--target",
+            "cursor",
+            "--target",
+            "codex",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join("skills/sample-rust/SKILL.md").exists());
+    assert!(root.join(".cursor/rules/sample-rust.mdc").exists());
+    assert!(root.join(".codex/skills/sample-rust/SKILL.md").exists());
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".claude-plugin/plugin.json").exists());
+
+    let json_out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        json_out.status.success(),
+        "verify must exit 0, got:\n{}",
+        String::from_utf8_lossy(&json_out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&json_out.stdout).unwrap();
+    assert_eq!(
+        json["ok"],
+        serde_json::Value::Bool(true),
+        "verify ok must be true, got:\n{json}"
+    );
+
+    let results = json["results"].as_array().unwrap();
+    for (check_id, label) in [
+        ("discovery.skill", "claude"),
+        ("discovery.codex.skill", "codex"),
+        ("discovery.cursor.mdc", "cursor"),
+    ] {
+        let matches: Vec<&serde_json::Value> = results
+            .iter()
+            .filter(|r| r["check_id"] == check_id)
+            .collect();
+        assert!(
+            !matches.is_empty(),
+            "verify must emit {check_id} result, got:\n{json}"
+        );
+        for r in &matches {
+            assert_eq!(
+                r["severity"], "pass",
+                "{label} check {check_id} must pass, got:\n{json}"
+            );
+        }
+    }
+}
+
+#[test]
+fn cursor_only_init_does_not_fail_on_missing_claude_plugin_dir() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--target",
+            "cursor",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join(".cursor/rules/sample-rust.mdc").exists());
+    assert!(!root.join(".claude-plugin").exists());
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify OK"));
+}
+
+#[test]
+fn broken_mdc_missing_description_fails_verify() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--target",
+            "cursor",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    fs::write(
+        root.join(".cursor/rules/sample-rust.mdc"),
+        "---\nalwaysApply: false\n---\n\n# sample-rust\n",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "verify must exit non-zero on missing description, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let results = json["results"].as_array().unwrap();
+    let name = "discovery.cursor.mdc.description";
+    let matches: Vec<&serde_json::Value> =
+        results.iter().filter(|r| r["check_id"] == name).collect();
+    assert!(
+        !matches.is_empty(),
+        "verify must emit {name} result, got:\n{json}"
+    );
+    for r in &matches {
+        assert_eq!(
+            r["severity"], "fail",
+            "{name} must be fail severity, got:\n{json}"
+        );
+    }
+}
+
+// Self-dogfood: `verify` against the skillpack repo's own committed
+// distribution files — Claude (skills/skillpack/SKILL.md + .claude-plugin/),
+// Cursor (.cursor/rules/skillpack.mdc), Codex (.codex/skills/skillpack/).
+// These files live in the committed repo (generated via `init --target
+// claude --target cursor --target codex` and committed), and `verify`
+// must pass against them end-to-end: the regression guard for the
+// multi-ecosystem discovery suite (a check regression here surfaces a
+// defect in `check_one_skill_md` / `check_one_mdc` / `check_marketplace` /
+// `check_plugin_json` against real, schema-conformant files).
+#[test]
+fn self_dogfood_verify_on_repos_committed_files() {
+    // The rendered `skillpack` binary's docs embed a `target/release/skillpack`
+    // path that only resolves after `cargo build --release`; the invocation
+    // check in `--debug` builds embeds the debug-binary path. Verify the
+    // release image exists so the invocation stage can spawn the documented
+    // CLI, then run verify against the repo itself.
+    Command::new("cargo")
+        .args(["build", "--release", "--quiet"])
+        .current_dir(repo_root())
+        .assert()
+        .success();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(repo_root())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "self-dogfood verify must pass, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.contains("verify OK"), "expected verify OK, got:\n{s}");
+    // Each ecosystem's pass message must be visible (multi-ecosystem verify
+    // actually covers the file — the regression target of this test).
+    assert!(s.contains(".claude-plugin/marketplace.json validates"));
+    assert!(s.contains("skills/skillpack/SKILL.md validates"));
+    assert!(s.contains(".codex/skills/skillpack/SKILL.md validates"));
+    assert!(s.contains(".cursor/rules/skillpack.mdc validates"));
+}

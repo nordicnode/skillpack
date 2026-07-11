@@ -123,7 +123,7 @@ pub fn render(report: &VerifyReport) -> String {
             r.severity.as_str(),
             r.check_name
         ));
-        if r.severity != Severity::Pass && !r.message.is_empty() {
+        if !r.message.is_empty() {
             out.push_str(&format!("    {}\n", r.message));
         }
         if let Some(s) = &r.suggestion {

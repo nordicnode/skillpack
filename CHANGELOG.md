@@ -4,6 +4,56 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-10
+
+### Added — Multi-ecosystem verify (design §3 Phase 4)
+
+- **`verify` now checks the Cursor and Codex distribution files**, not just
+  Claude's. Previously `init --target cursor --target codex` emitted those
+  files but `verify` silently ignored them — a broken `.mdc` or Codex
+  `SKILL.md` would pass `verify` and ship undetected. The discovery suite
+  now runs per-ecosystem:
+  - **Cursor** (`.cursor/rules/<name>.mdc`): new `check_one_mdc` parses the
+    YAML frontmatter and fails on a missing/empty `description` or a
+    description over the 1,536-char listing cap, warns on a missing or
+    non-boolean `alwaysApply`. Schema sourced from cursor.com/docs/rules
+    (verified July 2026).
+  - **Codex** (`.codex/skills/<name>/SKILL.md`): reuses the existing
+    `check_one_skill_md` validator with a distinct `discovery.codex.skill`
+    check_id prefix — same `SKILL.md` frontmatter shape as Claude, different
+    output path.
+  - Check ids are namespaced per ecosystem (`discovery.skill.*`,
+    `discovery.codex.skill.*`, `discovery.cursor.mdc.*`) so a CI report
+    names *which* ecosystem file drifted.
+
+### Fixed
+
+- **`verify` no longer hard-fails on a missing `.claude-plugin/`** — the
+  `marketplace.json` / `plugin.json` checks now run only when the Claude
+  distribution directory is present. A `--target cursor`-only pack
+  (legitimately without `.claude-plugin/`) was previously blocked by a
+  false positive `discovery.marketplace.missing` failure; `verify` now
+  skips the Claude checks entirely. An empty repo (no ecosystem files at
+  all) still emits a single `discovery.empty` failure so a typo'd `verify`
+  doesn't silently pass.
+
+### Notes
+
+- The human `verify` report now prints the per-file message for passing
+  checks (previously suppressed), so multi-ecosystem passes are visually
+  distinguishable (e.g. `skills/skillpack/SKILL.md validates` vs
+  `.codex/skills/skillpack/SKILL.md validates`). JSON output was already
+  per-file.
+- Schema constants live in `src/verify/schema.rs` with cited sources:
+  `CLAUDE_PLUGIN_DIR`, `CODEX_SKILLS_DIR`, `CURSOR_RULES_DIR` join the
+  existing `PLUGIN_JSON_PATH` / `MARKETPLACE_JSON_PATH`.
+- Invocation drift still runs against the first documented CLI's
+  SKILL.md only (design §5.2 step 3, unchanged from 0.2.1). Cursor/Codex
+  bodies are identical to the Claude SKILL.md body (same template), so a
+  Claude invocation-drift pass transitively validates the parallel
+  ecosystem files — per-ecosystem invocation drift is deferred to when a
+  pack legitimately ships divergent CLI surfaces per ecosystem.
+
 ## [0.3.0] - 2026-07-10
 
 ### Added — Multi-ecosystem emitter (design §3 Phase 4)

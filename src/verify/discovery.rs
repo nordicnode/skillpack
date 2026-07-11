@@ -20,27 +20,71 @@ static NAME_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(schema::NAME_KEBAB_REGEX).expect("compiled constant regex"));
 
 /// Run every discovery check, returning one [`CheckResult`] per check.
-/// `root` is the plugin root (the dir containing `.claude-plugin/`). Every
-/// SKILL.md under `skills/` (plus a root SKILL.md) is checked — a plugin may
-/// legitimately ship multiple skills (Improvement C).
+///
+/// `root` is the plugin root (e.g. the dir containing `.claude-plugin/`,
+/// `.cursor/rules/`, or `.codex/skills/`). Each ecosystem present is checked
+/// independently — discovery degrades gracefully when an ecosystem's files
+/// are absent (a `--target cursor`-only pack shouldn't fail on a missing
+/// `.claude-plugin/`).
 pub fn run(root: &Path) -> Result<Vec<CheckResult>> {
-    let mut out = vec![check_marketplace(root)?, check_plugin_json(root)?];
-    // Check every skill; if none exist, emit a single missing-skill failure
-    // (the earlier behavior) so a plugin with zero skills fails clearly.
-    let skills = find_skill_files(root);
-    if skills.is_empty() {
-        out.push(CheckResult::fail(
-            "discovery.skill.missing",
-            "a SKILL.md exists (skills/<name>/SKILL.md or root)",
-            "no SKILL.md found",
-            "To fix: run `skillpack init`, or add skills/<your-tool>/SKILL.md.",
-        ));
-    } else {
-        for skill_path in skills {
-            out.push(check_one_skill_md(root, &skill_path)?);
+    let mut out = Vec::new();
+
+    // Claude Code: marketplace.json + plugin.json + skills/<name>/SKILL.md.
+    // The marketplace/plugin checks only run when the Claude distribution is
+    // present — a `--target cursor`-only pack legitimately has no
+    // `.claude-plugin/` and must not fail on its absence.
+    if claude_present(root) {
+        out.push(check_marketplace(root)?);
+        out.push(check_plugin_json(root)?);
+        let skills = find_skill_files(root);
+        if skills.is_empty() {
+            out.push(CheckResult::fail(
+                "discovery.skill.missing",
+                "a SKILL.md exists (skills/<name>/SKILL.md or root)",
+                "no SKILL.md found",
+                "To fix: run `skillpack init`, or add skills/<your-tool>/SKILL.md.",
+            ));
+        } else {
+            for skill_path in skills {
+                out.push(check_one_skill_md(root, &skill_path, "discovery.skill")?);
+            }
         }
     }
+
+    // Codex CLI: `.codex/skills/<name>/SKILL.md` — same frontmatter shape as
+    // Claude, different output path and check_id prefix.
+    for skill_path in find_codex_skill_files(root) {
+        out.push(check_one_skill_md(
+            root,
+            &skill_path,
+            "discovery.codex.skill",
+        )?);
+    }
+
+    // Cursor: `.cursor/rules/<name>.mdc` — distinct frontmatter
+    // (`description` / `alwaysApply` / `globs`).
+    for mdc_path in find_cursor_mdc_files(root) {
+        out.push(check_one_mdc(root, &mdc_path)?);
+    }
+
+    // When no ecosystem files are present at all, the plugin is malformed —
+    // emit a single honest failure so a bare `skillpack verify` on an empty
+    // repo doesn't silently pass.
+    if out.is_empty() {
+        out.push(CheckResult::fail(
+            "discovery.empty",
+            "at least one ecosystem is present (Claude / Codex / Cursor)",
+            "no distribution files found (no .claude-plugin/, .codex/skills/, or .cursor/rules/)",
+            "To fix: run `skillpack init --target <ecosystem>` first.",
+        ));
+    }
+
     Ok(out)
+}
+
+/// True if the Claude Code distribution files (`.claude-plugin/`) are present.
+fn claude_present(root: &Path) -> bool {
+    root.join(schema::CLAUDE_PLUGIN_DIR).is_dir()
 }
 
 // ----- marketplace.json ------------------------------------------------------
@@ -369,7 +413,7 @@ fn find_kv_colon(line: &str) -> Option<usize> {
     None
 }
 
-fn check_one_skill_md(root: &Path, path: &Path) -> Result<CheckResult> {
+fn check_one_skill_md(root: &Path, path: &Path, prefix: &str) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let fm = parse_skill_frontmatter(&raw).unwrap_or_default();
 
@@ -382,7 +426,7 @@ fn check_one_skill_md(root: &Path, path: &Path) -> Result<CheckResult> {
     // description present.
     let Some(description) = fm.description.as_deref() else {
         return Ok(CheckResult::fail(
-            "discovery.skill.description",
+            &format!("{prefix}.description"),
             "SKILL.md has a `description`",
             format!("{rel}: frontmatter is missing `description`"),
             "To fix: add `description: <one sentence, use when ...>` to the frontmatter.",
@@ -390,7 +434,7 @@ fn check_one_skill_md(root: &Path, path: &Path) -> Result<CheckResult> {
     };
     if description.trim().is_empty() {
         return Ok(CheckResult::fail(
-            "discovery.skill.description",
+            &format!("{prefix}.description"),
             "SKILL.md `description` is non-empty",
             format!("{rel}: `description` is empty"),
             "To fix: write one sentence describing the task the skill does.",
@@ -406,7 +450,7 @@ fn check_one_skill_md(root: &Path, path: &Path) -> Result<CheckResult> {
     };
     if combined.chars().count() > schema::SKILL_LISTING_CHAR_CAP {
         return Ok(CheckResult::fail(
-            "discovery.skill.description_length",
+            &format!("{prefix}.description_length"),
             "combined description + when_to_use stays under 1,536 chars",
             format!(
                 "{rel}: combined description + when_to_use is {} chars (cap {})",
@@ -422,7 +466,7 @@ fn check_one_skill_md(root: &Path, path: &Path) -> Result<CheckResult> {
     let starts_alpha = first_word.chars().next().is_some_and(char::is_alphabetic);
     if !starts_alpha {
         return Ok(CheckResult::warn(
-            "discovery.skill.description_action_verb",
+            &format!("{prefix}.description_action_verb"),
             "SKILL.md description leads with an action",
             format!("{rel}: description does not start with a word (got `{first_word}`)"),
             "To fix: lead with an action verb (e.g. \"Generate ...\", \"Lint ...\") so the agent knows what this does.",
@@ -437,7 +481,7 @@ fn check_one_skill_md(root: &Path, path: &Path) -> Result<CheckResult> {
         .map_or(true, |w| w.trim().is_empty())
     {
         return Ok(CheckResult::warn(
-            "discovery.skill.when_to_use",
+            &format!("{prefix}.when_to_use"),
             "SKILL.md has non-empty `when_to_use` trigger phrases",
             format!("{rel}: `when_to_use` is missing or empty"),
             "To fix: list 2-5 trigger verbs/scenarios, e.g. \"Use when: the user asks to ...\".",
@@ -448,7 +492,7 @@ fn check_one_skill_md(root: &Path, path: &Path) -> Result<CheckResult> {
     if let Some(name) = fm.name.as_deref() {
         if name.chars().count() > schema::SKILL_NAME_MAX_CHARS {
             return Ok(CheckResult::fail(
-                "discovery.skill.name_length",
+                &format!("{prefix}.name_length"),
                 "SKILL.md `name` is ≤ 64 characters",
                 format!(
                     "{rel}: `name` is {} chars (max {})",
@@ -460,7 +504,7 @@ fn check_one_skill_md(root: &Path, path: &Path) -> Result<CheckResult> {
         }
         if schema::RESERVED_NAMES.contains(&name) {
             return Ok(CheckResult::warn(
-                "discovery.skill.name_reserved",
+                &format!("{prefix}.name_reserved"),
                 "SKILL.md name is not reserved",
                 format!("{rel}: skill name `{name}` is a reserved name"),
                 "To fix: pick a non-Anthropic-owned name.",
@@ -469,12 +513,157 @@ fn check_one_skill_md(root: &Path, path: &Path) -> Result<CheckResult> {
     }
 
     Ok(CheckResult::pass(
-        "discovery.skill",
+        prefix,
         "SKILL.md is structurally valid",
         format!("{rel} validates"),
     ))
 }
 
+// ----- .cursor/rules/*.mdc --------------------------------------------------
+
+/// Cursor `.mdc` frontmatter. Schema is documented at cursor.com/docs/rules
+/// (verified July 2026 against the live docs + the polarpoint.io writeup):
+///   description: <string, required> — drives auto-attach when alwaysApply:false
+///   globs:        [list of glob patterns]   — optional
+///   alwaysApply:  <bool>                    — required
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct CursorFrontmatter {
+    pub description: Option<String>,
+    pub always_apply: Option<String>,
+}
+
+impl CursorFrontmatter {
+    fn parse(block: &str) -> Self {
+        let mut fm = Self::default();
+        let mut current_key: Option<String> = None;
+        let mut current_val = String::new();
+        for line in block.lines() {
+            let trimmed = line.trim_end();
+            if let Some(idx) = find_kv_colon(trimmed) {
+                if let Some(k) = current_key.take() {
+                    store_cursor(&mut fm, &k, current_val.trim());
+                    current_val.clear();
+                }
+                let key = trimmed[..idx].trim().to_string();
+                let val = trimmed[idx + 1..].trim().trim_matches('"').to_string();
+                current_key = Some(key);
+                current_val = val;
+            } else if !trimmed.is_empty() && current_key.is_some() {
+                current_val.push('\n');
+                current_val.push_str(trimmed);
+            }
+        }
+        if let Some(k) = current_key.take() {
+            store_cursor(&mut fm, &k, current_val.trim());
+        }
+        fm
+    }
+}
+
+fn store_cursor(fm: &mut CursorFrontmatter, key: &str, val: &str) {
+    match key {
+        "description" => fm.description = Some(val.to_string()),
+        "alwaysApply" => fm.always_apply = Some(val.to_string()),
+        _ => {}
+    }
+}
+
+/// Parse the YAML frontmatter out of a Cursor `.mdc` file. Same `---`-delimited
+/// shape as [`parse_skill_frontmatter`]; the parsed struct differs because the
+/// keys differ. Exposed for unit tests.
+pub fn parse_cursor_mdc_frontmatter(raw: &str) -> Option<CursorFrontmatter> {
+    let mut lines = raw.lines();
+    let first = lines.next()?.trim();
+    if first != "---" {
+        return None;
+    }
+    let mut body = String::new();
+    for line in lines {
+        if line.trim() == "---" {
+            break;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    Some(CursorFrontmatter::parse(&body))
+}
+
+/// Validate a single `.cursor/rules/<name>.mdc` against Cursor's documented
+/// schema. Path-name consistency (kebab-ish) is warned, not failed — Cursor
+/// itself doesn't enforce it, but a name like `My Rule.mdc` is a maintenance
+/// smell.
+fn check_one_mdc(root: &Path, path: &Path) -> Result<CheckResult> {
+    let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let fm = parse_cursor_mdc_frontmatter(&raw).unwrap_or_default();
+
+    let rel = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
+
+    let Some(description) = fm.description.as_deref() else {
+        return Ok(CheckResult::fail(
+            "discovery.cursor.mdc.description",
+            ".mdc has a `description`",
+            format!("{rel}: frontmatter is missing `description`"),
+            "To fix: add `description: <one sentence, apply when ...>` to the frontmatter.",
+        ));
+    };
+    if description.trim().is_empty() {
+        return Ok(CheckResult::fail(
+            "discovery.cursor.mdc.description",
+            ".mdc `description` is non-empty",
+            format!("{rel}: `description` is empty"),
+            "To fix: write one sentence describing when Cursor should attach this rule.",
+        ));
+    }
+
+    // Cursor uses `description` for auto-attach logic; an oversized
+    // description dilutes that signal. Reuse the same 1,536-char listing cap
+    // as Claude/Codex — generous upper bound, not Cursor's own ~500-token rule
+    // guidance (which is a soft recommendation, not enforced).
+    if description.trim().chars().count() > schema::SKILL_LISTING_CHAR_CAP {
+        return Ok(CheckResult::fail(
+            "discovery.cursor.mdc.description_length",
+            "`.mdc` `description` stays under 1,536 chars",
+            format!(
+                "{rel}: `description` is {} chars (cap {})",
+                description.trim().chars().count(),
+                schema::SKILL_LISTING_CHAR_CAP
+            ),
+            "To fix: trim the description; Cursor uses it for auto-attach, so keep it one line.",
+        ));
+    }
+
+    // alwaysApply is required by the Cursor schema. We warn (not fail) on its
+    // absence: Cursor itself tolerates a missing field (defaults to false),
+    // but an explicit value is the documented contract — a warning teaches
+    // the maintainer without blocking them.
+    let always_apply = fm.always_apply.as_deref().unwrap_or("").trim();
+    if always_apply.is_empty() {
+        return Ok(CheckResult::warn(
+            "discovery.cursor.mdc.always_apply",
+            ".mdc has an explicit `alwaysApply`",
+            format!("{rel}: `alwaysApply` is missing or empty"),
+            "To fix: add `alwaysApply: true` or `alwaysApply: false` to the frontmatter.",
+        ));
+    }
+    if always_apply != "true" && always_apply != "false" {
+        return Ok(CheckResult::warn(
+            "discovery.cursor.mdc.always_apply",
+            ".mdc `alwaysApply` is a boolean",
+            format!("{rel}: `alwaysApply` is `{always_apply}` (expected `true`/`false`)"),
+            "To fix: set `alwaysApply: true` or `alwaysApply: false`.",
+        ));
+    }
+
+    Ok(CheckResult::pass(
+        "discovery.cursor.mdc",
+        ".mdc is structurally valid",
+        format!("{rel} validates"),
+    ))
+}
 // ----- helpers --------------------------------------------------------------
 
 /// Every SKILL.md under `skills/*/SKILL.md` plus a root `SKILL.md`, sorted for
@@ -507,6 +696,48 @@ pub(crate) fn find_skill_files(root: &Path) -> Vec<std::path::PathBuf> {
 /// deterministic plural form used by discovery.
 pub(crate) fn find_skill_file(root: &Path) -> Option<std::path::PathBuf> {
     find_skill_files(root).into_iter().next()
+}
+
+/// Every `.codex/skills/<name>/SKILL.md`, sorted. Same frontmatter shape
+/// as Claude's `skills/<name>/SKILL.md` but a distinct output path per
+/// Codex's `.codex/skills/` convention (design §3 Phase 4).
+pub(crate) fn find_codex_skill_files(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let dir = root.join(schema::CODEX_SKILLS_DIR);
+    if dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(&dir) {
+            let mut names: Vec<_> = entries.flatten().collect();
+            names.sort_by_key(|e| e.file_name());
+            for entry in names {
+                let candidate = entry.path().join("SKILL.md");
+                if candidate.is_file() {
+                    out.push(candidate);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Every `.cursor/rules/<name>.mdc`, sorted. Cursor's project-rule format:
+/// YAML frontmatter + markdown body, with its own frontmatter schema
+/// (`description` / `alwaysApply` / `globs`).
+pub(crate) fn find_cursor_mdc_files(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let dir = root.join(schema::CURSOR_RULES_DIR);
+    if dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(&dir) {
+            let mut names: Vec<_> = entries.flatten().collect();
+            names.sort_by_key(|e| e.file_name());
+            for entry in names {
+                let path = entry.path();
+                if path.is_file() && path.extension().is_some_and(|e| e == "mdc") {
+                    out.push(path);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// True for a valid kebab-case plugin/skill/marketplace name.
