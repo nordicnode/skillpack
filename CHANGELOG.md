@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-07-10
+
+### Fixed
+
+- **`plugin.json` version hardcoded `0.1.0`** — `generate::build_context`
+  emitted a literal `"0.1.0"` regardless of the project's real version. An
+  agent installing via a marketplace would see the wrong version signal for
+  every skill pack `skillpack` produced — the exact class of distribution-
+  layer drift `verify` exists to catch, yet `verify` itself never checked the
+  field. `introspect` now reads the version from the language manifest
+  (`Cargo.toml [package].version`, `package.json "version"`,
+  `pyproject.toml [project].version`, `*.gemspec spec.version`), stores it
+  on `ProjectProfile`, and `generate` passes it through to the template. Go
+  (`go.mod` has no version field) and manifests lacking a version key yield
+  an empty `version` rather than a fake sentinel — the honest signal.
+
+### Added
+
+- **`discovery.plugin.version` verify check** — warns on a missing or empty
+  `version` field in `plugin.json`, with a suggestion pointing at the
+  manifest key to set. Surfaced by the self-dogfood below: the old code
+  shipped `0.1.0` for a `0.2.3` crate and `verify` never flagged it.
+- **Self-dogfood** — `skillpack` now generates and verifies its own skill
+  pack (`skills/skillpack/SKILL.md`, `.claude-plugin/marketplace.json`,
+  `.claude-plugin/plugin.json`) via a committed `skillpack.toml`. Closes the
+  Phase-1 §10 "use it on yourself" gap; the repo is now installable as
+  `claude plugin marketplace add nordicnode/skillpack`.
+
 ## [0.2.3] - 2026-07-10
 
 ### Fixed

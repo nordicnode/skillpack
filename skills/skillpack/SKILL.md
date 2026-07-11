@@ -1,0 +1,63 @@
+---
+name: skillpack
+description: "Generate and verify the agent-distribution layer for any OSS project"
+when_to_use: "generate a claude code skill pack, verify agent-discoverability of a CLI or library, scaffold claude plugin distribution files"
+allowed-tools: Read Bash
+---
+
+# skillpack
+
+Generate and verify the agent-distribution layer for any OSS project
+
+## When to use
+
+Invoke this skill when the user's task matches any of these triggers:
+
+- generate a claude code skill pack
+- verify agent-discoverability of a CLI or library
+- scaffold claude plugin distribution files
+
+## When NOT to use
+
+- Do not use this skill if the user only wants to *read* or *inspect* skillpack without performing an action — prefer reading docs directly.
+- Do not use this skill for tasks outside the Rust tooling it was built for.
+
+## Installation
+
+
+Ensure `skillpack` is installed and available on PATH before invoking the examples below.
+
+
+
+## Invocation
+
+The exact command an agent should run to use this tool:
+
+```
+skillpack init
+```
+
+Run `skillpack --help` to discover the available flags. Documented flags (verified by `skillpack verify`):
+
+- `--verbose`
+- `--debug`
+- `-h`
+- `--help`
+- `-V`
+- `--version`
+
+### Subcommands
+
+This CLI uses subcommands. Each one has its own flags (verified by `skillpack verify`):
+
+- `init` — flags: `--root`, `--non-interactive`, `--accept-warnings`, `--verbose`, `--debug`, `--license`
+- `verify` — flags: `--root`, `--format`, `--verbose`, `--debug`
+
+Run `skillpack <subcommand> --help` for a subcommand's full options.
+
+
+## Footguns / gotchas
+
+- Verify the tool is installed before relying on it; do not assume availability.
+- Prefer the documented `skillpack` flags; undocumented flags may change without notice.
+- This file is authoritative for agent invocation; if it drifts from the CLI's real `--help`, run `skillpack verify` to catch it.

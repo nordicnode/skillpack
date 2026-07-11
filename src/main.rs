@@ -450,6 +450,7 @@ mod confirm_tests {
             cli_subcommand_help: Vec::new(),
             repo_url: None,
             license: Some("MIT".into()),
+            version: None,
             description_hint: Some(hint),
         };
         // Must not panic.

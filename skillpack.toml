@@ -1,0 +1,13 @@
+[skill]
+name = "skillpack"
+one_line_description = "Generate and verify the agent-distribution layer for any OSS project"
+when_to_use_phrases = [
+    "generate a claude code skill pack",
+    "verify agent-discoverability of a CLI or library",
+    "scaffold claude plugin distribution files",
+]
+invocation_command = "skillpack init"
+license = "MIT"
+
+[defaults]
+license = "MIT"

@@ -41,6 +41,7 @@ fn cli_profile() -> ProjectProfile {
         repo_url: Some("https://github.com/example/chronicle".to_string()),
         license: Some("MIT".to_string()),
         description_hint: None,
+        version: Some("0.1.0".to_string()),
     }
 }
 
@@ -69,6 +70,7 @@ fn lib_profile() -> ProjectProfile {
         repo_url: Some("https://github.com/example/fastcsv".to_string()),
         license: Some("MIT".to_string()),
         description_hint: None,
+        version: Some("0.1.0".to_string()),
     }
 }
 

@@ -106,7 +106,7 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         "license": intent.license,
         "repo_url": profile.repo_url,
         "keywords": keywords,
-        "version": "0.1.0",
+        "version": profile.version.as_deref().unwrap_or_default(),
         "has_cli": has_cli,
         "cli_binary": cli_binary,
         "invocation_command": intent.invocation_command,

@@ -247,10 +247,23 @@ fn check_plugin_json(root: &Path) -> Result<CheckResult> {
         ));
     }
 
+    let version = v.get("version").and_then(|x| x.as_str()).unwrap_or("");
+    if version.is_empty() {
+        return Ok(CheckResult::warn(
+            "discovery.plugin.version",
+            "plugin.json has a `version`",
+            "plugin.json has no `version`",
+            "To fix: set `version` in your manifest (Cargo.toml [package].version, package.json \"version\", pyproject.toml [project].version); then re-run `skillpack init`.",
+        ));
+    }
+
     Ok(CheckResult::pass(
         "discovery.plugin",
         "plugin.json is structurally valid",
-        format!("{} validates (name={name})", schema::PLUGIN_JSON_PATH),
+        format!(
+            "{} validates (name={name}, version={version})",
+            schema::PLUGIN_JSON_PATH
+        ),
     ))
 }
 

@@ -1,0 +1,19 @@
+{
+  "name": "skillpack",
+  "owner": {
+    "name": "Unspecified",
+    "type": "individual",
+    "url": "https://github.com/nordicnode/skillpack.git"
+  },
+  "plugins": [
+    {
+      "name": "skillpack",
+      "source": "./",
+      "description": "Generate and verify the agent-distribution layer for any OSS project",
+      "license": "MIT",
+      "repository": "https://github.com/nordicnode/skillpack.git",
+      "keywords": ["rust", "cli", "generate"],
+      "category": "developer-tools"
+    }
+  ]
+}

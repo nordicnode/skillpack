@@ -38,6 +38,11 @@ pub struct ProjectProfile {
     pub repo_url: Option<String>,
     /// SPDX identifier guessed from LICENSE file or manifest, e.g. `MIT`.
     pub license: Option<String>,
+    /// Project version parsed from the language manifest (`Cargo.toml`
+    /// `[package].version`, `package.json` `"version"`, etc.). `None` when
+    /// the manifest has no version or the language has no version-bearing
+    /// manifest (e.g. Go `go.mod`).
+    pub version: Option<String>,
     /// First paragraph of README, used as a description hint. May be empty.
     pub description_hint: Option<String>,
 }

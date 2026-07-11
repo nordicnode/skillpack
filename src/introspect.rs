@@ -35,6 +35,7 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
     let manifest_name = project_manifest_name(root, language);
     let repo_url = detect_repo_url(root);
     let license = detect_license(root).or_else(|| manifest_license(root, language));
+    let version = project_manifest_version(root, language);
     let description_hint = read_readme_hint(root);
     let d = detect_cli(root, language, manifest_name.clone());
     let has_cli = d.has_cli;
@@ -68,6 +69,7 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
         cli_subcommand_help,
         repo_url,
         license,
+        version,
         description_hint,
     })
 }
@@ -174,6 +176,65 @@ fn project_manifest_name(root: &Path, language: Language) -> Option<String> {
             None
         }
         Language::Unknown => None,
+    }
+}
+
+/// Pull the project version out of the language manifest, best-effort.
+/// Mirrors [`project_manifest_name`] per language. Returns `None` for Go
+/// (`go.mod` has no version field — versioning is via Git tags or a
+/// separately-versioned file) and for manifests lacking a version key.
+fn project_manifest_version(root: &Path, language: Language) -> Option<String> {
+    match language {
+        Language::Rust => {
+            let raw = fs::read_to_string(root.join("Cargo.toml")).ok()?;
+            let v = toml::from_str::<toml::Value>(&raw).ok()?;
+            v.get("package")
+                .and_then(|p| p.get("version"))
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
+        }
+        Language::Node => {
+            let raw = fs::read_to_string(root.join("package.json")).ok()?;
+            let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+            v.get("version")?
+                .as_str()
+                .map(std::string::ToString::to_string)
+        }
+        Language::Python => {
+            if let Ok(raw) = fs::read_to_string(root.join("pyproject.toml")) {
+                if let Ok(v) = toml::from_str::<toml::Value>(&raw) {
+                    if let Some(ver) = v
+                        .get("project")
+                        .and_then(|p| p.get("version"))
+                        .and_then(|n| n.as_str())
+                    {
+                        return Some(ver.to_string());
+                    }
+                }
+            }
+            None
+        }
+        Language::Ruby => {
+            if let Ok(entries) = fs::read_dir(root) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("gemspec") {
+                        if let Ok(raw) = fs::read_to_string(&p) {
+                            if let Some(line) = raw
+                                .lines()
+                                .find(|l| l.contains("spec.version") || l.contains(".version ="))
+                            {
+                                if let Some(ver) = extract_ruby_string_value(line) {
+                                    return Some(ver.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Language::Go | Language::Unknown => None,
     }
 }
 
@@ -667,6 +728,7 @@ impl ProjectProfile {
             cli_subcommand_help: Vec::new(),
             repo_url: None,
             license: None,
+            version: None,
             description_hint: None,
         }
     }
