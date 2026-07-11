@@ -123,6 +123,7 @@ pub fn run(cmd: &mut Command, timeout: Duration) -> SpawnOutcome {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::*;
 
     #[cfg(unix)]
