@@ -59,6 +59,7 @@ and CI-friendly.
 | Ruby     | a `ruby exe/<name>` (or `bin/<name>`) binstub |
 | PHP      | `php <script>` from a `composer.json` `bin` entry |
 | JVM      | pre-built Gradle `installDist` script, or `java -jar` a Maven shaded / Gradle shadow jar (pure filesystem reads — no build invoked) |
+| C#       | `dotnet run --project <csproj>` (SDK-style, `OutputType=Exe`; `WinExe` GUI projects skipped) |
 
 Projects without a CLI take the pure-library path: `SKILL.md` documents the install +
 import pattern instead, and the invocation test is a no-op. The `has_cli` flag is the
@@ -168,7 +169,7 @@ Exits non-zero on any critical failure, so it drops straight into CI as a PR gat
 
 ## Status
 
-`init` + `verify` + `doctor` across the seven language ecosystems above. Generates and
+`init` + `verify` + `doctor` across the eight language ecosystems above. Generates and
 verifies distribution files for **Claude Code** (default), **Cursor**
 (`.cursor/rules/*.mdc`), **Codex CLI** (`.codex/skills/`), **OpenCode**
 (`.opencode/agents/`), and **GitHub Copilot** (`.github/copilot-instructions.md`).

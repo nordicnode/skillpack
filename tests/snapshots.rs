@@ -211,3 +211,13 @@ fn snapshot_jvm_cursor_globs() {
     let mdc = files.iter().find(|f| f.rel_path.ends_with(".mdc")).unwrap();
     insta::assert_snapshot!("cursor_jvm", mdc.contents);
 }
+
+// C#: verify Cursor globs derive from Language::CSharp (locks *.cs, *.csproj, *.sln).
+#[test]
+fn snapshot_csharp_cursor_globs() {
+    let mut p = cli_profile();
+    p.language = Language::CSharp;
+    let files = render_targets(&p, &cli_intent(), &[Target::Cursor]).unwrap();
+    let mdc = files.iter().find(|f| f.rel_path.ends_with(".mdc")).unwrap();
+    insta::assert_snapshot!("cursor_csharp", mdc.contents);
+}

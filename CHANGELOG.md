@@ -220,7 +220,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `pass` severity.
 - **Discovery.empty on bare repo**: `verify_on_empty_repo_fails_with_discovery_empty`
   asserts a repo with no ecosystem files emits `discovery.empty` at fail severity.
-- **Self-dogfood all 5 ecosystems**: `self_dogfood_verify_asserts_all_five_ecosystems`
+- **Self-dogfood all ecosystems**: `self_dogfood_verify_asserts_all_ecosystems`
   runs `verify` against the skillpack repo itself and asserts all 6 check ids
   (marketplace, skill, cursor.mdc, codex.skill, opencode.agent, copilot.instructions) pass.
 - **Doctor on plain Rust CLI**: `doctor_on_plain_rust_cli_reports_has_cli_true`

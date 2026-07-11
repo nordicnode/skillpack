@@ -302,6 +302,7 @@ fn category_hint(lang: Language) -> &'static str {
         Language::Ruby => "the Ruby tooling",
         Language::Php => "the PHP tooling",
         Language::Jvm => "the JVM tooling",
+        Language::CSharp => "the .NET/C# tooling",
         Language::Unknown => "the tooling",
     }
 }
@@ -343,6 +344,7 @@ fn cursor_globs_hint(lang: Language) -> Vec<String> {
             "build.gradle".into(),
             "build.gradle.kts".into(),
         ],
+        Language::CSharp => vec!["*.cs".into(), "*.csproj".into(), "*.sln".into()],
         Language::Unknown => vec![],
     }
 }

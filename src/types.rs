@@ -99,6 +99,7 @@ pub enum Language {
     Go,
     Ruby,
     Php,
+    CSharp,
     Jvm,
     Unknown,
 }
@@ -112,6 +113,7 @@ impl Language {
             Self::Go => "go",
             Self::Ruby => "ruby",
             Self::Php => "php",
+            Self::CSharp => "csharp",
             Self::Jvm => "jvm",
             Self::Unknown => "unknown",
         }

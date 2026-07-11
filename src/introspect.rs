@@ -129,6 +129,8 @@ fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
         || root.join("build.gradle.kts").exists()
     {
         Language::Jvm
+    } else if has_csproj(root) {
+        Language::CSharp
     } else if root.join("Gemfile").exists() || has_gemspec(root) {
         Language::Ruby
     } else {
@@ -136,7 +138,8 @@ fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
             "detect_language",
             "no known manifest found (none of: Cargo.toml, package.json, ".to_string()
                 + "pyproject.toml, setup.py, setup.cfg, go.mod, composer.json, "
-                + "pom.xml, build.gradle, build.gradle.kts, Gemfile, *.gemspec); "
+                + "pom.xml, build.gradle, build.gradle.kts, Gemfile, *.gemspec, "
+                + "*.csproj); "
                 + "language detected as Unknown",
         );
         Language::Unknown
@@ -419,6 +422,52 @@ fn has_gemspec(root: &Path) -> bool {
     })
 }
 
+/// True if the root contains any `*.csproj` file. Solution-only repos (`.sln`
+/// at root, csproj in subdirs) are not detected — same limitation class as
+/// Cargo workspace-only roots. ponytail: add .sln directory walk when needed.
+fn has_csproj(root: &Path) -> bool {
+    fs::read_dir(root).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("csproj"))
+    })
+}
+
+/// Select the best csproj at root for CLI invocation. Prefers one with
+/// `<OutputType>Exe</OutputType>`, skipping `WinExe` (GUI — no stdout).
+/// Ties broken lexicographically by filename for cross-platform determinism.
+/// Returns the path to the csproj, or `None` if none are suitable.
+fn select_csproj(root: &Path) -> Option<PathBuf> {
+    let mut csprojs: Vec<PathBuf> = fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("csproj"))
+        .collect();
+    csprojs.sort();
+    // First pass: prefer Exe/Console, skip WinExe (GUI — no stdout).
+    for p in &csprojs {
+        if let Ok(raw) = fs::read_to_string(p) {
+            match extract_xml_tag(&raw, "OutputType").as_deref() {
+                Some("WinExe") => continue,
+                Some("Exe") | Some("Console") => return Some(p.clone()),
+                _ => {}
+            }
+        }
+    }
+    // Second pass: first non-WinExe csproj (SDK-style defaults to Exe).
+    for p in &csprojs {
+        if let Ok(raw) = fs::read_to_string(p) {
+            if extract_xml_tag(&raw, "OutputType").as_deref() == Some("WinExe") {
+                continue;
+            }
+        }
+        return Some(p.clone());
+    }
+    None
+}
+
 /// Pull the project name out of the language manifest, best-effort.
 fn project_manifest_name(root: &Path, language: Language) -> Option<String> {
     match language {
@@ -523,6 +572,19 @@ fn project_manifest_name(root: &Path, language: Language) -> Option<String> {
             }
             None
         }
+        Language::CSharp => {
+            if let Some(csproj) = select_csproj(root) {
+                if let Ok(raw) = fs::read_to_string(&csproj) {
+                    if let Some(n) = extract_xml_tag(&raw, "AssemblyName") {
+                        return Some(n);
+                    }
+                    if let Some(n) = extract_xml_tag(&raw, "RootNamespace") {
+                        return Some(n);
+                    }
+                }
+            }
+            None
+        }
         Language::Unknown => None,
     }
 }
@@ -605,6 +667,9 @@ fn project_manifest_version(root: &Path, language: Language) -> Option<String> {
             }
             None
         }
+        Language::CSharp => select_csproj(root)
+            .and_then(|p| fs::read_to_string(&p).ok())
+            .and_then(|raw| extract_xml_tag(&raw, "Version")),
         Language::Go | Language::Unknown => None,
     }
 }
@@ -704,6 +769,10 @@ fn project_manifest_authors(root: &Path, language: Language) -> Option<String> {
             // build.gradle has no standard authors field.
             None
         }
+        Language::CSharp => select_csproj(root)
+            .and_then(|p| fs::read_to_string(&p).ok())
+            .and_then(|raw| extract_xml_tag(&raw, "Authors"))
+            .and_then(|a| a.split(',').next().map(|s| s.trim().to_string())),
         Language::Go | Language::Unknown => None,
     }
 }
@@ -971,6 +1040,7 @@ fn primary_cli_candidate(root: &Path, language: Language, name: &str) -> Option<
         Language::Ruby => ruby_cli_candidate(root, name),
         Language::Php => php_cli_candidate(root, name),
         Language::Jvm => jvm_cli_candidate(root, name),
+        Language::CSharp => csharp_cli_candidate(root, name),
         Language::Unknown => which_on_path(name).map(|_| CliCandidate {
             argv: vec![name.to_string()],
             spawn_cwd: root.to_path_buf(),
@@ -1242,6 +1312,29 @@ fn jvm_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
     // Fallback to PATH probe for an installed JAR/script on PATH.
     which_on_path(name).map(|p| CliCandidate {
         argv: vec![p.to_string_lossy().to_string()],
+        spawn_cwd: root.to_path_buf(),
+    })
+}
+
+/// C# / .NET: `dotnet run --project <csproj>` from the project root (the
+/// canonical uninstalled invocation — mirrors `go run .`). Requires `dotnet`
+/// on PATH (honest `None` otherwise). `select_csproj` skips `WinExe` projects
+/// (GUI — no stdout) for deterministic, cross-platform CLI invocation.
+/// The trailing `--` separates `dotnet run`'s own flags from the app's argv
+/// so an appended `--help` reaches the app, not dotnet (dotnet would print
+/// its own help and never invoke the program).
+fn csharp_cli_candidate(root: &Path, _name: &str) -> Option<CliCandidate> {
+    which_on_path("dotnet")?;
+    let csproj = select_csproj(root)?;
+    let csproj_arg = csproj.to_string_lossy().to_string();
+    Some(CliCandidate {
+        argv: vec![
+            "dotnet".to_string(),
+            "run".to_string(),
+            "--project".to_string(),
+            csproj_arg,
+            "--".to_string(),
+        ],
         spawn_cwd: root.to_path_buf(),
     })
 }
