@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.8.0] - 2026-07-11
+
+### Added — C# / .NET ecosystem support
+
+- New **language** ecosystem: C# / .NET (`*.csproj` detection via
+  `has_csproj` glob, SDK-style projects). `select_csproj` picks
+  deterministically: sort by filename, prefer `OutputType=Exe`, skip
+  `WinExe` (GUI, no stdout), lexicographic tiebreak. `csharp_cli_candidate`
+  emits `dotnet run --project <csproj> --` (trailing `--` separator so
+  appended `--help` reaches the app, not dotnet). Cursor globs:
+  `["*.cs", "*.csproj", "*.sln"]`. CI adds `setup-dotnet@v4` (net8.0).
+  Fixture `tests/fixtures/repos/csharp-cli/` with SDK-style csproj +
+  `Program.cs` `--help` handler. Integration test `#[ignore]`-gated
+  (self-skips without dotnet, pre-builds with `dotnet build -v q`).
+
 ## [0.7.0] - 2026-07-11
 
 ### Added — multi-ecosystem depth + language coverage
