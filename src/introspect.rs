@@ -135,7 +135,8 @@ fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
         diag.push(
             "detect_language",
             "no known manifest found (none of: Cargo.toml, package.json, ".to_string()
-                + "pyproject.toml, setup.py, setup.cfg, go.mod, composer.json, Gemfile, *.gemspec); "
+                + "pyproject.toml, setup.py, setup.cfg, go.mod, composer.json, "
+                + "pom.xml, build.gradle, build.gradle.kts, Gemfile, *.gemspec); "
                 + "language detected as Unknown",
         );
         Language::Unknown
