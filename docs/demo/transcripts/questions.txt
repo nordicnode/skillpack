@@ -1,0 +1,11 @@
+Use the `fd` tool installed in this repo to do these tasks. Do NOT read the source code (src/*.rs) — the help/README is enough. Actually run fd where needed.
+
+Q1. Find all `.rs` files in the current directory (excluding target/). Show the exact command you'd run, then run it and paste the first 5 lines of output.
+
+Q2. Make the search case-sensitive. Find files matching "README". Run it, paste first 3 lines.
+
+Q3. Disable fd's gitignore-respecting behavior so it shows otherwise-ignored files. Find any files in the repo typically ignored by .gitignore.
+
+Q4. Find one file matching "*.rs" and run `wc -l` on it in a single fd command, using fd's flag to execute a command on each result.
+
+For each: end with `ANSWER N: <one-line summary of the command and result>`.

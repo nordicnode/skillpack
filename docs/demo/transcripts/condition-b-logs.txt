@@ -1,0 +1,75 @@
+timestamp=2026-07-11T20:52:08.019Z level=INFO run=cc0cd8f6 message="creating instance" directory=/tmp/fd-with-skillpack
+timestamp=2026-07-11T20:52:08.021Z level=INFO run=cc0cd8f6 message=fromDirectory directory=/tmp/fd-with-skillpack
+timestamp=2026-07-11T20:52:08.057Z level=INFO run=cc0cd8f6 message=bootstrapping directory=/tmp/fd-with-skillpack
+timestamp=2026-07-11T20:52:08.064Z level=INFO run=cc0cd8f6 message=loading path=/home/mikey/.config/opencode/config.json
+timestamp=2026-07-11T20:52:08.068Z level=INFO run=cc0cd8f6 message=loading path=/home/mikey/.config/opencode/opencode.json
+timestamp=2026-07-11T20:52:08.073Z level=INFO run=cc0cd8f6 message=loading path=/home/mikey/.config/opencode/opencode.jsonc
+timestamp=2026-07-11T20:52:08.093Z level=INFO run=cc0cd8f6 message=loading path=/tmp/fd-with-skillpack/.opencode/opencode.json
+timestamp=2026-07-11T20:52:08.094Z level=INFO run=cc0cd8f6 message=loading path=/tmp/fd-with-skillpack/.opencode/opencode.jsonc
+timestamp=2026-07-11T20:52:09.165Z level=INFO run=cc0cd8f6 message="all LSPs are disabled"
+timestamp=2026-07-11T20:52:09.167Z level=INFO run=cc0cd8f6 message="all formatters are disabled"
+timestamp=2026-07-11T20:52:09.167Z level=INFO run=cc0cd8f6 message=init
+timestamp=2026-07-11T20:52:09.212Z level=INFO run=cc0cd8f6 message=created id=ses_0ad0c5283ffeHfj5n7Vk7VlTec slug=quick-eagle version=1.17.15 projectID=5331ab25bbd7e1e84cbd57de53711ab7259d1eae directory=/tmp/fd-with-skillpack path="" workspaceID=undefined parentID=undefined title="New session - 2026-07-11T20:52:09.212Z" agent=undefined model=undefined metadata=undefined permission="[{\"permission\":\"question\",\"pattern\":\"*\",\"action\":\"deny\"},{\"permission\":\"plan_enter\",\"pattern\":\"*\",\"action\":\"deny\"},{\"permission\":\"plan_exit\",\"pattern\":\"*\",\"action\":\"deny\"}]" cost=0 tokens.input=0 tokens.output=0 tokens.reasoning=0 tokens.cache.read=0 tokens.cache.write=0 time.created=1783803129212 time.updated=1783803129212
+timestamp=2026-07-11T20:52:09.265Z level=INFO run=cc0cd8f6 message="fetching index" url=http://127.0.0.1:32931/index.json
+timestamp=2026-07-11T20:52:09.290Z level=INFO run=cc0cd8f6 message="event connected"
+timestamp=2026-07-11T20:52:09.316Z level=INFO run=cc0cd8f6 message=init count=3
+timestamp=2026-07-11T20:52:09.513Z level=INFO run=cc0cd8f6 message=loop session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec step=0
+timestamp=2026-07-11T20:52:09.538Z level=INFO run=cc0cd8f6 message=stream providerID=9router modelID=nvidia/z-ai/glm-5.2 session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec small=true agent=title mode=primary
+timestamp=2026-07-11T20:52:09.557Z level=INFO run=cc0cd8f6 message="llm runtime selected" llm.runtime=ai-sdk llm.provider=9router llm.model=nvidia/z-ai/glm-5.2
+timestamp=2026-07-11T20:52:09.612Z level=INFO run=cc0cd8f6 message=tracking hash=1b075cb0bcf312696fc9011d67729d97ed110d34 cwd=/tmp/fd-with-skillpack git=/home/mikey/.local/share/opencode/snapshot/5331ab25bbd7e1e84cbd57de53711ab7259d1eae/49eec90fc0bf79792aa41f0d6ab6876c6630eb9e
+timestamp=2026-07-11T20:52:09.630Z level=INFO run=cc0cd8f6 message="shell tool using shell" shell=/usr/bin/bash
+timestamp=2026-07-11T20:52:10.721Z level=INFO run=cc0cd8f6 message="watcher backend" directory=/tmp/fd-with-skillpack platform=linux backend=inotify
+timestamp=2026-07-11T20:52:10.730Z level=INFO run=cc0cd8f6 message="project copy refresh started" projectID=5331ab25bbd7e1e84cbd57de53711ab7259d1eae
+timestamp=2026-07-11T20:52:11.001Z level=INFO run=cc0cd8f6 message="project copy refresh done" projectID=5331ab25bbd7e1e84cbd57de53711ab7259d1eae updated=[] removed=[]
+timestamp=2026-07-11T20:52:11.110Z level=INFO run=cc0cd8f6 message="booting location services" directory=/tmp/fd-with-skillpack workspaceID=undefined
+timestamp=2026-07-11T20:52:11.120Z level=INFO run=cc0cd8f6 message=process session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec messageID=msg_f52f3aead001N4amHldjAPYwuT
+timestamp=2026-07-11T20:52:11.121Z level=INFO run=cc0cd8f6 message=stream providerID=9router modelID=nvidia/z-ai/glm-5.2 session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec small=false agent=fd-find mode=primary
+timestamp=2026-07-11T20:52:11.123Z level=INFO run=cc0cd8f6 message="llm runtime selected" llm.runtime=ai-sdk llm.provider=9router llm.model=nvidia/z-ai/glm-5.2
+timestamp=2026-07-11T20:52:12.685Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern=ls action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:12.685Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="command -v fd" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:12.685Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="fd --version" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:12.736Z level=INFO run=cc0cd8f6 message=tracking hash=1b075cb0bcf312696fc9011d67729d97ed110d34 cwd=/tmp/fd-with-skillpack git=/home/mikey/.local/share/opencode/snapshot/5331ab25bbd7e1e84cbd57de53711ab7259d1eae/49eec90fc0bf79792aa41f0d6ab6876c6630eb9e
+timestamp=2026-07-11T20:52:12.787Z level=INFO run=cc0cd8f6 message=loop session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec step=1
+timestamp=2026-07-11T20:52:12.818Z level=INFO run=cc0cd8f6 message=tracking hash=1b075cb0bcf312696fc9011d67729d97ed110d34 cwd=/tmp/fd-with-skillpack git=/home/mikey/.local/share/opencode/snapshot/5331ab25bbd7e1e84cbd57de53711ab7259d1eae/49eec90fc0bf79792aa41f0d6ab6876c6630eb9e
+timestamp=2026-07-11T20:52:12.827Z level=INFO run=cc0cd8f6 message=process session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec messageID=msg_f52f3bb74001ueDmH2TgLqy6kr
+timestamp=2026-07-11T20:52:12.827Z level=INFO run=cc0cd8f6 message=stream providerID=9router modelID=nvidia/z-ai/glm-5.2 session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec small=false agent=fd-find mode=primary
+timestamp=2026-07-11T20:52:12.829Z level=INFO run=cc0cd8f6 message="llm runtime selected" llm.runtime=ai-sdk llm.provider=9router llm.model=nvidia/z-ai/glm-5.2
+timestamp=2026-07-11T20:52:14.760Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="fd -e rs --exclude target" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:14.944Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="fd -s README" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:14.990Z level=INFO run=cc0cd8f6 message=tracking hash=1b075cb0bcf312696fc9011d67729d97ed110d34 cwd=/tmp/fd-with-skillpack git=/home/mikey/.local/share/opencode/snapshot/5331ab25bbd7e1e84cbd57de53711ab7259d1eae/49eec90fc0bf79792aa41f0d6ab6876c6630eb9e
+timestamp=2026-07-11T20:52:15.011Z level=INFO run=cc0cd8f6 message=loop session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec step=2
+timestamp=2026-07-11T20:52:15.034Z level=INFO run=cc0cd8f6 message=tracking hash=1b075cb0bcf312696fc9011d67729d97ed110d34 cwd=/tmp/fd-with-skillpack git=/home/mikey/.local/share/opencode/snapshot/5331ab25bbd7e1e84cbd57de53711ab7259d1eae/49eec90fc0bf79792aa41f0d6ab6876c6630eb9e
+timestamp=2026-07-11T20:52:15.046Z level=INFO run=cc0cd8f6 message=process session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec messageID=msg_f52f3c424001ANBHCyuZxkluBy
+timestamp=2026-07-11T20:52:15.047Z level=INFO run=cc0cd8f6 message=stream providerID=9router modelID=nvidia/z-ai/glm-5.2 session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec small=false agent=fd-find mode=primary
+timestamp=2026-07-11T20:52:15.049Z level=INFO run=cc0cd8f6 message="llm runtime selected" llm.runtime=ai-sdk llm.provider=9router llm.model=nvidia/z-ai/glm-5.2
+timestamp=2026-07-11T20:52:17.838Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="fd --no-ignore --exclude target --exclude .git" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:17.838Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="head -5" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:17.838Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="echo \"---\"" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:17.838Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="fd --no-ignore -t f --exclude target --exclude .git --hidden" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:17.838Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="grep -iE 'target|lock|tmp'" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:17.838Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern=head action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:18.655Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="fd -e rs --exclude target -X wc -l 2>&1" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:18.655Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="head -3" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:18.655Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="echo \"=== -x variant (one file) ===\"" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:18.655Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="fd -e rs --exclude target --max-results 1 -x wc -l" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:18.720Z level=INFO run=cc0cd8f6 message=tracking hash=1b075cb0bcf312696fc9011d67729d97ed110d34 cwd=/tmp/fd-with-skillpack git=/home/mikey/.local/share/opencode/snapshot/5331ab25bbd7e1e84cbd57de53711ab7259d1eae/49eec90fc0bf79792aa41f0d6ab6876c6630eb9e
+timestamp=2026-07-11T20:52:18.739Z level=INFO run=cc0cd8f6 message=loop session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec step=3
+timestamp=2026-07-11T20:52:18.759Z level=INFO run=cc0cd8f6 message=tracking hash=1b075cb0bcf312696fc9011d67729d97ed110d34 cwd=/tmp/fd-with-skillpack git=/home/mikey/.local/share/opencode/snapshot/5331ab25bbd7e1e84cbd57de53711ab7259d1eae/49eec90fc0bf79792aa41f0d6ab6876c6630eb9e
+timestamp=2026-07-11T20:52:18.772Z level=INFO run=cc0cd8f6 message=process session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec messageID=msg_f52f3d2b4001T2OtEJqq2pikl9
+timestamp=2026-07-11T20:52:18.773Z level=INFO run=cc0cd8f6 message=stream providerID=9router modelID=nvidia/z-ai/glm-5.2 session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec small=false agent=fd-find mode=primary
+timestamp=2026-07-11T20:52:18.774Z level=INFO run=cc0cd8f6 message="llm runtime selected" llm.runtime=ai-sdk llm.provider=9router llm.model=nvidia/z-ai/glm-5.2
+timestamp=2026-07-11T20:52:22.556Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="fd -e rs --exclude target -x wc -l" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:22.557Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="head -3" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:22.557Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="echo \"=== single file pick ===\"" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:22.557Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="fd -e rs --exclude target -x wc -l {} \\;" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:22.557Z level=INFO run=cc0cd8f6 message=evaluated permission=bash pattern="sed -n '1p;3p'" action.permission=* action.action=allow action.pattern=*
+timestamp=2026-07-11T20:52:22.639Z level=INFO run=cc0cd8f6 message=tracking hash=1b075cb0bcf312696fc9011d67729d97ed110d34 cwd=/tmp/fd-with-skillpack git=/home/mikey/.local/share/opencode/snapshot/5331ab25bbd7e1e84cbd57de53711ab7259d1eae/49eec90fc0bf79792aa41f0d6ab6876c6630eb9e
+timestamp=2026-07-11T20:52:22.663Z level=INFO run=cc0cd8f6 message=loop session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec step=4
+timestamp=2026-07-11T20:52:22.685Z level=INFO run=cc0cd8f6 message=tracking hash=1b075cb0bcf312696fc9011d67729d97ed110d34 cwd=/tmp/fd-with-skillpack git=/home/mikey/.local/share/opencode/snapshot/5331ab25bbd7e1e84cbd57de53711ab7259d1eae/49eec90fc0bf79792aa41f0d6ab6876c6630eb9e
+timestamp=2026-07-11T20:52:22.699Z level=INFO run=cc0cd8f6 message=process session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec messageID=msg_f52f3e208001EUhyJEuxeJNFKR
+timestamp=2026-07-11T20:52:22.700Z level=INFO run=cc0cd8f6 message=stream providerID=9router modelID=nvidia/z-ai/glm-5.2 session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec small=false agent=fd-find mode=primary
+timestamp=2026-07-11T20:52:22.701Z level=INFO run=cc0cd8f6 message="llm runtime selected" llm.runtime=ai-sdk llm.provider=9router llm.model=nvidia/z-ai/glm-5.2
+timestamp=2026-07-11T20:52:34.354Z level=INFO run=cc0cd8f6 message=tracking hash=1b075cb0bcf312696fc9011d67729d97ed110d34 cwd=/tmp/fd-with-skillpack git=/home/mikey/.local/share/opencode/snapshot/5331ab25bbd7e1e84cbd57de53711ab7259d1eae/49eec90fc0bf79792aa41f0d6ab6876c6630eb9e
+timestamp=2026-07-11T20:52:34.378Z level=INFO run=cc0cd8f6 message=loop session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec step=5
+timestamp=2026-07-11T20:52:34.379Z level=INFO run=cc0cd8f6 message="exiting loop" session.id=ses_0ad0c5283ffeHfj5n7Vk7VlTec
+timestamp=2026-07-11T20:52:34.401Z level=INFO run=cc0cd8f6 message="disposing instance" directory=/tmp/fd-with-skillpack

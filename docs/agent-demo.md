@@ -84,22 +84,26 @@ Output: `.opencode/agents/fd-find.md`, `skills/fd-find/SKILL.md`, `.cursor/rules
 
 ## Reproducing
 
-Full transcript JSON for both conditions is captured:
-- Condition A: `/tmp/demo-a-opencode.json` (20 step events)
-- Condition B: `/tmp/demo-b-opencode.json` (5 step events)
-- Logs: `/tmp/demo-a-logs.txt`, `/tmp/demo-b-logs.txt`
-- Questions: `/tmp/demo_questions.txt`
+Captured evidence in this repo under `docs/demo/transcripts/`:
+- Condition A: [condition-a-no-skillpack.json](demo/transcripts/condition-a-no-skillpack.json) (20 step events), [logs](demo/transcripts/condition-a-logs.txt)
+- Condition B: [condition-b-with-skillpack.json](demo/transcripts/condition-b-with-skillpack.json) (5 step events), [logs](demo/transcripts/condition-b-logs.txt)
+- Questions: [questions.txt](demo/transcripts/questions.txt)
+
+The transcripts were written then committed; you can re-run the comparison from a clean checkout with:
 
 ```sh
+# From your skillpack clone root:
+QUESTIONS="$(pwd)/docs/demo/transcripts/questions.txt"
+
 # Condition A (no skillpack)
 cd /tmp && git clone --depth=1 https://github.com/sharkdp/fd.git fd-no-skillpack
 cd fd-no-skillpack
-opencode run "$(cat /tmp/demo_questions.txt)" --format json --print-logs 2>/tmp/demo-a-logs.txt | tee /tmp/demo-a-opencode.json
+opencode run "$(cat "$QUESTIONS")" --format json --print-logs 2>a-logs.txt | tee a.json
 
 # Condition B (with skillpack)
 cd /tmp && git clone --depth=1 https://github.com/sharkdp/fd.git fd-with-skillpack
 cd fd-with-skillpack && cargo build --release
 # ... seed skillpack.toml + skillpack init --target opencode (see above)
 cd /tmp/fd-with-skillpack
-opencode run --agent fd-find "$(cat /tmp/demo_questions.txt)" --format json --print-logs 2>/tmp/demo-b-logs.txt | tee /tmp/demo-b-opencode.json
+opencode run --agent fd-find "$(cat "$QUESTIONS")" --format json --print-logs 2>b-logs.txt | tee b.json
 ```
