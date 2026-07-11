@@ -62,10 +62,12 @@ Projects without a CLI take the pure-library path: `SKILL.md` documents the inst
 import pattern instead, and the invocation test is a no-op. The `has_cli` flag is the
 single branching point.
 
-> **Platform:** V1 targets Unix (Linux/macOS). CLI detection probes `PATH` without
-> `PATHEXT`, so on Windows a bare `node` lookup misses `node.exe` and `verify`
-> will honestly report `has_cli=false` and skip the invocation check rather than
-> crash. Run on WSL/Linux/CI, or contribute `PATHEXT` enumeration.
+> **Platform:** Cross-platform — CI runs on Ubuntu, macOS, and Windows. CLI
+> detection probes `PATH` with `PATHEXT` enumeration on Windows (so a bare
+> `node` lookup resolves `node.exe`), and `cargo build` artifacts carry the
+> `.exe` suffix. Paths are normalized to forward slashes in the verify
+> report. PATHEXT enum (0.6.0), `.exe` artifact probe (0.6.3), and `\\?\`
+> UNC-prefix strip (0.6.4) brought Windows to parity.
 
 ## Install
 
