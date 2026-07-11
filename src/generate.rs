@@ -12,7 +12,7 @@ use once_cell::sync::Lazy;
 use tera::{Context as TeraContext, Tera};
 
 use crate::cli::Target;
-use crate::types::{Intent, ProjectProfile};
+use crate::types::{Intent, Language, ProjectProfile};
 
 /// Name → template source. Embedded via `include_str!` so templates ship inside
 /// the binary but still live as editable `.tera` files in the repo for
@@ -23,6 +23,7 @@ const SKILL_TPL: &str = include_str!("../templates/SKILL.md.tera");
 const CURSOR_RULE_TPL: &str = include_str!("../templates/cursor-rule.mdc.tera");
 const OPENCODE_AGENT_TPL: &str = include_str!("../templates/opencode-agent.md.tera");
 const COPILOT_INSTRUCTIONS_TPL: &str = include_str!("../templates/copilot-instructions.md.tera");
+const SKILL_BODY_TPL: &str = include_str!("../templates/skill_body.md.tera");
 
 static TERA: Lazy<Tera> = Lazy::new(|| {
     let mut tera = Tera::default();
@@ -36,6 +37,8 @@ static TERA: Lazy<Tera> = Lazy::new(|| {
         .expect("cursor rule template is valid");
     tera.add_raw_template("opencode-agent.md", OPENCODE_AGENT_TPL)
         .expect("opencode agent template is valid");
+    tera.add_raw_template("skill_body_partial", SKILL_BODY_TPL)
+        .expect("skill body partial template is valid");
     tera.add_raw_template("copilot-instructions.md", COPILOT_INSTRUCTIONS_TPL)
         .expect("copilot instructions template is valid");
     // json_encode is built into Tera; nothing custom to register.
@@ -126,6 +129,8 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         "documented_subcommands": documented_subcommands,
         "category_hint": category_hint(profile.language),
         "allowed_tools": allowed_tools_hint(profile.language),
+        "globs": cursor_globs_yaml(profile.language),
+        "opencode_mode": opencode_mode_hint(profile.language),
     }))
     .expect("Tera context serializes from JSON literal")
 }
@@ -146,7 +151,8 @@ fn one_line_description_yaml(s: &str) -> String {
 /// Renders all three files and returns them with their root-relative paths.
 /// The skill path uses the kebab name.
 pub fn render(profile: &ProjectProfile, intent: &Intent) -> Result<Vec<GeneratedFileOutput>> {
-    let ctx = build_context(profile, intent);
+    let mut ctx = build_context(profile, intent);
+    ctx.insert("noun", "skill");
     let name = coerce_kebab(&profile.name);
 
     let marketplace = TERA
@@ -197,8 +203,10 @@ pub fn render_targets(
         match target {
             Target::Claude => out.extend(render(profile, intent)?),
             Target::Cursor => {
+                let mut c = ctx.clone();
+                c.insert("noun", "rule");
                 let mdc = TERA
-                    .render("cursor-rule.mdc", &ctx)
+                    .render("cursor-rule.mdc", &c)
                     .context("rendering cursor-rule.mdc")?;
                 out.push(GeneratedFileOutput {
                     rel_path: format!(".cursor/rules/{name}.mdc"),
@@ -208,8 +216,10 @@ pub fn render_targets(
             Target::Codex => {
                 // Codex reads SKILL.md with the same frontmatter as Claude —
                 // reuse the same template, different output path.
+                let mut c = ctx.clone();
+                c.insert("noun", "skill");
                 let skill = TERA
-                    .render("SKILL.md", &ctx)
+                    .render("SKILL.md", &c)
                     .context("rendering codex SKILL.md")?;
                 out.push(GeneratedFileOutput {
                     rel_path: format!(".codex/skills/{name}/SKILL.md"),
@@ -219,8 +229,10 @@ pub fn render_targets(
             Target::OpenCode => {
                 // OpenCode: .opencode/agents/<name>.md with `description`
                 // (required) + `mode` frontmatter. Per opencode.ai/docs/agents.
+                let mut c = ctx.clone();
+                c.insert("noun", "agent");
                 let agent = TERA
-                    .render("opencode-agent.md", &ctx)
+                    .render("opencode-agent.md", &c)
                     .context("rendering opencode-agent.md")?;
                 out.push(GeneratedFileOutput {
                     rel_path: format!(".opencode/agents/{name}.md"),
@@ -230,8 +242,10 @@ pub fn render_targets(
             Target::Copilot => {
                 // GitHub Copilot: .github/copilot-instructions.md — plain
                 // markdown, no frontmatter. Per docs.github.com/copilot.
+                let mut c = ctx.clone();
+                c.insert("noun", "tool");
                 let instr = TERA
-                    .render("copilot-instructions.md", &ctx)
+                    .render("copilot-instructions.md", &c)
                     .context("rendering copilot-instructions.md")?;
                 out.push(GeneratedFileOutput {
                     rel_path: ".github/copilot-instructions.md".to_string(),
@@ -279,25 +293,69 @@ fn derive_keywords(profile: &ProjectProfile, intent: &Intent) -> Vec<String> {
     kws
 }
 
-fn category_hint(lang: crate::types::Language) -> &'static str {
+fn category_hint(lang: Language) -> &'static str {
     match lang {
-        crate::types::Language::Rust => "the Rust tooling",
-        crate::types::Language::Node => "the JavaScript/Node tooling",
-        crate::types::Language::Python => "the Python tooling",
-        crate::types::Language::Go => "the Go tooling",
-        crate::types::Language::Ruby => "the Ruby tooling",
-        crate::types::Language::Unknown => "the tooling",
+        Language::Rust => "the Rust tooling",
+        Language::Node => "the JavaScript/Node tooling",
+        Language::Python => "the Python tooling",
+        Language::Go => "the Go tooling",
+        Language::Ruby => "the Ruby tooling",
+        Language::Unknown => "the tooling",
     }
 }
 
-fn allowed_tools_hint(lang: crate::types::Language) -> Option<&'static str> {
+fn allowed_tools_hint(lang: Language) -> Option<&'static str> {
     // The skill describes a CLI a user runs; it can use Bash to run the CLI
     // and Read to consult output. We keep this conservative — a library skill
     // leans on the host project's tooling, so we leave it blank.
-    if let crate::types::Language::Unknown = lang {
+    if let Language::Unknown = lang {
         None
     } else {
         Some("Read Bash")
+    }
+}
+
+/// Cursor auto-attach is driven by `globs` (file-pattern match) OR
+/// `alwaysApply: true`. With neither, generated rules won't auto-trigger.
+/// Derive glob patterns from the detected language so the rule activates on
+/// the relevant files. Empty for Unknown — the maintainer should curate.
+fn cursor_globs_hint(lang: Language) -> Vec<String> {
+    match lang {
+        Language::Rust => vec!["*.rs".into()],
+        Language::Node => vec![
+            "*.js".into(),
+            "*.ts".into(),
+            "*.jsx".into(),
+            "*.tsx".into(),
+            "package.json".into(),
+        ],
+        Language::Python => vec!["*.py".into()],
+        Language::Go => vec!["*.go".into(), "go.mod".into()],
+        Language::Ruby => vec!["*.rb".into(), "*.gemspec".into(), "Gemfile".into()],
+        Language::Unknown => vec![],
+    }
+}
+
+/// Format globs as a YAML flow-sequence string with quoted entries:
+/// `"*.rs", "*.go"`. Empty vec → empty string (template's `{% if globs %}`
+/// gates the line). The template wraps with `globs: [{{ globs }}]` →
+/// `globs: ["*.rs"]`.
+fn cursor_globs_yaml(lang: Language) -> String {
+    cursor_globs_hint(lang)
+        .iter()
+        .map(|g| format!("\"{g}\""))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// OpenCode `mode` frontmatter: `primary` for CLI tools (standalone agent),
+/// `subagent` for pure libraries (invoked by a parent agent). Conservative
+/// default `subagent` for Unknown since the maintainer should confirm.
+fn opencode_mode_hint(lang: Language) -> &'static str {
+    if let Language::Unknown = lang {
+        "subagent"
+    } else {
+        "primary"
     }
 }
 

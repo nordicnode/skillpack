@@ -1,0 +1,50 @@
+---
+source: tests/snapshots.rs
+expression: mdc.contents
+---
+---
+description: "Journal events to a chronological log"
+alwaysApply: false
+globs: ["*.rs"]
+---
+
+# chronicle
+
+Journal events to a chronological log
+
+## When to use
+
+Invoke this rule when the user's task matches any of these triggers:
+
+- log a journal entry
+- record an incident
+
+
+## When NOT to use
+
+- Do not use this rule if the user only wants to *read* or *inspect* chronicle without performing an action — prefer reading docs directly.
+- Do not use this rule for tasks outside the Rust tooling it was built for.
+
+## Installation
+
+Ensure `chronicle` is installed and available on PATH before invoking the examples below.
+
+## Invocation
+
+The exact command an agent should run to use this tool:
+
+```
+chronicle --new "entry"
+```
+
+Run `chronicle --help` to discover the available flags. Documented flags (verified by `skillpack verify`):
+
+- `--new`
+- `--verbose`
+
+
+## Footguns / gotchas
+
+- Verify the tool is installed before relying on it; do not assume availability.
+- Prefer the documented `chronicle` flags; undocumented flags may change without notice.
+- This file is authoritative for agent invocation; if it drifts from the CLI's real `--help`, run `skillpack verify` to catch it.

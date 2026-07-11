@@ -18,7 +18,8 @@
 //! regenerate with `INSTA_UPDATE=always cargo test --test snapshots` then
 //! commit the updated `tests/snapshots/*.snap`.
 
-use skillpack::generate::render;
+use skillpack::cli::Target;
+use skillpack::generate::{render, render_targets};
 use skillpack::types::{Intent, Language, ProjectProfile};
 
 /// A fixed CLI profile: name, language, a real `--help` blob (so the
@@ -159,4 +160,33 @@ fn snapshot_render_is_idempotent_byte_identical() {
     for (x, y) in a.iter().zip(b.iter()) {
         assert_eq!(x.contents, y.contents, "{} not idempotent", x.rel_path);
     }
+}
+
+// ----- non-Claude target snapshots -----------------------------------------
+// Lock the Cursor globs, OpenCode mode, and Copilot noun ("tool") that the
+// shared partial + per-target frontmatter produce. Mirrors the Claude pattern
+// but via `render_targets` so the full multi-ecosystem path is exercised.
+
+#[test]
+fn snapshot_cli_cursor_mdc() {
+    let files = render_targets(&cli_profile(), &cli_intent(), &[Target::Cursor]).unwrap();
+    let mdc = files.iter().find(|f| f.rel_path.ends_with(".mdc")).unwrap();
+    insta::assert_snapshot!("cursor_cli", mdc.contents);
+}
+
+#[test]
+fn snapshot_cli_opencode_agent() {
+    let files = render_targets(&cli_profile(), &cli_intent(), &[Target::OpenCode]).unwrap();
+    let agent = files.iter().find(|f| f.rel_path.ends_with(".md")).unwrap();
+    insta::assert_snapshot!("opencode_cli", agent.contents);
+}
+
+#[test]
+fn snapshot_cli_copilot_instructions() {
+    let files = render_targets(&cli_profile(), &cli_intent(), &[Target::Copilot]).unwrap();
+    let instr = files
+        .iter()
+        .find(|f| f.rel_path.ends_with("copilot-instructions.md"))
+        .unwrap();
+    insta::assert_snapshot!("copilot_cli", instr.contents);
 }
