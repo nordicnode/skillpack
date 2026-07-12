@@ -1,7 +1,7 @@
 {
   "name": "skillpack",
   "description": "Generate and verify the agent-distribution layer for any OSS project",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "author": {
     "name": "nordicnode"
   },

@@ -4,7 +4,28 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.6] - 2026-07-12
 
+### Changed — internal: discovery module split
+
+- Extracted the per-ecosystem discovery checks from `src/verify/discovery.rs`
+  into three sibling modules under `src/verify/discovery/`:
+  `cursor.rs` (`CursorFrontmatter` + `parse_cursor_mdc_frontmatter` +
+  `check_one_mdc` + `find_cursor_mdc_files`, 172 lines),
+  `opencode.rs` (`OpenCodeFrontmatter` + `parse_opencode_agent_frontmatter` +
+  `check_one_opencode_agent` + `find_opencode_agent_files`, 147 lines), and
+  `copilot.rs` (`find_copilot_instructions` + `check_copilot_instructions`,
+  70 lines). `discovery.rs` shrank from 1041 to 689 lines (-34 %); the three
+  new leaves total 389 lines. Pure refactor — no public-API or behavior
+  change: `pub use` re-exports preserve the `crate::verify::discovery::`
+  import paths for `parse_cursor_mdc_frontmatter`, `CursorFrontmatter`,
+  `parse_opencode_agent_frontmatter`, and `OpenCodeFrontmatter`, so the
+  property test (`tests/property_proptest.rs` L11) and the `run()` orchestrator
+  are unchanged. Shared helpers `rel_unix` + `find_kv_colon` were lifted to
+  `pub(crate)`; `is_valid_kebab`, `validate_relative_source`, `read_optional`,
+  and the Claude/Codex/`store` core (marketplace.json + plugin.json +
+  SKILL.md frontmatter) stay in the parent. Self-dogfood: `skillpack verify`
+  on this repo still reports 12 passed, discoverability score 100/100.
 
 ## [0.8.5] - 2026-07-11
 

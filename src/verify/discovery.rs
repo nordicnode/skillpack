@@ -21,12 +21,22 @@ static NAME_RE: Lazy<Regex> =
 use super::super::introspect::{detect_language, project_manifest_version};
 use crate::types::DiagTrace;
 
+mod copilot;
+mod cursor;
+mod opencode;
+
+use copilot::{check_copilot_instructions, find_copilot_instructions};
+use cursor::{check_one_mdc, find_cursor_mdc_files};
+pub use cursor::{parse_cursor_mdc_frontmatter, CursorFrontmatter};
+use opencode::{check_one_opencode_agent, find_opencode_agent_files};
+pub use opencode::{parse_opencode_agent_frontmatter, OpenCodeFrontmatter};
+
 /// Render `path` as a forward-slash-separated string relative-ish to `root`.
 /// Windows `Path` uses `\`, but the verify report and snapshot paths are
 /// cross-OS canonical — marketplace.json schema requires `./` + forward
 /// slashes only, and a `\` in the human/JSON report would break downstream
 /// tools + snapshot equality. Strips `root` prefix when present.
-fn rel_unix(root: &Path, path: &Path) -> String {
+pub(crate) fn rel_unix(root: &Path, path: &Path) -> String {
     let stripped = path.strip_prefix(root).unwrap_or(path);
     stripped.to_string_lossy().replace('\\', "/")
 }
@@ -472,7 +482,7 @@ fn store(fm: &mut SkillFrontmatter, key: &str, val: &str) {
     }
 }
 
-fn find_kv_colon(line: &str) -> Option<usize> {
+pub(crate) fn find_kv_colon(line: &str) -> Option<usize> {
     // First `:` not inside quotes.
     let mut in_s = false;
     let mut in_d = false;
@@ -589,147 +599,6 @@ fn check_one_skill_md(root: &Path, path: &Path, prefix: &str) -> Result<CheckRes
     ))
 }
 
-// ----- .cursor/rules/*.mdc --------------------------------------------------
-
-/// Cursor `.mdc` frontmatter. Schema is documented at cursor.com/docs/rules
-/// (verified July 2026 against the live docs + the polarpoint.io writeup):
-///   description: <string, required> — drives auto-attach when alwaysApply:false
-///   globs:        [list of glob patterns]   — optional
-///   alwaysApply:  <bool>                    — required
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct CursorFrontmatter {
-    pub description: Option<String>,
-    pub always_apply: Option<String>,
-}
-
-impl CursorFrontmatter {
-    fn parse(block: &str) -> Self {
-        let mut fm = Self::default();
-        let mut current_key: Option<String> = None;
-        let mut current_val = String::new();
-        for line in block.lines() {
-            let trimmed = line.trim_end();
-            if let Some(idx) = find_kv_colon(trimmed) {
-                if let Some(k) = current_key.take() {
-                    store_cursor(&mut fm, &k, current_val.trim());
-                    current_val.clear();
-                }
-                let key = trimmed[..idx].trim().to_string();
-                let val = trimmed[idx + 1..].trim().trim_matches('"').to_string();
-                current_key = Some(key);
-                current_val = val;
-            } else if !trimmed.is_empty() && current_key.is_some() {
-                current_val.push('\n');
-                current_val.push_str(trimmed);
-            }
-        }
-        if let Some(k) = current_key.take() {
-            store_cursor(&mut fm, &k, current_val.trim());
-        }
-        fm
-    }
-}
-
-fn store_cursor(fm: &mut CursorFrontmatter, key: &str, val: &str) {
-    match key {
-        "description" => fm.description = Some(val.to_string()),
-        "alwaysApply" => fm.always_apply = Some(val.to_string()),
-        _ => {}
-    }
-}
-
-/// Parse the YAML frontmatter out of a Cursor `.mdc` file. Same `---`-delimited
-/// shape as [`parse_skill_frontmatter`]; the parsed struct differs because the
-/// keys differ. Exposed for unit tests.
-pub fn parse_cursor_mdc_frontmatter(raw: &str) -> Option<CursorFrontmatter> {
-    let mut lines = raw.lines();
-    let first = lines.next()?.trim();
-    if first != "---" {
-        return None;
-    }
-    let mut body = String::new();
-    for line in lines {
-        if line.trim() == "---" {
-            break;
-        }
-        body.push_str(line);
-        body.push('\n');
-    }
-    Some(CursorFrontmatter::parse(&body))
-}
-
-/// Validate a single `.cursor/rules/<name>.mdc` against Cursor's documented
-/// schema. Path-name consistency (kebab-ish) is warned, not failed — Cursor
-/// itself doesn't enforce it, but a name like `My Rule.mdc` is a maintenance
-/// smell.
-fn check_one_mdc(root: &Path, path: &Path) -> Result<CheckResult> {
-    let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let fm = parse_cursor_mdc_frontmatter(&raw).unwrap_or_default();
-
-    let rel = rel_unix(root, path);
-
-    let Some(description) = fm.description.as_deref() else {
-        return Ok(CheckResult::fail(
-            "discovery.cursor.mdc.description",
-            ".mdc has a `description`",
-            format!("{rel}: frontmatter is missing `description`"),
-            "To fix: add `description: <one sentence, apply when ...>` to the frontmatter.",
-        ));
-    };
-    if description.trim().is_empty() {
-        return Ok(CheckResult::fail(
-            "discovery.cursor.mdc.description",
-            ".mdc `description` is non-empty",
-            format!("{rel}: `description` is empty"),
-            "To fix: write one sentence describing when Cursor should attach this rule.",
-        ));
-    }
-
-    // Cursor uses `description` for auto-attach logic; an oversized
-    // description dilutes that signal. Reuse the same 1,536-char listing cap
-    // as Claude/Codex — generous upper bound, not Cursor's own ~500-token rule
-    // guidance (which is a soft recommendation, not enforced).
-    if description.trim().chars().count() > schema::SKILL_LISTING_CHAR_CAP {
-        return Ok(CheckResult::fail(
-            "discovery.cursor.mdc.description_length",
-            "`.mdc` `description` stays under 1,536 chars",
-            format!(
-                "{rel}: `description` is {} chars (cap {})",
-                description.trim().chars().count(),
-                schema::SKILL_LISTING_CHAR_CAP
-            ),
-            "To fix: trim the description; Cursor uses it for auto-attach, so keep it one line.",
-        ));
-    }
-
-    // alwaysApply is required by the Cursor schema. We warn (not fail) on its
-    // absence: Cursor itself tolerates a missing field (defaults to false),
-    // but an explicit value is the documented contract — a warning teaches
-    // the maintainer without blocking them.
-    let always_apply = fm.always_apply.as_deref().unwrap_or("").trim();
-    if always_apply.is_empty() {
-        return Ok(CheckResult::warn(
-            "discovery.cursor.mdc.always_apply",
-            ".mdc has an explicit `alwaysApply`",
-            format!("{rel}: `alwaysApply` is missing or empty"),
-            "To fix: add `alwaysApply: true` or `alwaysApply: false` to the frontmatter.",
-        ));
-    }
-    if always_apply != "true" && always_apply != "false" {
-        return Ok(CheckResult::warn(
-            "discovery.cursor.mdc.always_apply",
-            ".mdc `alwaysApply` is a boolean",
-            format!("{rel}: `alwaysApply` is `{always_apply}` (expected `true`/`false`)"),
-            "To fix: set `alwaysApply: true` or `alwaysApply: false`.",
-        ));
-    }
-
-    Ok(CheckResult::pass(
-        "discovery.cursor.mdc",
-        ".mdc is structurally valid",
-        format!("{rel} validates"),
-    ))
-}
 // ----- helpers --------------------------------------------------------------
 
 /// Every SKILL.md under `skills/*/SKILL.md` plus a root `SKILL.md`, sorted for
@@ -783,227 +652,6 @@ pub(crate) fn find_codex_skill_files(root: &Path) -> Vec<std::path::PathBuf> {
         }
     }
     out
-}
-
-/// Every `.cursor/rules/<name>.mdc`, sorted. Cursor's project-rule format:
-/// YAML frontmatter + markdown body, with its own frontmatter schema
-/// (`description` / `alwaysApply` / `globs`).
-pub(crate) fn find_cursor_mdc_files(root: &Path) -> Vec<std::path::PathBuf> {
-    let mut out = Vec::new();
-    let dir = root.join(schema::CURSOR_RULES_DIR);
-    if dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(&dir) {
-            let mut names: Vec<_> = entries.flatten().collect();
-            names.sort_by_key(|e| e.file_name());
-            for entry in names {
-                let path = entry.path();
-                if path.is_file() && path.extension().is_some_and(|e| e == "mdc") {
-                    out.push(path);
-                }
-            }
-        }
-    }
-    out
-}
-
-// ----- .opencode/agents/*.md ------------------------------------------------
-
-/// OpenCode agent frontmatter. Per opencode.ai/docs/agents: `description`
-/// is required; `mode` is optional (primary|subagent|all, defaults to all).
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct OpenCodeFrontmatter {
-    pub description: Option<String>,
-    pub mode: Option<String>,
-}
-
-impl OpenCodeFrontmatter {
-    fn parse(block: &str) -> Self {
-        let mut fm = Self::default();
-        for line in block.lines() {
-            let trimmed = line.trim_end();
-            if let Some(idx) = find_kv_colon(trimmed) {
-                let key = trimmed[..idx].trim();
-                let val = trimmed[idx + 1..].trim().trim_matches('"').to_string();
-                match key {
-                    "description" => fm.description = Some(val),
-                    "mode" => fm.mode = Some(val),
-                    _ => {}
-                }
-            }
-        }
-        fm
-    }
-}
-
-/// Parse the `---`-delimited YAML frontmatter out of an OpenCode agent .md
-/// file. Same shape as [`parse_cursor_mdc_frontmatter`]. Exposed for tests.
-pub fn parse_opencode_agent_frontmatter(raw: &str) -> Option<OpenCodeFrontmatter> {
-    let mut lines = raw.lines();
-    let first = lines.next()?.trim();
-    if first != "---" {
-        return None;
-    }
-    let mut body = String::new();
-    for line in lines {
-        if line.trim() == "---" {
-            break;
-        }
-        body.push_str(line);
-        body.push('\n');
-    }
-    Some(OpenCodeFrontmatter::parse(&body))
-}
-
-/// Validate a single `.opencode/agents/<name>.md` against OpenCode's
-/// documented schema. `description` present + non-empty + under the listing
-/// cap is a hard fail; `mode` valid range is a warning (docs mark it
-/// optional with a default). File-name kebab-ness is warned, not failed.
-fn check_one_opencode_agent(root: &Path, path: &Path) -> Result<CheckResult> {
-    let raw = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let Some(fm) = parse_opencode_agent_frontmatter(&raw) else {
-        return Ok(CheckResult::fail(
-            "discovery.opencode.agent.frontmatter",
-            "frontmatter block present (--- delimited)",
-            "no YAML frontmatter found",
-            "To fix: add a `---` frontmatter block with `description:`.",
-        ));
-    };
-
-    // `description` is required per opencode.ai/docs/agents.
-    let desc = fm.description.as_deref().unwrap_or("");
-    if desc.is_empty() {
-        return Ok(CheckResult::fail(
-            "discovery.opencode.agent.description",
-            "frontmatter `description` is present and non-empty",
-            "description is missing or empty",
-            "To fix: add `description: \"<what this agent does>\"` to the frontmatter.",
-        ));
-    }
-    if desc.chars().count() > schema::SKILL_LISTING_CHAR_CAP {
-        return Ok(CheckResult::fail(
-            "discovery.opencode.agent.description",
-            "description stays under the listing cap",
-            format!(
-                "description is {} chars (exceeds cap)",
-                desc.chars().count()
-            ),
-            "To fix: shorten the description.",
-        ));
-    }
-
-    // `mode` is optional; if present, must be primary|subagent|all (warn only).
-    let mut warnings: Vec<String> = Vec::new();
-    let check_id = "discovery.opencode.agent";
-    if let Some(mode) = &fm.mode {
-        if !matches!(mode.as_str(), "primary" | "subagent" | "all") {
-            warnings.push(format!(
-                "mode `{mode}` is not one of primary|subagent|all (defaults to all)"
-            ));
-        }
-    }
-
-    // File-name kebab-ness: warn so `My Agent.md` surfaces as a smell.
-    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-        if !is_valid_kebab(stem) {
-            warnings.push(format!("file name `{stem}` is not kebab-case"));
-        }
-    }
-
-    if warnings.is_empty() {
-        Ok(CheckResult::pass(
-            check_id,
-            "OpenCode agent file validates against opencode.ai/docs/agents",
-            format!("{} validates", rel_unix(root, path)),
-        ))
-    } else {
-        Ok(CheckResult::warn(
-            check_id,
-            "OpenCode agent file validates against opencode.ai/docs/agents",
-            warnings.join("; "),
-            "To fix: address the warnings above (non-blocking).",
-        ))
-    }
-}
-
-/// Every `.opencode/agents/<name>.md`, sorted.
-pub(crate) fn find_opencode_agent_files(root: &Path) -> Vec<std::path::PathBuf> {
-    let mut out = Vec::new();
-    let dir = root.join(schema::OPENCODE_AGENTS_DIR);
-    if dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(&dir) {
-            let mut names: Vec<_> = entries.flatten().collect();
-            names.sort_by_key(|e| e.file_name());
-            for entry in names {
-                let path = entry.path();
-                if path.is_file() && path.extension().is_some_and(|e| e == "md") {
-                    out.push(path);
-                }
-            }
-        }
-    }
-    out
-}
-
-// ----- .github/copilot-instructions.md --------------------------------------
-
-/// The single Copilot instructions path (one file, not a directory scan).
-pub(crate) fn find_copilot_instructions(root: &Path) -> Option<std::path::PathBuf> {
-    let p = root.join(schema::COPILOT_INSTRUCTIONS_PATH);
-    if p.is_file() {
-        Some(p)
-    } else {
-        None
-    }
-}
-
-/// Validate `.github/copilot-instructions.md`: plain markdown, no frontmatter.
-/// Must be non-empty and start with a `#` heading (structural, no grammar).
-fn check_copilot_instructions(root: &Path, path: &Path) -> Result<CheckResult> {
-    let raw = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let check_id = "discovery.copilot.instructions";
-    let rel = rel_unix(root, path);
-
-    // The Copilot spec (see schema.rs) says "Plain markdown, no frontmatter."
-    // A file starting with `---` is a hard spec violation.
-    if raw.trim_start().starts_with("---") {
-        return Ok(CheckResult::fail(
-            check_id,
-            "Copilot instructions are plain markdown (no frontmatter)",
-            "file starts with a `---` frontmatter block",
-            "To fix: remove the frontmatter block. Copilot instructions are plain markdown.",
-        ));
-    }
-    if raw.trim().is_empty() {
-        return Ok(CheckResult::fail(
-            check_id,
-            "file is non-empty",
-            "copilot-instructions.md is empty",
-            "To fix: add instructions content, or run `skillpack init --target copilot`.",
-        ));
-    }
-
-    // Copilot instructions are plain markdown; a leading `#` heading is the
-    // structural expectation (matches every example in the GitHub docs).
-    let first_non_blank = raw.lines().find(|l| !l.trim().is_empty());
-    match first_non_blank {
-        Some(line) if line.trim_start().starts_with('#') => Ok(CheckResult::pass(
-            check_id,
-            "Copilot instructions file validates",
-            format!("{} validates", rel),
-        )),
-        Some(_) => Ok(CheckResult::warn(
-            check_id,
-            "file starts with a `#` heading",
-            "first non-blank line is not a markdown heading",
-            "To fix: start the file with `# <tool name>`.",
-        )),
-        None => Ok(CheckResult::fail(
-            check_id,
-            "file is non-empty",
-            "file contains only blank lines",
-            "To fix: add instructions content.",
-        )),
-    }
 }
 
 /// True for a valid kebab-case plugin/skill/marketplace name.
