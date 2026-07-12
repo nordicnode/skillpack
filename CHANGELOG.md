@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+
+## [0.8.3] - 2026-07-11
+
+### Added — discoverability score in verify output
+
+- `verify` now computes a 0-100 `discoverability_score`: each check
+  contributes Pass = 1.0, Warn = 0.5, Error = 0.0, divided over non-skipped
+  checks (Skipped excluded from the denominator; all-skipped or empty → 0,
+  an honest "nothing verified" rather than a misleading 100). Exposed as
+  `discoverability_score` (integer) in the `--format json` report and in
+  the human summary line. The score does not gate the exit code — only
+  critical failures do — so it's a tracking signal, not a pass/fail gate.
+- New `VerifyReport::discoverability_score` method + 7 unit tests covering
+  edge cases (all-pass=100, warn=partial, error lowers, all-skipped=0,
+  empty=0, skipped-excluded, all-errors=0).
+- Integration test `verify_format_json_is_machine_readable` extended to
+  assert the score field is present, numeric, and matches the expected
+  value (90 — the rust-cli fixture emits one `discovery.plugin.author`
+  warning, so 4 pass + 1 warn = 4.5/5 = 90).
+
 ## [0.8.2] - 2026-07-11
 
 ### Added — verify catches plugin.json version drift

@@ -173,8 +173,16 @@ the invocation check is reported as a **warning** (not silently skipped), so the
 The invocation check runs against the **first** documented CLI; discovery checks above run
 against every `SKILL.md` (a plugin may ship several).
 
-Exits non-zero on any critical failure, so it drops straight into CI as a PR gate. Pass
-`--format json` for a machine-readable report (per-check ids, counts, `ok` flag) for scripting.
+**Discoverability score** — every `verify` run computes a 0-100 score: each
+check contributes Pass = 1.0, Warn = 0.5, Error = 0.0, divided over non-skipped
+checks. The JSON report carries it as `discoverability_score` (integer); the
+human report prints it in the summary line. Track it over time as a single
+agent-discoverability health number — it does not gate the exit code (only
+critical failures do).
+
+Exits non-zero on any critical failure, so it drops straight into CI as a PR
+gate. Pass `--format json` for a machine-readable report (per-check ids,
+counts, `ok` flag, `discoverability_score`) for scripting.
 
 ## Flags
 

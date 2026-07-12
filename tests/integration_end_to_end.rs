@@ -292,6 +292,11 @@ fn verify_format_json_is_machine_readable() {
     assert!(results
         .iter()
         .any(|r| r["check_id"].as_str().unwrap().starts_with("invocation.")));
+    // The score field is always present and numeric. The rust-cli fixture
+    // emits one warning (discovery.plugin.author — no author in
+    // skillpack.toml) so 4 pass + 1 warn = 4.5/5 = 90, not 100.
+    assert!(v["discoverability_score"].is_number());
+    assert_eq!(v["discoverability_score"], serde_json::Value::from(90));
 }
 
 // Version drift: plugin.json `version` must match the project manifest

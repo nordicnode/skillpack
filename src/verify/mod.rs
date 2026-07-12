@@ -134,7 +134,8 @@ pub fn render(report: &VerifyReport) -> String {
     let _ = &skip;
     let _ = &warn;
     out.push_str(&format!(
-        "\n{pass} passed, {warn} warning(s), {fail} failed"
+        "\n{pass} passed, {warn} warning(s), {fail} failed — discoverability score {}/100",
+        report.discoverability_score()
     ));
     out.push_str(if fail > 0 {
         " — verify FAILED\n"
@@ -145,8 +146,10 @@ pub fn render(report: &VerifyReport) -> String {
 }
 
 /// Render the report as a stable JSON object for CI / scripting. Shape:
-/// `{ "ok": bool, "counts": {pass,warn,fail,skip}, "results": [ {check_id,
-/// check_name, severity, message, suggestion?, location?} ... ] }`.
+/// `{ "ok": bool, "discoverability_score": u8, "counts": {pass,warn,fail,skip},
+/// "results": [ {check_id, check_name, severity, message, suggestion?,
+/// location?} ... ] }`. The score weights Pass=1.0, Warn=0.5, Error=0;
+/// Skipped excluded from the denominator.
 pub fn render_json(report: &VerifyReport) -> String {
     let (pass, warn, fail, skip) = report.counts();
     let results: Vec<_> = report
@@ -175,6 +178,7 @@ pub fn render_json(report: &VerifyReport) -> String {
         .collect();
     let body = serde_json::json!({
         "ok": !report.has_critical_failure(),
+        "discoverability_score": report.discoverability_score(),
         "counts": {
             "pass": pass,
             "warn": warn,

@@ -146,4 +146,111 @@ impl VerifyReport {
         }
         (pass, warn, fail, skip)
     }
+
+    /// A 0-100 score for the plugin distribution's agent-discoverability.
+    /// Each check contributes a weighted credit toward a denominator of
+    /// eligible (non-skipped) checks:
+    ///   Pass  = 1.0  Warn = 0.5  Error = 0.0
+    /// Skipped checks are excluded entirely (they represent "nothing to
+    /// verify here," not a quality signal). When no checks are eligible
+    /// (all skipped, or zero checks ran) the score is 0 — an honest
+    /// "nothing verified," not a misleading 100.
+    pub fn discoverability_score(&self) -> u8 {
+        let mut credits = 0.0_f32;
+        let mut eligible = 0;
+        for r in &self.results {
+            match r.severity {
+                Severity::Pass => {
+                    credits += 1.0;
+                    eligible += 1;
+                }
+                Severity::Warn => {
+                    credits += 0.5;
+                    eligible += 1;
+                }
+                Severity::Error => {
+                    eligible += 1;
+                }
+                Severity::Skipped => {}
+            }
+        }
+        if eligible == 0 {
+            return 0;
+        }
+        (credits / eligible as f32 * 100.0).round() as u8
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mk(id: &str, sev: Severity) -> CheckResult {
+        CheckResult {
+            check_id: id.to_string(),
+            check_name: id.to_string(),
+            severity: sev,
+            message: String::new(),
+            suggestion: None,
+            location: None,
+        }
+    }
+
+    #[test]
+    fn score_all_pass_is_100() {
+        let mut r = VerifyReport::default();
+        r.push(mk("a", Severity::Pass));
+        r.push(mk("b", Severity::Pass));
+        assert_eq!(r.discoverability_score(), 100);
+    }
+
+    #[test]
+    fn score_one_warn_out_of_two_is_75() {
+        let mut r = VerifyReport::default();
+        r.push(mk("a", Severity::Pass));
+        r.push(mk("b", Severity::Warn));
+        // 1.0 + 0.5 = 1.5 credits / 2 eligible = 75%
+        assert_eq!(r.discoverability_score(), 75);
+    }
+
+    #[test]
+    fn score_error_lowers_below_100() {
+        let mut r = VerifyReport::default();
+        r.push(mk("a", Severity::Pass));
+        r.push(mk("b", Severity::Pass));
+        r.push(mk("c", Severity::Error));
+        // 2.0 / 3 * 100 = 66.67 -> 67
+        assert_eq!(r.discoverability_score(), 67);
+    }
+
+    #[test]
+    fn score_all_skipped_is_zero() {
+        let mut r = VerifyReport::default();
+        r.push(mk("a", Severity::Skipped));
+        r.push(mk("b", Severity::Skipped));
+        assert_eq!(r.discoverability_score(), 0);
+    }
+
+    #[test]
+    fn score_empty_report_is_zero() {
+        let r = VerifyReport::default();
+        assert_eq!(r.discoverability_score(), 0);
+    }
+
+    #[test]
+    fn score_skipped_excluded_from_denominator() {
+        let mut r = VerifyReport::default();
+        r.push(mk("a", Severity::Skipped));
+        r.push(mk("b", Severity::Warn));
+        // 0.5 / 1 * 100 = 50, skipped doesn't dilute
+        assert_eq!(r.discoverability_score(), 50);
+    }
+
+    #[test]
+    fn score_all_errors_is_zero() {
+        let mut r = VerifyReport::default();
+        r.push(mk("a", Severity::Error));
+        r.push(mk("b", Severity::Error));
+        assert_eq!(r.discoverability_score(), 0);
+    }
 }
