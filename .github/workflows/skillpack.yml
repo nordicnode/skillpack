@@ -4,10 +4,10 @@
 #
 #   jobs:
 #     skillpack:
-#       uses: nordicnode/skillpack/.github/workflows/skillpack.yml@main
+#       uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.9.0
 #
-# (Pin to a tag — e.g. `@v0.9.0` — once a 0.9.0+ release ships that includes
-# this file. Until then `@main` tracks the latest.)
+# Pin to a released tag (e.g. `@v0.9.0`) — bump the pin to pick up new
+# features.
 #
 # The job installs `skillpack` from crates.io, then runs `skillpack verify` in
 # the consumer repo root. `verify` exits non-zero on any critical failure, so
@@ -27,10 +27,10 @@ on:
   workflow_call:
     inputs:
       skillpack-version:
-        description: 'crate version to install from crates.io (e.g. "0.8.8" or "0.9.0")'
+        description: 'crate version to install from crates.io (e.g. "0.9.0")'
         required: false
         type: string
-        default: '0.8.8'
+        default: '0.9.0'
 
 jobs:
   verify:
