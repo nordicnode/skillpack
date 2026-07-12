@@ -225,8 +225,10 @@ counts, `ok` flag, `discoverability_score`) for scripting.
 | `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`. Repeatable. |
 | `verify --format human\|json` | human report (default) or machine-readable JSON for CI   |
 | `verify --fix` | mechanically repair detected drift (rewrites only the file the drift lives in; surgical). No-op when nothing is fixable. |
+| `verify --min-score <N>` | minimum discoverability score (0–100) the run must reach to exit zero; gate runs against the post-fix report. Omitted by default. Pairs with `--format json` for CI. |
 | `doctor` | read-only diagnosis: print detected language, CLI, and diag trace (exit 0) |
 | `doctor --format human\|json` | read-only diagnosis as serialized `ProjectProfile` for CI (default: human) |
+| `--root <DIR>`           | project root to operate on (default: current dir); available on `init`, `verify`, `doctor`      |
 | `--verbose`             | print what `skillpack` detected in the repo (introspection)      |
 | `--debug`             | print every subprocess call                                       |
 

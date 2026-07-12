@@ -166,6 +166,13 @@ fn apply_regen_skill_md_frontmatter(
     // Derive the target from the location path: Codex skills live under
     // `.codex/skills/`, Claude skills under `skills/`. Render ONLY the
     // ecosystem whose file drifted — surgical: we don't touch the other path.
+    // ponytail: ceiling is two path-prefixes (Codex + default Claude). When a
+    // third ecosystem path appears (or a non-standard skill location), extend
+    // this `if/else` into a match on a thread-friendly enum (or a mapping from
+    // Target → canonical path prefix). The current prefix inference is fine
+    // for the only two SKILL.md locations init emits today; a wrong prefix
+    // falls into the Claude branch, finds no matching `rel_path`, and surfaces
+    // an anyhow error upstream (not silent), so the failure mode is loud.
     let target = if loc.starts_with(".codex/skills/") {
         Target::Codex
     } else {
@@ -206,7 +213,8 @@ fn apply_regen_skill_md_frontmatter(
     let committed = std::fs::read_to_string(&committed_path)
         .with_context(|| format!("reading committed skill {}", committed_path.display()))?
         .replace("\r\n", "\n");
-    let preserved_body = split_frontmatter(&committed)
+    let committed = crate::verify::discovery::strip_bom(&committed);
+    let preserved_body = split_frontmatter(committed)
         .map(|(_fm, body)| body)
         .unwrap_or_default();
 

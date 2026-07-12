@@ -865,6 +865,159 @@ fn name_drift_warn_does_not_shadow_description_fail() {
     let _ = has_name_drift;
 }
 
+// Regression for the ordering bug the 0.9.2 fix missed: name_drift (WARN) was
+// placed BEFORE name_length (FAIL), so a SKILL.md with BOTH a drifted name
+// AND one >64 chars hit name_drift's early return → name_length FAIL never
+// reached the report → verify exited 0 (warn-only), shadowing the hard fail.
+// Sibling of `name_drift_warn_does_not_shadow_description_fail`; locks the
+// same invariant for name_length specifically. A long drifted name must exit
+// VERIFY_FAIL (1), not VERIFY_OK (0), and the report must surface
+// `discovery.skill.name_length` as a fail.
+#[test]
+fn name_drift_warn_does_not_shadow_name_length_fail() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Mutate the canonical SKILL.md: replace `name: sample-rust` with a name
+    // that is BOTH (a) drifted from `sample-rust` (any non-canonical string)
+    // and (b) >64 chars (the schema fails this). 65 chars triggers FAIL.
+    let skill = root.join("skills/sample-rust/SKILL.md");
+    let raw = fs::read_to_string(&skill).unwrap();
+    // 65 chars: 0123456789 repeated 6 times = 60 chars, plus "-tool" = 65.
+    let long_drifted = "01234567890123456789012345678901234567890123456789012345678901234";
+    assert_eq!(
+        long_drifted.chars().count(),
+        65,
+        "fixture name must be >64 chars to trigger name_length FAIL"
+    );
+    assert_ne!(
+        long_drifted, "sample-rust",
+        "name must differ from canonical to trigger name_drift WARN"
+    );
+    let mutated = raw.replacen("name: sample-rust", &format!("name: {long_drifted}"), 1);
+    assert_ne!(mutated, raw, "name-length mutation must change the file");
+    assert!(
+        mutated.contains(&format!("name: {long_drifted}")),
+        "long drifted name must be present before verify"
+    );
+    fs::write(&skill, mutated).unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    // VERIFY_FAIL = 1: name_length fail must drive the exit, NOT name_drift
+    // warn (exit 0). Before the fix, this was `Some(0)` — name_drift's early
+    // return prevented name_length from ever pushing.
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "name_length fail must drive exit 1, not name_drift warn; got {:?} and stderr:\n{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    let has_name_length_fail = v["results"].as_array().unwrap().iter().any(|r| {
+        r["check_id"].as_str().unwrap() == "discovery.skill.name_length"
+            && r["severity"].as_str().unwrap() == "fail"
+    });
+    assert!(
+        has_name_length_fail,
+        "report must surface the name_length FAIL, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+// Regression: a UTF-8 BOM (U+FEFF / EF BB BF) prefixed to a SKILL.md must not
+// make `verify` misreport valid frontmatter as missing. Windows editors
+// (Notepad, VS Code "UTF-8 with BOM" save) emit this prefix; Rust's
+// char::is_whitespace returns false for U+FEFF (Unicode 3.2+), so str::trim()
+// does NOT strip it → the `\u{feff}---` opening delimiter fails the `== "---"`
+// guard in `parse_skill_frontmatter` → empty SkillFrontmatter → false
+// "frontmatter missing description" FAIL on a structurally valid file.
+#[test]
+fn bom_prefixed_skill_md_validates_clean() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Inject a UTF-8 BOM at the start of the canonical SKILL.md — rest of the
+    // file stays unchanged (valid frontmatter + body).
+    let skill = root.join("skills/sample-rust/SKILL.md");
+    let raw = fs::read_to_string(&skill).unwrap();
+    let bom = "\u{feff}";
+    assert!(!raw.starts_with(bom), "fixture must not already have a BOM");
+    fs::write(&skill, format!("{bom}{raw}")).unwrap();
+    // Sanity: byte 0 is EF (first byte of EF BB BF).
+    let bytes = fs::read(&skill).unwrap();
+    assert_eq!(bytes[0], 0xEF, "BOM byte 0 must be EF");
+    assert_eq!(bytes[1], 0xBB, "BOM byte 1 must be BB");
+    assert_eq!(bytes[2], 0xBF, "BOM byte 2 must be BF");
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    // Before the BOM strip, verify exited 1 with `discovery.skill.description`
+    // FAIL ("frontmatter is missing description"). After the strip, verify
+    // must exit 0 (no critical fail from the SKILL.md frontmatter; drift may
+    // fire if the canonical-sample-rust rule disagrees, but that's a warn).
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "BOM-prefixed SKILL.md with valid frontmatter must NOT trigger a description FAIL; got {:?} and stderr:\n{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    let has_desc_fail = v["results"].as_array().unwrap().iter().any(|r| {
+        r["check_id"].as_str().unwrap() == "discovery.skill.description"
+            && r["severity"].as_str().unwrap() == "fail"
+    });
+    assert!(
+        !has_desc_fail,
+        "BOM must not produce a false 'missing description' FAIL; report was:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
 // `verify --min-score` opt-in score gate: when the score meets or exceeds
 // the threshold, verify must still exit 0 (no message, no failure).
 #[test]

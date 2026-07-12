@@ -83,7 +83,8 @@ pub fn parse_cursor_mdc_frontmatter(raw: &str) -> Option<CursorFrontmatter> {
 /// smell.
 pub(crate) fn check_one_mdc(root: &Path, path: &Path) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let fm = parse_cursor_mdc_frontmatter(&raw).unwrap_or_default();
+    let raw = super::strip_bom(&raw);
+    let fm = parse_cursor_mdc_frontmatter(raw).unwrap_or_default();
 
     let rel = rel_unix(root, path);
 

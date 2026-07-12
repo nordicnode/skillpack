@@ -43,6 +43,21 @@ pub(crate) fn rel_unix(root: &Path, path: &Path) -> String {
     stripped.to_string_lossy().replace('\\', "/")
 }
 
+/// Strip a leading UTF-8 BOM (U+FEFF, bytes EF BB BF) from `s`. Rust's
+/// `char::is_whitespace` returns false for U+FEFF (Unicode 3.2+ excludes it),
+/// so `str::trim()` and `trim_start()` do NOT strip it — `fs::read_to_string`
+/// preserves BOM (valid UTF-8). A BOM-prefixed `---` frontmatter delimiter
+/// would otherwise parse as missing frontmatter (false "missing description"
+/// FAIL on a valid file), and a BOM-prefixed `#` heading in Copilot
+/// instructions would false-warn "not a markdown heading". Windows editors
+/// (Notepad, VS Code "UTF-8 with BOM" save) emit this prefix, so any hand-edited
+/// SKILL.md / .mdc / agent file from a Windows user is exposed. Applied at each
+/// raw-text read boundary (callers below), NOT inside `parse_*_frontmatter`
+/// itself — non-BOM paths stay byte-identical (snapshot tests stay green).
+pub(crate) fn strip_bom(s: &str) -> &str {
+    s.strip_prefix('\u{feff}').unwrap_or(s)
+}
+
 /// Run every discovery check, returning one [`CheckResult`] per check.
 ///
 /// `root` is the plugin root (e.g. the dir containing `.claude-plugin/`,
@@ -540,7 +555,8 @@ fn check_one_skill_md(
     profile_name: &Option<String>,
 ) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let fm = parse_skill_frontmatter(&raw).unwrap_or_default();
+    let raw = strip_bom(&raw);
+    let fm = parse_skill_frontmatter(raw).unwrap_or_default();
 
     let rel = rel_unix(root, path);
 
@@ -557,8 +573,8 @@ fn check_one_skill_md(
         return Ok(CheckResult::fail(
             &format!("{prefix}.description"),
             "SKILL.md `description` is non-empty",
-            format!("{rel}: `description` is empty"),
-            "To fix: write one sentence describing the task the skill does.",
+            format!("{rel}: `description` is empty (it may be missing, or the line `description:` has no value on the same line — e.g. a nested map)"),
+            "To fix: write one sentence describing the skill on the SAME line as `description:` — e.g. `description: Generate an agent skill pack`. Avoid indented YAML blocks under `description:`.",
         ));
     }
 
@@ -582,16 +598,43 @@ fn check_one_skill_md(
         ));
     }
 
+    // name: if present, kebab + <=64 chars. MUST be before name_drift (a WARN)
+    // so a long or reserved name FAILs rather than being shadowed by the
+    // drift WARN's early return — same ordering invariant the 0.9.2 fix
+    // locked down for description (name_drift_warn_does_not_shadow_description_fail).
+    if let Some(name) = fm.name.as_deref() {
+        if name.chars().count() > schema::SKILL_NAME_MAX_CHARS {
+            return Ok(CheckResult::fail(
+                &format!("{prefix}.name_length"),
+                "SKILL.md `name` is ≤ 64 characters",
+                format!(
+                    "{rel}: `name` is {} chars (max {})",
+                    name.chars().count(),
+                    schema::SKILL_NAME_MAX_CHARS
+                ),
+                "To fix: shorten the skill name.",
+            ));
+        }
+        if schema::RESERVED_NAMES.contains(&name) {
+            return Ok(CheckResult::warn(
+                &format!("{prefix}.name_reserved"),
+                "SKILL.md name is not reserved",
+                format!("{rel}: skill name `{name}` is a reserved name"),
+                "To fix: pick a non-Anthropic-owned name.",
+            ));
+        }
+    }
+
     // name_drift: frontmatter `name:` (if present) must match the canonical
     // project name — `coerce_kebab(profile.name)`, the same value the SKILL.md
     // template renders. `init` writes them in sync; drift means a hand-edited
     // frontmatter or a renamed project repo/manifest that wasn't regenerated.
     // Warn (not fail): a maintainer may intentionally ship a skill under a
-    // divergent name. Placed AFTER the fail-severity checks (description,
-    // description_length) so a structurally broken skill surfaces its fail
-    // first — drift is a warn and must not shadow a fail. Skipped when either
-    // side is absent (no frontmatter name, or introspection couldn't derive a
-    // canonical name).
+    // divergent name. Placed AFTER ALL fail-severity checks (description,
+    // description_empty, description_length, name_length) so a structurally
+    // broken skill surfaces its fail first — drift is a warn and must not
+    // shadow a fail. Skipped when either side is absent (no frontmatter name,
+    // or introspection couldn't derive a canonical name).
     if let (Some(fm_name), Some(canonical)) = (fm.name.as_deref(), profile_name.as_deref()) {
         if fm_name != canonical {
             let mut r = CheckResult::warn(
@@ -658,30 +701,6 @@ fn check_one_skill_md(
                 ),
                 "To fix: each comma-separated token must be a bare identifier \
                  (e.g. `Read`) or a namespaced call (e.g. `Bash(npm test:*)`).",
-            ));
-        }
-    }
-
-    // name: if present, kebab + <=64 chars.
-    if let Some(name) = fm.name.as_deref() {
-        if name.chars().count() > schema::SKILL_NAME_MAX_CHARS {
-            return Ok(CheckResult::fail(
-                &format!("{prefix}.name_length"),
-                "SKILL.md `name` is ≤ 64 characters",
-                format!(
-                    "{rel}: `name` is {} chars (max {})",
-                    name.chars().count(),
-                    schema::SKILL_NAME_MAX_CHARS
-                ),
-                "To fix: shorten the skill name.",
-            ));
-        }
-        if schema::RESERVED_NAMES.contains(&name) {
-            return Ok(CheckResult::warn(
-                &format!("{prefix}.name_reserved"),
-                "SKILL.md name is not reserved",
-                format!("{rel}: skill name `{name}` is a reserved name"),
-                "To fix: pick a non-Anthropic-owned name.",
             ));
         }
     }

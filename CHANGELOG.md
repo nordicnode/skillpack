@@ -7,6 +7,79 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.9.3] - 2026-07-12
 
+
+### Fixed — name_drift WARN no longer shadows name_length FAIL
+
+- `discovery.skill.name_drift` (a WARN) was placed in `check_one_skill_md`
+  BEFORE `discovery.skill.name_length` (a FAIL). The 0.9.2 fix that moved
+  name_drift after the first batch of FAIL-severity checks (description,
+  description_empty, description_length) missed this fourth FAIL further down
+  the function — name_drift's early `return Ok(r)` shadowed it. A SKILL.md
+  with BOTH a drifted name AND one >64 chars reported only the warn → verify
+  exited 0 / "OK" instead of exit 1 / "FAILED", silently passing a structurally
+  broken skill that should have hard-failed. Both `name_length` (FAIL) and its
+  sibling `name_reserved` (WARN) now run BEFORE name_drift — restoring the
+  fail-severity-first invariant the 0.9.2 patch locked down for description.
+  Regression test: `name_drift_warn_does_not_shadow_name_length_fail`
+  (asserts a 65-char drifted name exits 1 with `discovery.skill.name_length`
+  FAIL in the report, not exit 0 / warn-only).
+
+### Fixed — BOM-prefixed (U+FEFF) SKILL.md / .mdc / OpenCode / Copilot files no longer false-fail
+
+- Four text-entry points (`parse_skill_frontmatter`, `parse_cursor_mdc_frontmatter`,
+  `parse_opencode_agent_frontmatter`, `check_copilot_instructions`) had no
+  handling for a leading UTF-8 BOM (U+FEFF, bytes EF BB BF). `fs::read_to_string`
+  preserves BOM (valid UTF-8); Rust's `char::is_whitespace` returns false for
+  U+FEFF (Unicode 3.2+), so `str::trim()` and `trim_start()` do NOT strip it →
+  a `\u{feff}---` opening delimiter failed the `== "---"` guard → empty
+  SkillFrontmatter → false "frontmatter missing description" FAIL on a
+  structurally valid file, and a BOM-prefixed `#` heading in Copilot
+  instructions false-warned "not a markdown heading". Windows editors
+  (Notepad, VS Code "UTF-8 with BOM" save) emit this prefix, so any hand-edited
+  distribution file from a Windows user was exposed. Added a `strip_bom`
+  helper (`discovery.rs`) applied at the raw-text read boundary in all 4 entry
+  points plus `verify --fix`'s committed-SKILL.md read (defensive — the
+  latent `split_frontmatter` body-deletion path was unreachable today but is
+  now closed). Regression test: `bom_prefixed_skill_md_validates_clean`
+  (asserts a BOM-prefixed SKILL.md with valid frontmatter exits 0 with no
+  `discovery.skill.description` fail).
+
+### Fixed — invocation multi-CLI counter no longer silently drops unreadable skills
+
+- `verify::run`'s multi-CLI counter (`mod.rs`) swallowed `read_to_string` Err
+  to `None` via `.ok()`, dropping unreadable skills (non-UTF8, permission
+  denied, EBUSY) from the count — while the parallel discovery loader
+  propagated the same error class via `.with_context(...)?` to abort verify.
+  A corrupt `skills/<x>/SKILL.md` would FATAL-abort via discovery but silently
+  no-op in the invocation counter — inconsistent. Now surfaces an
+  `invocation.read_failed` WARN per unreadable skill (in addition to discovery's
+  existing abort behavior) so the maintainer sees the read failure on both
+  paths rather than the multi-CLI counter silently under-firing.
+
+### Fixed — misleading "description is empty" message on malformed nested-YAML `description:`
+
+- A multi-line YAML map under `description:` (e.g. `description:\n  broken:
+  yaml`) parses without panic but flushes the key with an empty value — verify
+  hard-failed with "description is empty", which hid the real cause (the user
+  wrote a nested map instead of a same-line scalar). The message now reads
+  "is empty (it may be missing, OR the line `description:` has no value on the
+  same line — e.g. a nested map)" and the suggestion points at writing the
+  value on the SAME line as `description:` to avoid indented YAML blocks.
+
+### Docs — README flags table now covers `--root` and `--min-score`
+
+- The Flags table in README.md was missing two shipped flags: `--root <DIR>`
+  (the project-root override available on init / verify / doctor) and
+  `--min-score <N>` (shipped in 0.9.2, the opt-in CI discoverability-score
+  gate). Both are now in the table.
+
+### Internal — dropped `let _ = &…` anti-idiom in `verify::render`
+
+- `render()` destructured `counts()` as `(pass, warn, fail, skip)` then emitted
+  three `let _ = &pass; let _ = &skip; let _ = &warn;` lines to bypass
+  `unused_variable` (only `fail` was actually consumed by the summary line +
+  `pass`/`warn` were used in the format string). Replaced with a clean
+  `(pass, warn, fail, _skip)` discard.
 ### Changed — internal: decompose `introspect.rs` into `cli_probe.rs` + `repo.rs`
 
 - Pure internal refactor; no user-facing behavior or API change. `src/introspect.rs`
@@ -27,16 +100,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     and its module doc was updated to point at `super::cli_probe` (the
     orchestrator no longer "stays in the parent").
   - `manifest.rs`, `workspace.rs` — unchanged.
-- Test coverage preserved verbatim (62 lib + 49 integration + 3 property + 13
+- Refactor coverage preserved verbatim (62 lib + 49 integration + 3 property + 13
   snapshot, all green); the walk_* tests live in `cli_probe::tests`, the
   `read_readme_hint` HTML-skip regression lives in `repo::tests`, and the
   dir-tail canonicalization (Bug #3) + `which_on_path` real-exercise tests
-  stay in the parent `parse_tests`.
+  stay in the parent `parse_tests`. The bug fixes below add 2 integration tests
+  (51 integration total, 132 tests overall), each documented inline.
 - All release gates green: `cargo fmt -- --check`, `cargo clippy --all-targets
   --all-features -- -D warnings`, `cargo test -- --include-ignored`, self-dogfood
   `skillpack verify --root .` → 12 pass / 0 warn / 0 fail / score 100, and
-  `skillpack doctor --root .` (human + json) clean. No crates.io release cut
-  for this internal-only refactor — ships on main untagged.
+  `skillpack doctor --root .` (human + json) clean.
 
 ## [0.9.2] - 2026-07-12
 

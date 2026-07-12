@@ -62,7 +62,8 @@ pub fn parse_opencode_agent_frontmatter(raw: &str) -> Option<OpenCodeFrontmatter
 /// optional with a default). File-name kebab-ness is warned, not failed.
 pub(crate) fn check_one_opencode_agent(root: &Path, path: &Path) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let Some(fm) = parse_opencode_agent_frontmatter(&raw) else {
+    let raw = super::strip_bom(&raw);
+    let Some(fm) = parse_opencode_agent_frontmatter(raw) else {
         return Ok(CheckResult::fail(
             "discovery.opencode.agent.frontmatter",
             "frontmatter block present (--- delimited)",

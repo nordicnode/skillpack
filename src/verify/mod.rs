@@ -78,11 +78,24 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
     // them (the multi-CLI limit is documented, but a silent skip is a cliff).
     let cli_skills = discovery::find_skill_files(root)
         .into_iter()
-        .filter(|p| {
-            std::fs::read_to_string(p)
-                .ok()
-                .and_then(|s| invocation::extract_documented_invocation(&s))
-                .is_some()
+        .filter(|p| match std::fs::read_to_string(p) {
+            Ok(s) => invocation::extract_documented_invocation(&s).is_some(),
+            Err(e) => {
+                // Path exists (find_skill_files returned it) — read failure is
+                // non-missing (permissions, non-UTF8, EBUSY). Discovery's
+                // `check_one_skill_md` would `with_context(...)?` and abort
+                // verify on the same file; surface a WARN here instead so the
+                // maintainer sees the read failure rather than the multi-CLI
+                // counter silently dropping the skill (the parallel discovery
+                // check still aborts on the corrupt file independently).
+                report.push(CheckResult::warn(
+                    "invocation.read_failed",
+                    "skills a verify can spawn should be readable",
+                    format!("{}: read failed ({}); invocation drift check skipped for this skill", discovery::rel_unix(root, p), e),
+                    "To fix: check file permissions, ensure UTF-8 encoding (no Latin-1), and re-run.",
+                ));
+                false
+            }
         })
         .count();
     if cli_skills > 1 {
@@ -122,7 +135,7 @@ pub enum OutputFormat {
 pub fn render(report: &VerifyReport) -> String {
     use self::result::Severity;
     let mut out = String::new();
-    let (pass, warn, fail, skip) = report.counts();
+    let (pass, warn, fail, _skip) = report.counts();
     for r in &report.results {
         let glyph = match r.severity {
             Severity::Pass => "✓",
@@ -143,9 +156,7 @@ pub fn render(report: &VerifyReport) -> String {
             out.push_str(&format!("    {s}\n"));
         }
     }
-    let _ = &pass;
-    let _ = &skip;
-    let _ = &warn;
+
     out.push_str(&format!(
         "\n{pass} passed, {warn} warning(s), {fail} failed — discoverability score {}/100",
         report.discoverability_score()

@@ -23,6 +23,7 @@ pub(crate) fn find_copilot_instructions(root: &Path) -> Option<std::path::PathBu
 /// Must be non-empty and start with a `#` heading (structural, no grammar).
 pub(crate) fn check_copilot_instructions(root: &Path, path: &Path) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let raw = super::strip_bom(&raw);
     let check_id = "discovery.copilot.instructions";
     let rel = rel_unix(root, path);
 
