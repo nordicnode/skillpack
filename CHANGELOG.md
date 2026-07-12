@@ -5,6 +5,39 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.3] - 2026-07-12
+
+### Changed — internal: decompose `introspect.rs` into `cli_probe.rs` + `repo.rs`
+
+- Pure internal refactor; no user-facing behavior or API change. `src/introspect.rs`
+  shrank from 1091 to 260 lines (76% reduction) — it is now a thin top-level
+  orchestrator that calls `detect_language` then delegates to five sibling
+  submodules:
+  - `cli_probe.rs` (517, new) — the guarded `--help` spawn pipeline
+    (`detect_cli`, `spawn_candidate`, `capture_subcommand_help`) plus the
+    Cargo/npm workspace member walks (`walk_cargo_workspace`,
+    `walk_npm_workspace`) and the root-manifest probes (`has_gemspec`,
+    `has_csproj`).
+  - `repo.rs` (136, new) — repo-metadata reads: `git remote get-url origin`
+    (`detect_repo_url`, inline `spawn::run` so it shares no helper with the
+    CLI probe pipeline), the LICENSE SPDX heuristic (`detect_license`), the
+    README description hint (`read_readme_hint`), and `repo_url_name`.
+  - `cli_candidates.rs` — gained the `candidate_tests` module (moved from the
+    parent; tests the candidate *resolution* fns that already lived here),
+    and its module doc was updated to point at `super::cli_probe` (the
+    orchestrator no longer "stays in the parent").
+  - `manifest.rs`, `workspace.rs` — unchanged.
+- Test coverage preserved verbatim (62 lib + 49 integration + 3 property + 13
+  snapshot, all green); the walk_* tests live in `cli_probe::tests`, the
+  `read_readme_hint` HTML-skip regression lives in `repo::tests`, and the
+  dir-tail canonicalization (Bug #3) + `which_on_path` real-exercise tests
+  stay in the parent `parse_tests`.
+- All release gates green: `cargo fmt -- --check`, `cargo clippy --all-targets
+  --all-features -- -D warnings`, `cargo test -- --include-ignored`, self-dogfood
+  `skillpack verify --root .` → 12 pass / 0 warn / 0 fail / score 100, and
+  `skillpack doctor --root .` (human + json) clean. No crates.io release cut
+  for this internal-only refactor — ships on main untagged.
+
 ## [0.9.2] - 2026-07-12
 
 ### Added — verify catches SKILL.md name drift + opt-in score gate
