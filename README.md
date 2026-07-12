@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/logo.png" width="512" alt="skillpack logo"></p>
+<div align="center"><img src="docs/logo.png" width="512" alt="skillpack logo"></div>
 
 # skillpack — the distribution-layer generator + verifier for AI agents, not a skill library.
 
