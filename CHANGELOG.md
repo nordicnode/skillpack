@@ -26,6 +26,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Self-dogfood: `skillpack verify` on this repo still reports 12 passed,
   discoverability score 100/100.
 
+### Fixed — empty invocation block on config replay
+
+- `init --non-interactive` re-runs from a `skillpack.toml` that omits
+  `invocation_command` (the field is elided on save by
+  `skip_serializing_if = "Option::is_none"`) produced a SKILL.md with an
+  empty fenced invocation block for a CLI project — the template rendered
+  `{{ invocation_command }}` as the empty string because `intent.invocation_command`
+  yielded `None`. The interactive interview path already had a `suggest`
+  default for blank answers; the config replay path had no such recovery.
+  Fixed in `templates/skill_body.md.tera` by falling back to `cli_binary`
+  (already derived from `cli_command` in `build_context`) via Tera's
+  `default(value=cli_binary)` filter. Self-dogfood surfaced this on a fresh
+  Rust CLI fixture: the generated SKILL.md now shows `frob-cli` in the
+  invocation block instead of empty ticks. Regression test
+  `invocation_block_falls_back_to_cli_binary_when_intent_omits_command`
+  in `src/generate.rs` asserts the fallback fires; verified it fails when
+  the template fix is reverted. Existing snapshots unchanged (fixtures
+  supply `invocation_command: Some("chronicle --new \"entry\"")`).
+
 ## [0.8.6] - 2026-07-12
 
 ### Changed — internal: discovery module split

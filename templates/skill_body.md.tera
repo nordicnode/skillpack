@@ -30,7 +30,7 @@ Import pattern:
 The exact command an agent should run to use this tool:
 
 ```
-{{ invocation_command }}
+{{ invocation_command | default(value=cli_binary) }}
 ```
 
 {% if documented_flags %}Run `{{ cli_binary }} --help` to discover the available flags. Documented flags (verified by `skillpack verify`):

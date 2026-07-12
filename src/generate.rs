@@ -567,4 +567,27 @@ mod tests {
             "the placeholder must not leak into the skill, got:\n{skill}"
         );
     }
+    // Bug: non-interactive `init` replay from a skillpack.toml that omits
+    // `invocation_command` (elided by `skip_serializing_if = "Option::is_none"`)
+    // produced an empty fenced invocation block — the template rendered
+    // `{{ invocation_command }}` as the empty string for a CLI project. The
+    // template's `default(value=cli_binary)` falls back to the bare binary
+    // name derived from `cli_command` (e.g. `chronicle`), so agents see a
+    // runnable command instead of empty ticks.
+    #[test]
+    fn invocation_block_falls_back_to_cli_binary_when_intent_omits_command() {
+        let p = cli_profile(); // has_cli=true, cli_command=["chronicle","--help"]
+        let mut i = cli_intent();
+        i.invocation_command = None; // simulates config replay without the field
+        let skill = render(&p, &i).unwrap()[2].contents.clone();
+        assert!(
+            skill.contains("## Invocation"),
+            "CLI project must still emit an Invocation section, got:\n{skill}"
+        );
+        // The fenced block must contain the bare binary name, not be empty.
+        assert!(
+            skill.contains("```\nchronicle\n```"),
+            "invocation block must fall back to cli_binary `chronicle`, got:\n{skill}"
+        );
+    }
 }
