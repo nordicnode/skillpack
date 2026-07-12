@@ -5,6 +5,39 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.1] - 2026-07-12
+
+### Added — verify catches plugin.json URL drift (`discovery.plugin.url_drift`)
+
+- `verify` now warns when `.claude-plugin/plugin.json`'s `homepage` or
+  `repository` field no longer matches the `git remote get-url origin` URL.
+  `init` writes both fields from the detected origin, so drift means a
+  hand-edited plugin.json or a renamed/stale remote that wasn't regenerated.
+  Warning (not failure): a maintainer may intentionally host the plugin
+  elsewhere.
+- The check stays pure — no subprocess spawn inside `verify::discovery`. The
+  git origin URL is detected once at introspection (`introspect::detect_repo_url`,
+  already cached on `ProjectProfile.repo_url`) and threaded into the
+  discovery stage via a new `VerifyInput.repo_url` field, preserving the
+  module's "pure functions over their inputs" contract.
+- Extends `verify --fix`: `discovery.plugin.url_drift` is now mapped to
+  `RegenPluginJson` (same mechanical fix as `version_drift` — regenerate ONLY
+  plugin.json, leave SKILL.md/marketplace.json intact). `action_for` is the
+  only registration point: an exhaustive match makes forgetting the arm a
+  compile failure.
+- Skips silently on a repo with no git origin (no canonical URL to drift
+  against) — `profile.repo_url = None` short-circuits the check.
+
+### Internal — verify plumbing surfaces repo_url to discovery
+
+- `VerifyInput` gains a `repo_url: Option<String>` field. Both callers
+  (`verify_rendered` in `init`'s pre-commit gate, `run_verify_inner` in the
+  `verify` subcommand) populate it from `profile.repo_url`. `discovery::run`
+  and `check_plugin_json` take it as a parameter — no new spawn, no global
+  state, no breaking change to the public `verify::run(input)` signature
+  beyond the added struct field.
+
+
 ## [0.9.0] - 2026-07-12
 
 ### Added — reusable GitHub Action workflow for CI drift gating

@@ -125,7 +125,9 @@ fn write_one(root: &Path, file: &GeneratedFileOutput) -> Result<()> {
 /// verify `--fix` dispatcher to filter the report to only-fixable drift.
 pub fn action_for(check_id: &str) -> Option<FixAction> {
     match check_id {
-        "discovery.plugin.version_drift" => Some(FixAction::RegenPluginJson),
+        "discovery.plugin.version_drift" | "discovery.plugin.url_drift" => {
+            Some(FixAction::RegenPluginJson)
+        }
         // Extend here + add the match arm above — exhaustive match makes
         // forgetting an arm a compile failure, not a silent skip.
         _ => None,
@@ -144,6 +146,16 @@ mod tests {
         );
         assert_eq!(action_for("discovery.description"), None);
         assert_eq!(action_for("invocation.help_present"), None);
+    }
+
+    #[test]
+    fn action_for_maps_url_drift() {
+        // RegenPluginJson rebuilds homepage+repository from the current git
+        // origin, so url_drift is the same mechanical fix as version_drift.
+        assert_eq!(
+            action_for("discovery.plugin.url_drift"),
+            Some(FixAction::RegenPluginJson)
+        );
     }
 
     #[test]

@@ -37,6 +37,11 @@ pub struct VerifyInput {
     /// project root while `root` is the temp dir holding the rendered files.
     pub spawn_root: std::path::PathBuf,
     pub cli_command: Option<Vec<String>>,
+    /// The repo URL `git remote get-url origin` produced at introspection
+    /// (cached on `ProjectProfile.repo_url`, threaded here so `discovery`'s
+    /// URL-drift check stays free of a subprocess spawn — see module doc).
+    /// `None` when no git origin is configured.
+    pub repo_url: Option<String>,
     /// Print every subprocess spawn to stderr (design §8.2 --debug).
     pub debug: bool,
 }
@@ -46,8 +51,9 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
     let root = &input.root;
     let mut report = VerifyReport::default();
 
-    // Discovery checks (pure, file reads only).
-    for check in discovery::run(root)? {
+    // Discovery checks (pure, file reads only + the threaded repo_url for the
+    // plugin.json URL-drift sub-check).
+    for check in discovery::run(root, &input.repo_url)? {
         report.push(check);
     }
 

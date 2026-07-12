@@ -406,6 +406,179 @@ fn verify_warns_on_plugin_json_version_drift() {
     );
 }
 
+// URL drift: plugin.json `homepage` and `repository` both render from
+// `repo_url` (the `git remote get-url origin` value detected at
+// introspection). `init` writes them in sync; a hand-edited or stale plugin
+// must surface as a `discovery.plugin.url_drift` WARNING naming the drifted
+// field, the stale value, and the canonical git origin. The check SKIPS on a
+// repo with no git origin (no canonical URL to drift against), so the fixture
+// is seeded with a `.git` remote before init.
+#[test]
+fn verify_warns_on_plugin_json_url_drift() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    // copy_fixture ships no .git — seed an origin so detect_repo_url returns
+    // Some(...) and the URL-drift check actually runs (else it skips).
+    Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/nordicnode/sample-rust.git",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Control: freshly-init'd pack — homepage + repository both equal the git
+    // origin URL — must NOT report url_drift.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert!(
+        !v["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["check_id"].as_str().unwrap() == "discovery.plugin.url_drift"),
+        "freshly-init'd pack with matching homepage/repository must not report url_drift, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // Mutate ONLY `homepage` to diverge from the git origin; leave `repository`
+    // matching. The check iterates the fields in order (homepage first) and
+    // returns on the first mismatch, so the warning must name `homepage` and
+    // the canonical origin, not `repository`.
+    let pj = root.join(".claude-plugin/plugin.json");
+    let mut pjv: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pj).unwrap()).unwrap();
+    pjv["homepage"] = serde_json::Value::String("https://example.com/STALE-url".into());
+    fs::write(&pj, serde_json::to_string_pretty(&pjv).unwrap()).unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "url_drift warning must not fail verify; got {} and stderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    let drift = v["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["check_id"].as_str().unwrap() == "discovery.plugin.url_drift")
+        .unwrap_or_else(|| {
+            panic!(
+                "url_drift warning missing in:\n{}",
+                String::from_utf8_lossy(&out.stdout)
+            )
+        });
+    assert_eq!(drift["severity"].as_str().unwrap(), "warn");
+    let msg = drift["message"].as_str().unwrap();
+    assert!(
+        msg.contains("homepage"),
+        "message must name the drifted field (homepage): {msg}"
+    );
+    assert!(
+        msg.contains("STALE-url"),
+        "message must name the stale URL value: {msg}"
+    );
+    assert!(
+        msg.contains("github.com/nordicnode/sample-rust.git"),
+        "message must name the canonical git origin URL: {msg}"
+    );
+    assert!(
+        !msg.contains("repository"),
+        "only homepage drifted; message must not mention repository: {msg}"
+    );
+}
+
+// URL-drift skip control: a repo with NO git origin has no canonical URL to
+// drift against, so the check must SKIP silently (no warning, no failure) even
+// if plugin.json carries a hand-written homepage. Distinct branch coverage
+// from the match-URL control: this exercises the `if let Some(canonical)` skip
+// the match-URL control in the warn test exercises the inner equality branch.
+#[test]
+fn verify_skips_url_drift_when_no_git_origin() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    // No `git init`, no remote — copy_fixture ships neither. detect_repo_url
+    // returns None, so plugin.json's homepage stays whatever init rendered
+    // (the empty string from a repo with no origin).
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "no-git-origin repo must still pass verify; got {} and stderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert!(
+        !v["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["check_id"].as_str().unwrap() == "discovery.plugin.url_drift"),
+        "url_drift must not fire on a repo with no git origin (no canonical URL), got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
 // `verify --fix` mechanically repairs the `discovery.plugin.version_drift`
 // warning by regenerating ONLY `.claude-plugin/plugin.json` (surgical: the
 // committed `SKILL.md` + `marketplace.json` stay intact). After the fix,

@@ -1,6 +1,8 @@
 //! Discovery checks — structural validation against the documented Claude Code
-//! plugin schema. Pure functions; the only I/O is the file reads the caller
-//! hands us. See [`crate::verify::schema`] for the cited source of each rule.
+//! plugin schema. Pure functions over their inputs: file reads of the committed
+//! artifacts plus the `repo_url` the caller threads in (so the URL-drift check
+//! stays free of git subprocess spawns we'd otherwise own here). See
+//! [`crate::verify::schema`] for the cited source of each rule.
 //!
 //! Checks run against the *generated* files, but `verify` also accepts
 //! hand-written files written without `init` (design §4.2), so every check
@@ -48,7 +50,7 @@ pub(crate) fn rel_unix(root: &Path, path: &Path) -> String {
 /// independently — discovery degrades gracefully when an ecosystem's files
 /// are absent (a `--target cursor`-only pack shouldn't fail on a missing
 /// `.claude-plugin/`).
-pub fn run(root: &Path) -> Result<Vec<CheckResult>> {
+pub fn run(root: &Path, repo_url: &Option<String>) -> Result<Vec<CheckResult>> {
     let mut out = Vec::new();
 
     // Claude Code: marketplace.json + plugin.json + skills/<name>/SKILL.md.
@@ -57,7 +59,7 @@ pub fn run(root: &Path) -> Result<Vec<CheckResult>> {
     // `.claude-plugin/` and must not fail on its absence.
     if claude_present(root) {
         out.push(check_marketplace(root)?);
-        out.push(check_plugin_json(root)?);
+        out.push(check_plugin_json(root, repo_url)?);
         let skills = find_skill_files(root);
         if skills.is_empty() {
             out.push(CheckResult::fail(
@@ -298,7 +300,7 @@ fn check_marketplace(root: &Path) -> Result<CheckResult> {
 
 // ----- plugin.json ----------------------------------------------------------
 
-fn check_plugin_json(root: &Path) -> Result<CheckResult> {
+fn check_plugin_json(root: &Path, repo_url: &Option<String>) -> Result<CheckResult> {
     let path = root.join(schema::PLUGIN_JSON_PATH);
     let raw = match read_optional(&path)? {
         Some(r) => r,
@@ -382,6 +384,30 @@ fn check_plugin_json(root: &Path) -> Result<CheckResult> {
                 format!("plugin.json version `{version}` != manifest version `{mv}`"),
                 "To fix: re-run `skillpack init` to regenerate plugin.json from the manifest, or intentionally pin the plugin version.",
             ));
+        }
+    }
+
+    // URL drift: plugin.json `homepage` and `repository` both render from
+    // `repo_url` (the git origin detected at introspection time — see
+    // `introspect::detect_repo_url`). `init` writes plugin.json, so drift
+    // means a hand-edited plugin.json or a renamed/stale remote that wasn't
+    // regenerated. Warn (not fail): a maintainer may intentionally host the
+    // plugin elsewhere. Skipped entirely when `repo_url` is None (no git
+    // origin) — a non-git or fresh repo cannot drift on a URL there's no
+    // canonical source for.
+    if let Some(canonical) = repo_url {
+        for field in &["homepage", "repository"] {
+            let current = v.get(*field).and_then(|x| x.as_str()).unwrap_or("");
+            if current != canonical {
+                return Ok(CheckResult::warn(
+                    "discovery.plugin.url_drift",
+                    &format!("plugin.json `{}` matches the git origin URL", field),
+                    format!(
+                        "plugin.json `{field}` `{current}` != git origin `{canonical}`"
+                    ),
+                    "To fix: re-run `skillpack init` to regenerate plugin.json from the current remote, or intentionally pin the URL.",
+                ));
+            }
         }
     }
 

@@ -242,6 +242,7 @@ fn verify_rendered(
         // relative-invocation CLI like `go run .` or `node ./bin/cli.js`.
         spawn_root: root.to_path_buf(),
         cli_command: profile.cli_command.clone(),
+        repo_url: profile.repo_url.clone(),
         debug,
     };
     verify::run(&input)
@@ -424,6 +425,7 @@ fn run_verify_inner(
             spawn_root: root.to_path_buf(),
             cli_command: profile.cli_command.clone(),
             debug,
+            repo_url: profile.repo_url.clone(),
         };
         verify::run(&input)
     };
