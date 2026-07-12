@@ -72,6 +72,15 @@ pub enum Commands {
         /// the post-fix report. Use `skillpack init` for wholesale regen.
         #[arg(long)]
         fix: bool,
+
+        /// Minimum discoverability score (0–100) the verify run must reach
+        /// to exit zero. Independent of `--fix`: if `--fix` is also passed,
+        /// the gate runs against the post-fix report. Omitted by default —
+        /// projects opt in to harder enforcement (a low score is otherwise
+        /// surfaced but never fails the run). Useful as a CI gate: pair with
+        /// `--format json` for a structured exit.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(0..=100))]
+        min_score: Option<u8>,
     },
     /// Diagnose why introspection chose `has_cli` / language as it did.
     /// Prints the detected profile + a chronological trace of the decision

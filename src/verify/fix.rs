@@ -6,9 +6,12 @@
 //! failure, not a silent runtime gap.
 //!
 //! `--fix` regenerates files surgically (only the file the drift lives in),
-//! never full-tree — `skillpack init` is the wholesale regen command. A user
-//! who hand-tailored `SKILL.md` description or `allowed-tools` post-init must
-//! not see `verify --fix` wipe their work to fix an unrelated `plugin.json`.
+//! never full-tree — `skillpack init` is the wholesale regen command. For
+//! `SKILL.md` drift the surgery goes one level finer: ONLY the frontmatter
+//! block is regenerated from the current intent; the body prose a maintainer
+//! may have hand-tailored post-init is preserved byte-for-byte. (Regenerating
+//! the whole `SKILL.md` would clobber the gotchas / examples sections — the
+//! maintainer's authorship belongs to them, not the template.)
 
 use std::path::Path;
 
@@ -23,11 +26,22 @@ use crate::{config::Config, introspect, types::Intent};
 /// variant (compile-driven extension — add a variant, add an arm).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FixAction {
-    /// `discovery.plugin.version_drift`: `.claude-plugin/plugin.json`'s
-    /// `version` doesn't match the manifest version. Apply by regenerating
-    /// ONLY `plugin.json` from the current manifest + intent, leaving the
-    /// committed `SKILL.md` / `marketplace.json` alone.
+    /// `discovery.plugin.version_drift` / `discovery.plugin.url_drift`:
+    /// `.claude-plugin/plugin.json`'s `version` / `homepage` / `repository`
+    /// drifted from the manifest / git origin. Apply by regenerating ONLY
+    /// `plugin.json` from the current manifest + intent, leaving the committed
+    /// `SKILL.md` / `marketplace.json` alone.
     RegenPluginJson,
+    /// `discovery.skill.name_drift` / `discovery.codex.skill.name_drift`:
+    /// a SKILL.md's frontmatter `name:` drifted from the canonical project
+    /// name (`coerce_kebab(profile.name)`). Apply by regenerating ONLY the
+    /// frontmatter block from the current intent — the body prose (which a
+    /// maintainer may have hand-tailored) is preserved byte-for-byte. The
+    /// skill file path is threaded via `apply`'s `location` param since the
+    /// drift may live at `skills/<name>/SKILL.md` (Claude) or
+    /// `.codex/skills/<name>/SKILL.md` (Codex), and the `<name>` segment may
+    /// itself be the drifted value.
+    RegenSkillMdFrontmatter,
 }
 
 /// What `apply` did: the file paths it wrote. Empty `files_written` is a
@@ -62,9 +76,20 @@ impl FixOutcome {
 /// the drift lives in, writes it. Returns the file paths written (empty on
 /// no-op). Fails if the prerequisites for the fix are absent (e.g. a
 /// `skillpack.toml` to recover the intent from).
-pub fn apply(action: FixAction, root: &Path) -> Result<FixOutcome> {
+///
+/// `location` is the `CheckResult.location` (rel-path + optional line) that
+/// triggered the fix — threaded so `RegenSkillMdFrontmatter` knows WHICH skill
+/// file to rewrite (the drift may live at `skills/<name>/SKILL.md` for Claude
+/// or `.codex/skills/<name>/SKILL.md` for Codex, and `<name>` may itself be
+/// the drifted value). Ignored by `RegenPluginJson` (fixed path).
+pub fn apply(
+    action: FixAction,
+    root: &Path,
+    location: Option<&(String, Option<usize>)>,
+) -> Result<FixOutcome> {
     match action {
         FixAction::RegenPluginJson => apply_regen_plugin_json(root),
+        FixAction::RegenSkillMdFrontmatter => apply_regen_skill_md_frontmatter(root, location),
     }
 }
 
@@ -109,6 +134,107 @@ fn apply_regen_plugin_json(root: &Path) -> Result<FixOutcome> {
     })
 }
 
+fn apply_regen_skill_md_frontmatter(
+    root: &Path,
+    location: Option<&(String, Option<usize>)>,
+) -> Result<FixOutcome> {
+    // The location's rel-path tells us WHICH skill file drifted AND which
+    // ecosystem (Claude `skills/<name>/SKILL.md` vs Codex
+    // `.codex/skills/<name>/SKILL.md`). Without it, the applicator cannot
+    // know what to rewrite — name_drift without a location is a programming
+    // bug, not a user-facing state.
+    let loc = location
+        .map(|(p, _)| p.as_str())
+        .ok_or_else(|| anyhow::anyhow!("name_drift fix dispatched without a location path"))?;
+
+    // Recover profile + intent (same precedent as apply_regen_plugin_json).
+    let profile = introspect::introspect(root).context("introspecting repo for --fix")?;
+    let Some(cfg) = Config::load(root)? else {
+        bail!(
+            "no skillpack.toml at {} — `--fix` can only repair init-managed\n\
+             distribution files; run `skillpack init` to seed it first.",
+            root.display()
+        );
+    };
+    let Some(intent): Option<Intent> = cfg.to_intent() else {
+        bail!(
+            "skillpack.toml at {} has no `[skill]` block — cannot recover intent for --fix",
+            root.display()
+        );
+    };
+
+    // Derive the target from the location path: Codex skills live under
+    // `.codex/skills/`, Claude skills under `skills/`. Render ONLY the
+    // ecosystem whose file drifted — surgical: we don't touch the other path.
+    let target = if loc.starts_with(".codex/skills/") {
+        Target::Codex
+    } else {
+        Target::Claude
+    };
+    let files =
+        render_targets(&profile, &intent, &[target]).context("rendering skill target for --fix")?;
+
+    // The rendered SKILL.md whose rel-path matches the drifted file. Render
+    // produces a fresh full skill (frontmatter + body); we keep ONLY the
+    // frontmatter from it and rebuild the body from the committed file below.
+    let fresh_skill = files
+        .iter()
+        .find(|f| f.rel_path == loc)
+        .cloned()
+        .ok_or_else(|| {
+            anyhow::anyhow!("rendered no skill at `{loc}` — fix prerequisites not met")
+        })?;
+
+    // Slice the fresh frontmatter: everything from the opening `---` through
+    // the closing `---` (inclusive). If the template stopped emitting a
+    // frontmatter block, fall back to the full fresh file (no body to splice).
+    let fresh_frontmatter = split_frontmatter(&fresh_skill.contents)
+        .map(|(fm, _body)| fm)
+        .unwrap_or_else(|| fresh_skill.contents.clone());
+
+    // Read the committed file and preserve its BODY — the prose a maintainer
+    // may have hand-tailored post-init (the whole reason `--fix` is surgical
+    // here instead of wholesale regen).
+    let committed_path = root.join(loc);
+    // Normalize CRLF→LF before splitting: a Windows `git autocrlf` checkout
+    // (or a direct CRLF commit) would make `split_frontmatter`'s `\n---\n`
+    // probe miss the closing delimiter → return None → preserved_body default
+    // empty → the maintainer's BODY PROSE SILENTLY DELETED on `--fix`. Writing
+    // back LF-normalized also matches `init`'s output (the template renders LF
+    // and `.gitattributes` pins `*.md text eol=lf`, so LF-on-disk is the
+    // canonical form downstream verify byte-tests against).
+    let committed = std::fs::read_to_string(&committed_path)
+        .with_context(|| format!("reading committed skill {}", committed_path.display()))?
+        .replace("\r\n", "\n");
+    let preserved_body = split_frontmatter(&committed)
+        .map(|(_fm, body)| body)
+        .unwrap_or_default();
+
+    // Splice: regenerated frontmatter + preserved body. A single `\n` joins
+    // them; the template ends its frontmatter block with a closing `---` and
+    // the body starts with a blank line, so the joined artifact mirrors what
+    // `init` writes on a fresh run (modulo the maintainer's body edits).
+    let spliced = format!("{fresh_frontmatter}\n{preserved_body}");
+    std::fs::write(&committed_path, &spliced)
+        .with_context(|| format!("writing spliced skill {}", committed_path.display()))?;
+    Ok(FixOutcome {
+        files_written: vec![loc.to_string()],
+    })
+}
+
+/// Split a SKILL.md into `(frontmatter_block, trailing_body)`. The frontmatter
+/// block includes both `---` delimiters; the body is everything after the
+/// closing `---` (typically a leading blank line + the prose). Returns `None`
+/// if the file has no `---`-delimited frontmatter (a hand-written skill with
+/// no frontmatter, or a corrupted file — caller falls back to whole-file).
+fn split_frontmatter(contents: &str) -> Option<(String, String)> {
+    let after_open = contents.strip_prefix("---\n")?;
+    let close_idx = after_open.find("\n---\n")?;
+    let fm = format!("---\n{}---", &after_open[..close_idx]);
+    let body = after_open[close_idx + "\n---\n".len()..].to_string();
+    Some((fm, body))
+}
+
 fn write_one(root: &Path, file: &GeneratedFileOutput) -> Result<()> {
     let p = root.join(&file.rel_path);
     if let Some(parent) = p.parent() {
@@ -127,6 +253,9 @@ pub fn action_for(check_id: &str) -> Option<FixAction> {
     match check_id {
         "discovery.plugin.version_drift" | "discovery.plugin.url_drift" => {
             Some(FixAction::RegenPluginJson)
+        }
+        "discovery.skill.name_drift" | "discovery.codex.skill.name_drift" => {
+            Some(FixAction::RegenSkillMdFrontmatter)
         }
         // Extend here + add the match arm above — exhaustive match makes
         // forgetting an arm a compile failure, not a silent skip.
@@ -155,6 +284,22 @@ mod tests {
         assert_eq!(
             action_for("discovery.plugin.url_drift"),
             Some(FixAction::RegenPluginJson)
+        );
+    }
+
+    #[test]
+    fn action_for_maps_name_drift_both_ecosystems() {
+        // Both Claude (`discovery.skill.name_drift`) and Codex
+        // (`discovery.codex.skill.name_drift`) map to RegenSkillMdFrontmatter —
+        // the applicator uses the threaded location path to dispatch to the
+        // right file (skills/<name>/SKILL.md vs .codex/skills/<name>/SKILL.md).
+        assert_eq!(
+            action_for("discovery.skill.name_drift"),
+            Some(FixAction::RegenSkillMdFrontmatter)
+        );
+        assert_eq!(
+            action_for("discovery.codex.skill.name_drift"),
+            Some(FixAction::RegenSkillMdFrontmatter)
         );
     }
 

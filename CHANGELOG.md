@@ -5,6 +5,58 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.2] - 2026-07-12
+
+### Added — verify catches SKILL.md name drift + opt-in score gate
+
+- `verify` now warns when a generated `SKILL.md` frontmatter `name:` field
+  no longer matches the canonical project name (`coerce_kebab(profile.name)`,
+  the exact value the template renders). Fires under two check IDs —
+  `discovery.skill.name_drift` (Claude) and `discovery.codex.skill.name_drift`
+  (Codex) — both mapped to the new `FixAction::RegenSkillMdFrontmatter`.
+  Warning (not failure): drift signals a hand-edited skill file or a renamed
+  project that wasn't regenerated. Skips silently when either side is absent
+  (e.g. no detectable project name).
+- `verify --fix` regenerates ONLY the frontmatter block of the drifted
+  `SKILL.md`, splicing the fresh frontmatter onto the preserved body prose.
+  The applicator derives the target (Claude vs Codex) and which skill file
+  from the warning's `location` rel-path, re-renders that single target, and
+  reads the committed file with CRLF→LF normalization before splicing — so
+  maintainer body prose (gotchas, examples, hand-tailored sections) survives
+  the fix byte-for-byte on Windows autocrlf checkouts. Wholesale `init` regen
+  remains the path for body drift; `--fix` is the surgical tool for
+  frontmatter-only drift.
+- `verify --min-score <N>` (0–100) is an opt-in CI gate: when passed, verify
+  exits **2** if the discoverability score is below `N` and no critical check
+  failed. Exit 2 (`VERIFY_SCORE_BELOW_MIN`) is distinct from exit 1
+  (`VERIFY_FAIL`) so CI can distinguish a structurally broken pack from a
+  score below an opt-in threshold — the latter is often `verify --fix`-
+  actionable. A human-readable stderr line names the threshold and actual
+  score when the gate fires; the JSON body still lands on stdout under
+  `--format json`. Exit precedence is now load-bearing: **critical failure
+  (1) > score below min (2) > ok (0)** — a broken pack surfaces the
+  structure error first, the score gate fires only when structure passed.
+  Omitted by default; the score continues not to gate exits unless asked.
+
+### Internal — verify plumbing threads profile_name + location to discovery & fix
+
+- `VerifyInput` gains a `profile_name: Option<String>` field (the
+  `coerce_kebab`'d canonical name, threaded from both callers). `discovery::run`
+  forwards it to `check_one_skill_md`, where the name_drift check compares it
+  against the frontmatter `name:`. Threading the pre-coerced value (rather
+  than re-coercing inside discovery) keeps the comparison a raw string match
+  with no duplicated normalization, and keeps discovery a pure function of
+  its inputs.
+- `fix::apply` now threads `location: Option<&(String, Option<usize>)>` so the
+  `RegenSkillMdFrontmatter` applicator can locate the drifted file without
+  re-scanning. `RegenPluginJson` ignores `location` (fixed path); the verify
+  dispatcher retains `r.location.clone()` so the applicator isn't dead. The
+  distillation is one new enum variant + one applicator + one `action_for`
+  arm — the exhaustive match makes forgetting the arm a compile failure.
+- `exit::VERIFY_SCORE_BELOW_MIN = 2` joins `VERIFY_OK = 0` and `VERIFY_FAIL = 1`.
+  Documented for consumers scripting `verify` — exit 2 is recoverable via
+  `--fix` or by raising the pack's score, exit 1 is structural.
+
 ## [0.9.1] - 2026-07-12
 
 ### Added — verify catches plugin.json URL drift (`discovery.plugin.url_drift`)

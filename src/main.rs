@@ -42,9 +42,12 @@ fn main() {
             license,
             target,
         ),
-        Commands::Verify { root, format, fix } => {
-            run_verify(&root, cli.verbose, cli.debug, format, fix)
-        }
+        Commands::Verify {
+            root,
+            format,
+            fix,
+            min_score,
+        } => run_verify(&root, cli.verbose, cli.debug, format, fix, min_score),
         Commands::Doctor { root, format } => run_doctor(&root, cli.verbose, cli.debug, format),
     }) {
         code
@@ -243,6 +246,7 @@ fn verify_rendered(
         spawn_root: root.to_path_buf(),
         cli_command: profile.cli_command.clone(),
         repo_url: profile.repo_url.clone(),
+        profile_name: Some(coerce_kebab(&profile.name)),
         debug,
     };
     verify::run(&input)
@@ -387,8 +391,9 @@ fn run_verify(
     debug: bool,
     format: verify::OutputFormat,
     fix: bool,
+    min_score: Option<u8>,
 ) -> i32 {
-    match run_verify_inner(root, verbose, debug, format, fix) {
+    match run_verify_inner(root, verbose, debug, format, fix, min_score) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -403,6 +408,7 @@ fn run_verify_inner(
     debug: bool,
     format: verify::OutputFormat,
     fix: bool,
+    min_score: Option<u8>,
 ) -> Result<i32> {
     // Defer to introspect only to recover has_cli + cli_command for the
     // *spawn* stage. CLI *presence* is now derived from the SKILL.md itself
@@ -424,6 +430,7 @@ fn run_verify_inner(
             root: root.to_path_buf(),
             spawn_root: root.to_path_buf(),
             cli_command: profile.cli_command.clone(),
+            profile_name: Some(coerce_kebab(&profile.name)),
             debug,
             repo_url: profile.repo_url.clone(),
         };
@@ -440,7 +447,7 @@ fn run_verify_inner(
     let (final_report, applied_summary) = if !fix {
         (report, None)
     } else {
-        let actions: Vec<verify::fix::FixAction> = report
+        let actions: Vec<_> = report
             .results
             .iter()
             .filter(|r| {
@@ -449,15 +456,15 @@ fn run_verify_inner(
                     verify::result::Severity::Warn | verify::result::Severity::Error
                 )
             })
-            .filter_map(|r| verify::fix::action_for(&r.check_id))
+            .filter_map(|r| verify::fix::action_for(&r.check_id).map(|a| (a, r.location.clone())))
             .collect();
         if actions.is_empty() {
             (report, None)
         } else {
             let mut written: Vec<String> = Vec::new();
-            for action in actions {
-                let outcome =
-                    verify::fix::apply(action, root).context("applying a `--fix` action")?;
+            for (action, loc) in actions {
+                let outcome = verify::fix::apply(action, root, loc.as_ref())
+                    .context("applying a `--fix` action")?;
                 written.extend(outcome.files_written);
             }
             let summary: Vec<String> = verify::fix::FixOutcome {
@@ -477,11 +484,25 @@ fn run_verify_inner(
         println!("{line}");
     }
     print!("{}", render(&final_report));
-    Ok(if final_report.has_critical_failure() {
+    // Exit precedence: critical failure (1) > score-below-min (2) > ok (0).
+    // A structurally broken pack is more severe than a low score and must
+    // surface first; the score gate fires only when structure passed.
+    let code = if final_report.has_critical_failure() {
         exit::VERIFY_FAIL
+    } else if let Some(min) = min_score {
+        let actual = final_report.discoverability_score();
+        if actual < min {
+            eprintln!(
+                "verify: discoverability score {actual} is below the --min-score {min} threshold"
+            );
+            exit::VERIFY_SCORE_BELOW_MIN
+        } else {
+            exit::VERIFY_OK
+        }
     } else {
         exit::VERIFY_OK
-    })
+    };
+    Ok(code)
 }
 /// `skillpack doctor` — diagnose why introspection chose what it did.
 /// Read-only: prints the detected profile + the decision trace (`diag`),

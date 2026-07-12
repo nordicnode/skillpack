@@ -19,3 +19,9 @@ pub const INIT_FATAL: i32 = 3;
 pub const VERIFY_OK: i32 = 0;
 /// `verify` failure: at least one critical check failed. Blocks the PR.
 pub const VERIFY_FAIL: i32 = 1;
+/// `verify` score-below-min: every critical check passed, but the
+/// discoverability score fell below the `--min-score` threshold the caller
+/// opted into. Distinct from VERIFY_FAIL so a CI gate can tell "structure
+/// broke" (1) from "drift/warnings degraded the score" (2) — the latter is
+/// often actionable via `verify --fix` rather than a hand-edit.
+pub const VERIFY_SCORE_BELOW_MIN: i32 = 2;

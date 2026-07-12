@@ -50,7 +50,11 @@ pub(crate) fn rel_unix(root: &Path, path: &Path) -> String {
 /// independently — discovery degrades gracefully when an ecosystem's files
 /// are absent (a `--target cursor`-only pack shouldn't fail on a missing
 /// `.claude-plugin/`).
-pub fn run(root: &Path, repo_url: &Option<String>) -> Result<Vec<CheckResult>> {
+pub fn run(
+    root: &Path,
+    repo_url: &Option<String>,
+    profile_name: &Option<String>,
+) -> Result<Vec<CheckResult>> {
     let mut out = Vec::new();
 
     // Claude Code: marketplace.json + plugin.json + skills/<name>/SKILL.md.
@@ -70,7 +74,12 @@ pub fn run(root: &Path, repo_url: &Option<String>) -> Result<Vec<CheckResult>> {
             ));
         } else {
             for skill_path in skills {
-                out.push(check_one_skill_md(root, &skill_path, "discovery.skill")?);
+                out.push(check_one_skill_md(
+                    root,
+                    &skill_path,
+                    "discovery.skill",
+                    profile_name,
+                )?);
             }
         }
     }
@@ -91,6 +100,7 @@ pub fn run(root: &Path, repo_url: &Option<String>) -> Result<Vec<CheckResult>> {
                 root,
                 &skill_path,
                 "discovery.codex.skill",
+                profile_name,
             )?);
         }
     }
@@ -523,7 +533,12 @@ pub(crate) fn find_kv_colon(line: &str) -> Option<usize> {
     None
 }
 
-fn check_one_skill_md(root: &Path, path: &Path, prefix: &str) -> Result<CheckResult> {
+fn check_one_skill_md(
+    root: &Path,
+    path: &Path,
+    prefix: &str,
+    profile_name: &Option<String>,
+) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let fm = parse_skill_frontmatter(&raw).unwrap_or_default();
 
@@ -565,6 +580,29 @@ fn check_one_skill_md(root: &Path, path: &Path, prefix: &str) -> Result<CheckRes
             ),
             "To fix: trim your description/when_to_use; the first sentence is what the agent sees first.",
         ));
+    }
+
+    // name_drift: frontmatter `name:` (if present) must match the canonical
+    // project name — `coerce_kebab(profile.name)`, the same value the SKILL.md
+    // template renders. `init` writes them in sync; drift means a hand-edited
+    // frontmatter or a renamed project repo/manifest that wasn't regenerated.
+    // Warn (not fail): a maintainer may intentionally ship a skill under a
+    // divergent name. Placed AFTER the fail-severity checks (description,
+    // description_length) so a structurally broken skill surfaces its fail
+    // first — drift is a warn and must not shadow a fail. Skipped when either
+    // side is absent (no frontmatter name, or introspection couldn't derive a
+    // canonical name).
+    if let (Some(fm_name), Some(canonical)) = (fm.name.as_deref(), profile_name.as_deref()) {
+        if fm_name != canonical {
+            let mut r = CheckResult::warn(
+                &format!("{prefix}.name_drift"),
+                "SKILL.md `name` matches the canonical project name",
+                format!("{rel}: `name: {fm_name}` != canonical `{canonical}`"),
+                "To fix: run `skillpack verify --fix` to regenerate the frontmatter, or re-run `skillpack init` to refresh the whole skill, or intentionally pin the skill name.",
+            );
+            r.location = Some((rel.clone(), None));
+            return Ok(r);
+        }
     }
 
     // description leads with an alpha word (action-verb heuristic).

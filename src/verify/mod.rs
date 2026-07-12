@@ -42,6 +42,13 @@ pub struct VerifyInput {
     /// URL-drift check stays free of a subprocess spawn — see module doc).
     /// `None` when no git origin is configured.
     pub repo_url: Option<String>,
+    /// The kebab-coerced project name (`coerce_kebab(&profile.name)`,
+    /// already computed for rendering). Threaded so `discovery`'s
+    /// `discovery.skill.name_drift` check can compare the SKILL.md `name:`
+    /// frontmatter against the canonical value the template renders — without
+    /// `discovery` itself calling `coerce_kebab` or building a `ProjectProfile`.
+    /// `None` only when introspection couldn't derive a name at all.
+    pub profile_name: Option<String>,
     /// Print every subprocess spawn to stderr (design §8.2 --debug).
     pub debug: bool,
 }
@@ -51,13 +58,12 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
     let root = &input.root;
     let mut report = VerifyReport::default();
 
-    // Discovery checks (pure, file reads only + the threaded repo_url for the
-    // plugin.json URL-drift sub-check).
-    for check in discovery::run(root, &input.repo_url)? {
+    // Discovery checks (pure, file reads only + the threaded repo_url +
+    // profile_name for the plugin.json / SKILL.md drift sub-checks).
+    for check in discovery::run(root, &input.repo_url, &input.profile_name)? {
         report.push(check);
     }
 
-    // Invocation checks. Build the input from the SKILL.md we located. Note we
     // use the FIRST skill's text for the invocation spawn — the documented CLI
     // belongs to exactly one skill. Discovery above still checks all skills.
     let skill_path = find_skill_file(root);

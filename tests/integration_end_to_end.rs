@@ -579,6 +579,424 @@ fn verify_skips_url_drift_when_no_git_origin() {
     );
 }
 
+// Skill name drift: SKILL.md frontmatter `name:` must match the canonical
+// project name (`coerce_kebab(profile.name)`, which for the rust-cli fixture
+// is `sample-rust` from Cargo.toml [package].name — NO git seed needed, unlike
+// url_drift). `init` writes them in sync; hand-editing the frontmatter must
+// surface as a `discovery.skill.name_drift` WARNING naming both values.
+#[test]
+fn verify_warns_on_skill_md_name_drift() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Control: freshly-init'd pack has `name: sample-rust` in lockstep → no warn.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert!(
+        !v["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["check_id"].as_str().unwrap() == "discovery.skill.name_drift"),
+        "freshly-init'd pack must not report name_drift, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // Mutate ONLY the frontmatter `name:` to diverge from the canonical
+    // `sample-rust`. Body untouched (the body-preservation test below
+    // exercises the body-splice path; here we only assert the warn).
+    let skill = root.join("skills/sample-rust/SKILL.md");
+    let raw = fs::read_to_string(&skill).unwrap();
+    let mutated = raw.replacen("name: sample-rust", "name: STALE-name", 1);
+    assert_ne!(
+        mutated, raw,
+        "fixture must have a `name: sample-rust` to mutate"
+    );
+    fs::write(&skill, mutated).unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "name_drift warning must not fail verify; got {} and stderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    let drift = v["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["check_id"].as_str().unwrap() == "discovery.skill.name_drift")
+        .unwrap_or_else(|| {
+            panic!(
+                "name_drift warning missing in:\n{}",
+                String::from_utf8_lossy(&out.stdout)
+            )
+        });
+    assert_eq!(drift["severity"].as_str().unwrap(), "warn");
+    let msg = drift["message"].as_str().unwrap();
+    assert!(
+        msg.contains("STALE-name"),
+        "message must name the drifted frontmatter value: {msg}"
+    );
+    assert!(
+        msg.contains("sample-rust"),
+        "message must name the canonical project name: {msg}"
+    );
+}
+
+// `verify --fix` repairs `discovery.skill.name_drift` by regenerating ONLY
+// the frontmatter block from the current intent — the body prose must survive
+// byte-for-byte. This is the surgical principle that distinguishes
+// RegenSkillMdFrontmatter from wholesale regen (init).
+#[test]
+fn verify_fix_repairs_name_drift_preserving_body() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Sentinel body prose the maintainer "hand-tailored" post-init. --fix MUST
+    // NOT wipe this. We anchor on a unique line so the assertion is byte-precise
+    // rather than substring-only (whitespace normalization around it is fine;
+    // the line itself must survive intact).
+    let skill = root.join("skills/sample-rust/SKILL.md");
+    let raw = fs::read_to_string(&skill).unwrap();
+    let body_sentinel = "BODY_SENTINEL_KEEP_ME_UNIQUE_PROSE";
+    let with_sentinel = format!("{raw}\n{body_sentinel}\n");
+    let mutated_name = with_sentinel.replacen("name: sample-rust", "name: STALE-name", 1);
+    assert_ne!(&mutated_name, &with_sentinel);
+    fs::write(&skill, mutated_name).unwrap();
+
+    // Confirm the drift is visible pre-fix.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert!(
+        v["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| { r["check_id"].as_str().unwrap() == "discovery.skill.name_drift" }),
+        "pre-fix verify must surface name_drift, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // Apply --fix. The post-fix report must NOT report name_drift, and the
+    // skill file must show its name restored to `sample-rust` AND the body
+    // sentinel preserved byte-for-byte.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--fix", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "post-fix verify must exit 0; got {} and stderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let json_str = raw
+        .lines()
+        .skip_while(|l| !l.trim_start().starts_with('{'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let v: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    let has_drift = v["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["check_id"].as_str().unwrap() == "discovery.skill.name_drift");
+    assert!(
+        !has_drift,
+        "post-fix report must not still emit name_drift, got:\n{raw}"
+    );
+
+    let after = fs::read_to_string(&skill).unwrap();
+    assert!(
+        after.contains("name: sample-rust"),
+        "post-fix frontmatter must show the canonical name; got:\n{after}"
+    );
+    assert!(
+        !after.contains("STALE-name"),
+        "post-fix must not retain the stale name; got:\n{after}"
+    );
+    assert!(
+        after.contains(body_sentinel),
+        "post-fix must preserve the body sentinel byte-for-byte; got:\n{after}"
+    );
+}
+
+// Regression: a skill with BOTH a drifted frontmatter `name:` (warn) AND an
+// empty/missing `description` (fail) must surface the FAIL, exit 1. name_drift
+// is a WARN and must NOT shadow a fail-severity check. This guards against the
+// ordering mistake where name_drift was placed before the fail checks and
+// short-circuited them — restoring structural-failure-first precedence.
+#[test]
+fn name_drift_warn_does_not_shadow_description_fail() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Mutate the canonical SKILL.md: drift the `name:` AND blank the
+    // `description:`. Both checks would fire independently; only the fail
+    // must reach the report.
+    let skill = root.join("skills/sample-rust/SKILL.md");
+    let raw = fs::read_to_string(&skill).unwrap();
+    let desc_line = raw
+        .lines()
+        .find(|l| l.starts_with("description:"))
+        .expect("fixture SKILL.md must have a `description:` frontmatter line");
+    let drifted = raw
+        .replacen("name: sample-rust", "name: STALE-name", 1)
+        .replacen(desc_line, "description: \"\"", 1);
+    // Sanity: the mutation landed — both edits applied, else the assertions
+    // below could pass vacuously.
+    assert_ne!(
+        drifted, raw,
+        "name + description mutation must change the file"
+    );
+    assert!(
+        drifted.contains("name: STALE-name"),
+        "name drift must be present before verify"
+    );
+    assert!(
+        drifted.contains("description: \"\""),
+        "blank description must be present before verify"
+    );
+    fs::write(&skill, drifted).unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    // VERIFY_FAIL = 1: the empty-description fail must drive the exit, NOT
+    // the name_drift warn (exit 0).
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "description fail must drive exit 1, not name_drift warn; got {:?} and stderr:\n{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    let has_desc_fail = v["results"].as_array().unwrap().iter().any(|r| {
+        r["check_id"].as_str().unwrap() == "discovery.skill.description"
+            && r["severity"].as_str().unwrap() == "fail"
+    });
+    assert!(
+        has_desc_fail,
+        "report must surface the description FAIL, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let has_name_drift = v["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["check_id"].as_str().unwrap() == "discovery.skill.name_drift");
+    // name_drift may or may not also appear (early-return-on-fail idiom), but
+    // FAIL must win the exit code regardless of its presence.
+    let _ = has_name_drift;
+}
+
+// `verify --min-score` opt-in score gate: when the score meets or exceeds
+// the threshold, verify must still exit 0 (no message, no failure).
+#[test]
+fn verify_min_score_passes_when_threshold_met() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Freshly-init'd rust-cli pack emits a `discovery.plugin.author` warn (no
+    // author in the fixture's skillpack.toml) → baseline score 90, NOT 100.
+    // A threshold of 90 must pass — exit 0, no stderr gate message.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "verify",
+            "--root",
+            ".",
+            "--min-score",
+            "90",
+            "--format",
+            "json",
+        ])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "score meeting threshold must exit 0; got {} and stderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert_eq!(
+        v["discoverability_score"].as_u64().unwrap(),
+        90,
+        "score must be exactly 90 on this fixture (author warn, no other drift), got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("--min-score"),
+        "no gate message when threshold met; stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+// `verify --min-score` fails-below-threshold: when the discoverability score
+// falls below the opt-in threshold (but no critical check failed), verify must
+// exit 2 (VERIFY_SCORE_BELOW_MIN — distinct from VERIFY_FAIL=1) and emit a
+// human-readable stderr line naming the threshold + actual score. The rust-cli
+// fixture's baseline score is 90 (author warn); no git seed or extra mutation
+// is needed — 90 < 100 gates.
+#[test]
+fn verify_min_score_fails_below_threshold() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Baseline 90 (fixture emits `discovery.plugin.author` warn). Gate at 100
+    // → must exit 2 because 90 < 100, even though no critical check failed.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "verify",
+            "--root",
+            ".",
+            "--min-score",
+            "100",
+            "--format",
+            "json",
+        ])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    // VERIFY_SCORE_BELOW_MIN = 2, distinct from VERIFY_FAIL = 1.
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "score below --min-score must exit 2 (not 1); got {:?} and stderr:\n{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--min-score"),
+        "stderr must mention the --min-score flag; got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("100"),
+        "stderr must name the threshold (100); got:\n{stderr}"
+    );
+    // The score-below message must surface even under --format json: the gate
+    // message is human-facing on stderr, the JSON body on stdout.
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    let score = v["discoverability_score"].as_u64().unwrap();
+    assert_eq!(
+        score, 90,
+        "fixture baseline score must be 90 (author warn); got {score}"
+    );
+}
+
 // `verify --fix` mechanically repairs the `discovery.plugin.version_drift`
 // warning by regenerating ONLY `.claude-plugin/plugin.json` (surgical: the
 // committed `SKILL.md` + `marketplace.json` stay intact). After the fix,
