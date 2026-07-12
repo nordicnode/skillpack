@@ -1,0 +1,88 @@
+# Reusable workflow: run `skillpack verify` against an agent-distribution layer.
+#
+# Consumers add this to their own workflow:
+#
+#   jobs:
+#     skillpack:
+#       uses: nordicnode/skillpack/.github/workflows/skillpack.yml@main
+#
+# (Pin to a tag — e.g. `@v0.9.0` — once a 0.9.0+ release ships that includes
+# this file. Until then `@main` tracks the latest.)
+#
+# The job installs `skillpack` from crates.io, then runs `skillpack verify` in
+# the consumer repo root. `verify` exits non-zero on any critical failure, so
+# a broken skill pack blocks the consumer's PR — exactly the CI gate skillpack
+# itself uses in its own `.github/workflows/ci.yml`.
+#
+# `verify` needs the real CLI on PATH (it spawns the documented `--help`), so
+# the matrix + runtime-setup block mirrors skillpack's own CI verbatim — a
+# consumer repo gets identical cross-OS coverage without hand-rolling setup-*
+# actions for each language runtime. Consumers whose project has no language
+# runtime on the matrix (a pure-library pack) can drop unused setup-* steps
+# from a forked copy; this workflow keeps the full set so the default covers
+# the eight language ecosystems skillpack supports.
+name: skillpack verify
+
+on:
+  workflow_call:
+    inputs:
+      skillpack-version:
+        description: 'crate version to install from crates.io (e.g. "0.8.8" or "0.9.0")'
+        required: false
+        type: string
+        default: '0.8.8'
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Runtime prereqs — one setup-* action per language, lifted verbatim from
+      # skillpack/.github/workflows/ci.yml so consumers get identical coverage.
+      # The Go + Ruby installs let the `#[ignore]`-gated round-trip tests run
+      # in skillpack's own CI; for a consumer repo they only matter if the
+      # consumer's documented CLI is in one of those languages.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0'
+
+      # Install skillpack from crates.io (pinned by version input). `cargo
+      # install` requires a Rust toolchain; rely on the runner's default
+      # stable toolchain rather than pinning one — `verify` doesn't compile
+      # skillpack, it just runs the published binary.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 'stable'
+      - name: install skillpack
+        run: cargo install skillpack --version ${{ inputs.skillpack-version }} --locked
+
+      # Run verify with exit-code gating (critical failure → exit 1 → job
+      # fails → consumer's PR is blocked). Warnings pass (they do not gate).
+      # Pass --format json so the GitHub Actions log carries a structured
+      # report a consumer can scrape or paste into a PR comment.
+      - name: skillpack verify
+        run: skillpack verify --format json

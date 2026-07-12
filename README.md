@@ -108,6 +108,32 @@ skillpack doctor
 the worst case — a broken skill pack that looks fine until an agent tries to use it — is
 caught up front.
 
+
+## CI gate (drop-in)
+
+`verify` exits non-zero on any critical failure, so it drops straight into CI as
+a PR gate. A reusable workflow ships in this repo — one line in your workflow:
+
+```yaml
+jobs:
+  skillpack:
+    uses: nordicnode/skillpack/.github/workflows/skillpack.yml@main
+```
+
+Pin to a released tag (e.g. `@v0.9.0`) once that tag is available; until then
+`@main` tracks the latest. The job installs `skillpack` from crates.io and
+runs `skillpack verify --format json` against the consumer repo, mirroring
+skillpack's own CI matrix (ubuntu / macOS / Windows, same runtime setup-* actions
+per supported language). Override the installed crate version:
+
+```yaml
+with:
+  skillpack-version: '0.8.8'   # any crates.io-published version
+```
+
+Prefer wiring your own workflow? `cargo install skillpack --locked` and run
+`skillpack verify` directly; the subcommand is the same as in Quick start.
+
 ## Does it actually help agents? (measured)
 
 Four fd search tasks, run with [OpenCode](https://opencode.ai) on a plain

@@ -54,6 +54,24 @@ fn write_skillpack_toml(root: &Path, name: &str) {
     fs::write(root.join("skillpack.toml"), toml).unwrap();
 }
 
+/// Replace the FIRST line of `text` that starts with `prefix` with `new_line`.
+/// Used by allowed-tools grammar tests to mutate the emitted `allowed-tools:`
+/// line in place — inserting above the closing `---` of the frontmatter block
+/// lands in the body, where `parse_skill_frontmatter` never sees it. Ponytail:
+/// a 6-line char scan beats pulling `regex` into the test deps.
+fn replace_first_line_starting_with(text: &str, prefix: &str, new_line: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        if line.trim_end_matches('\n').starts_with(prefix) {
+            out.push_str(new_line);
+            out.push('\n');
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
 #[test]
 fn rust_cli_init_then_verify_round_trip() {
     let root = copy_fixture("rust-cli");
@@ -386,6 +404,154 @@ fn verify_warns_on_plugin_json_version_drift() {
         msg.contains("0.1.0"),
         "message must name manifest version: {msg}"
     );
+}
+
+// `verify --fix` mechanically repairs the `discovery.plugin.version_drift`
+// warning by regenerating ONLY `.claude-plugin/plugin.json` (surgical: the
+// committed `SKILL.md` + `marketplace.json` stay intact). After the fix,
+// the re-run report must have no version_drift warning and exit 0. The fix
+// summary line is printed for the human via stdout.
+#[test]
+fn verify_fix_repairs_version_drift_surgically() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Snapshot SKILL.md body — assert unchanged after `--fix` (surgical guard).
+    let skill_path = root.join("skills/sample-rust/SKILL.md");
+    let skill_before = fs::read_to_string(&skill_path).unwrap();
+
+    // Inject drift: rewrite plugin.json version to diverge from manifest.
+    let pj = root.join(".claude-plugin/plugin.json");
+    let mut pjv: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pj).unwrap()).unwrap();
+    pjv["version"] = serde_json::Value::String("9.9.9-fake".into());
+    fs::write(&pj, serde_json::to_string_pretty(&pjv).unwrap()).unwrap();
+
+    // Run `verify --fix --format json`. The final report (post-fix re-run)
+    // is the JSON body on stdout. Pre-fix report is suppressed; an
+    // "✓ applied N fix(es), wrote: ..." summary line precedes it.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--fix", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "verify --fix must exit 0 after repair, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    let raw = String::from_utf8_lossy(&out.stdout);
+    // The human-readable fix summary line precedes the JSON body.
+    assert!(
+        raw.contains("✓ applied 1 fix(es), wrote: .claude-plugin/plugin.json"),
+        "must report the surgical fix in stdout: {raw}"
+    );
+    // The final JSON report must NOT contain the version_drift warning.
+    let json_str = raw
+        .lines()
+        .skip_while(|l| !l.trim_start().starts_with('{'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let v: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    let has_drift = v["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["check_id"].as_str().unwrap() == "discovery.plugin.version_drift");
+    assert!(
+        !has_drift,
+        "post-fix report must not still emit version_drift, got:\n{raw}"
+    );
+
+    // Plugin.json version is back to the manifest version.
+    let pjv2: serde_json::Value = serde_json::from_str(&fs::read_to_string(&pj).unwrap()).unwrap();
+    assert_ne!(
+        pjv2["version"].as_str().unwrap(),
+        "9.9.9-fake",
+        "plugin.json version must have been rewritten, got:\n{}",
+        fs::read_to_string(&pj).unwrap()
+    );
+    assert_eq!(pjv2["version"].as_str().unwrap(), "0.1.0");
+
+    // Surgical guard: SKILL.md untouched.
+    let skill_after = fs::read_to_string(&skill_path).unwrap();
+    assert_eq!(
+        skill_before, skill_after,
+        "verify --fix must NOT touch SKILL.md (surgical to plugin.json only)"
+    );
+}
+
+/// `verify --fix` with no fixable drift is a no-op: no "✓ applied" summary,
+/// just the normal verify report. Guards against `--fix` miscategorizing
+/// warns/errors (which would clobber files unexpectedly).
+#[test]
+fn verify_fix_is_noop_when_no_fixable_drift() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Freshly init'd: no version_drift (we'd instead see discovery.plugin.author
+    // warn — not a fixable drift). --fix must NOT emit "✓ applied" and must
+    // exit 0.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--fix", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "no-op --fix must exit 0, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let raw = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !raw.contains("✓ applied"),
+        "no-op --fix must NOT emit fix summary, got: {raw}"
+    );
+    // Post-json JSON body still parses — verify functionality intact.
+    let json_str = raw
+        .lines()
+        .skip_while(|l| !l.trim_start().starts_with('{'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let v: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(v["ok"], serde_json::Value::Bool(true));
 }
 
 // Improvement C: a plugin shipping multiple skills must verify each (the old
@@ -1436,6 +1602,157 @@ fn broken_mdc_missing_description_fails_verify() {
     }
 }
 
+// `allowed-tools` grammar check (discovery.skill.allowed_tools): valid
+// tokens (bare identifiers + namespaced calls) MUST NOT warn; malformed
+// tokens (unbalanced parens, non-alpha identifiers, empty entries) MUST
+// warn with `discovery.skill.allowed_tools`. Grammar-only — we don't
+// validate membership against an Anthropic allowlist (which would false-fail
+// the moment new tools ship).
+#[test]
+fn verify_warns_on_malformed_allowed_tools_grammar() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Mutate skills/<name>/SKILL.md frontmatter to inject malformed tokens.
+    // `Read` + `Bash(npm test:*)` are VALID (control); `Bash(` (unbalanced),
+    // `4R3ad` (non-alpha identifier) are INVALID. Replace the emitted
+    // `allowed-tools:` line IN PLACE — inserting ABOVE the closing `---`
+    // would land in the body outside the frontmatter block and the grammar
+    // check never sees it.
+    let skill_path = root.join("skills/sample-rust/SKILL.md");
+    let raw = fs::read_to_string(&skill_path).unwrap();
+    let new_raw = replace_first_line_starting_with(
+        &raw,
+        "allowed-tools:",
+        "allowed-tools: Read, Bash(npm test:*), Bash(, 4R3ad",
+    );
+    assert_ne!(
+        new_raw, raw,
+        "test setup failed: emitted SKILL.md had no `allowed-tools:` line to replace"
+    );
+    fs::write(&skill_path, new_raw).unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    // Grammar failures are WARN-level — verify must still exit 0.
+    assert!(
+        out.status.success(),
+        "verify must exit 0 on a warn (grammar only), got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let results = json["results"].as_array().unwrap();
+    let matches: Vec<&serde_json::Value> = results
+        .iter()
+        .filter(|r| r["check_id"] == "discovery.skill.allowed_tools")
+        .collect();
+    assert!(
+        !matches.is_empty(),
+        "verify must emit discovery.skill.allowed_tools, got:\n{json}"
+    );
+    for r in &matches {
+        assert_eq!(
+            r["severity"], "warn",
+            "allowed_tools grammar must be warn, got:\n{json}"
+        );
+        let msg = r["message"].as_str().unwrap_or("");
+        // Both invalid tokens must be named in the message.
+        assert!(msg.contains("`Bash(`"), "message must name `Bash(`: {msg}");
+        assert!(msg.contains("`4R3ad`"), "message must name `4R3ad`: {msg}");
+        // Valid tokens must NOT appear as bad.
+        assert!(
+            !msg.contains("`Read`"),
+            "valid `Read` must not be flagged bad: {msg}"
+        );
+    }
+}
+
+/// Control: a SKILL.md with ONLY valid allowed-tools tokens (bare
+/// identifiers + namespaced calls) must NOT emit `allowed_tools` warn.
+/// Guards against the grammar check over-firing on well-formed input.
+#[test]
+fn verify_passes_on_valid_allowed_tools_grammar() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Replace the emitted `allowed-tools:` line IN PLACE with a well-formed
+    // body: two bare identifiers + a namespaced call + a wildcard-arg call.
+    // Mutating inside the frontmatter block is what the grammar check sees —
+    // inserting above the closing `---` lands in the body and never parses.
+    let skill_path = root.join("skills/sample-rust/SKILL.md");
+    let raw = fs::read_to_string(&skill_path).unwrap();
+    let new_raw = replace_first_line_starting_with(
+        &raw,
+        "allowed-tools:",
+        "allowed-tools: Read, Edit, Bash(npm test:*), Grep(*)",
+    );
+    assert_ne!(
+        new_raw, raw,
+        "test setup failed: emitted SKILL.md had no `allowed-tools:` line to replace"
+    );
+    fs::write(&skill_path, new_raw).unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "verify must exit 0, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let results = json["results"].as_array().unwrap();
+    let matches: Vec<&serde_json::Value> = results
+        .iter()
+        .filter(|r| r["check_id"] == "discovery.skill.allowed_tools")
+        .collect();
+    assert!(
+        matches.is_empty(),
+        "valid allowed-tools grammar must NOT emit a warn, got:\n{json}"
+    );
+}
+
 // Self-dogfood: `verify` against the skillpack repo's own committed
 // distribution files — Claude (skills/skillpack/SKILL.md + .claude-plugin/),
 // Cursor (.cursor/rules/skillpack.mdc), Codex (.codex/skills/skillpack/).
@@ -1477,6 +1794,206 @@ fn self_dogfood_verify_on_repos_committed_files() {
     assert!(s.contains("skills/skillpack/SKILL.md validates"));
     assert!(s.contains(".codex/skills/skillpack/SKILL.md validates"));
     assert!(s.contains(".cursor/rules/skillpack.mdc validates"));
+}
+
+// Self-dogfood stronger guard: the COMMITTED distribution artifacts must be
+// byte-identical to what a fresh `skillpack init --target <all 5>` produces.
+// `self_dogfood_verify_on_repos_committed_files` above only asserts verify
+// PASSES — but the 0.8.8 dogfood surface surfaced drift (cursor `globs:`
+// missing, opencode `mode: subagent` instead of `primary`, trailing-newline
+// drift) that all pass `verify` silently. Byte-diff catches what verify-passes
+// hides.
+//
+// Skipped URLs: we DON'T byte-diff `.claude-plugin/marketplace.json` or
+// `.claude-plugin/plugin.json` because their `repository` / `url` /
+// `homepage` fields carry the git origin URL — the temp-dir copy has no
+// `.git`, so init emits an empty URL there, while the committed files carry
+// the GitHub URL. The 5 body files below never carry URL-derived fields, so
+// byte-equality is the right assertion (they embed name, description,
+// when_to_use, allowed-tools, globs, opencode mode, language-derived
+// defaults — all deterministic from Cargo.toml + skillpack.toml).
+#[test]
+fn self_dogfood_regenerated_artifacts_match_committed_byte_identical() {
+    // `init` needs a built skillpack binary on PATH (it probes
+    // target/release/skillpack for `has_cli`). Each test runs in its own
+    // target/debug/deps binary, so build release first.
+    Command::new("cargo")
+        .args(["build", "--release", "--quiet"])
+        .current_dir(repo_root())
+        .assert()
+        .success();
+
+    // Stage a minimal copy of the repo in a temp dir: the source tree +
+    // templates so `init` can resolve the binary (Cargo.toml's [[bin]])
+    // and the README description hint. Skip `.git` (no origin URL in the
+    // temp), `target/` (we'll rebuild here), test fixtures, and the
+    // existing committed distribution dirs — those would taint the
+    // regenerated output if init inherited them as input.
+    let dest = tempfile::tempdir().unwrap().keep();
+    for entry in &[
+        "Cargo.toml",
+        "skillpack.toml",
+        "README.md",
+        "LICENSE",
+        "rust-toolchain.toml",
+    ] {
+        fs::copy(repo_root().join(entry), dest.join(entry)).unwrap();
+    }
+    fs::create_dir_all(dest.join("docs")).unwrap();
+    fs::copy(
+        repo_root().join("docs/logo.png"),
+        dest.join("docs/logo.png"),
+    )
+    .unwrap();
+    for dir in &["src", "templates"] {
+        copy_dir(&repo_root().join(dir), &dest.join(dir));
+    }
+
+    // Build the binary in the temp dir so `has_cli=true` probes target/release.
+    // (Without this, init folds to the pure-library branch and the SKILL.md
+    // would omit the `## Invocation` block, mismatching the committed file.)
+    Command::new("cargo")
+        .args(["build", "--release", "--quiet"])
+        .current_dir(&dest)
+        .assert()
+        .success();
+
+    // Regenerate all 5 targets non-interactively from the copied
+    // skillpack.toml (no interview prompts).
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--non-interactive",
+            "--accept-warnings",
+            "--target",
+            "claude",
+            "--target",
+            "cursor",
+            "--target",
+            "codex",
+            "--target",
+            "opencode",
+            "--target",
+            "copilot",
+        ])
+        .current_dir(&dest)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "init must exit 0, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // Byte-equalize the 5 body files that don't carry URL-derived fields.
+    // Drift in `globs:`, `mode:`, language-derived `allowed-tools`, the
+    // `## Invocation` block, trailing newlines, or template polish all
+    // surface here.
+    for rel in &[
+        "skills/skillpack/SKILL.md",
+        ".codex/skills/skillpack/SKILL.md",
+        ".cursor/rules/skillpack.mdc",
+        ".opencode/agents/skillpack.md",
+        ".github/copilot-instructions.md",
+    ] {
+        let regen = fs::read_to_string(dest.join(rel)).unwrap_or_default();
+        let committed = fs::read_to_string(repo_root().join(rel)).unwrap_or_default();
+        assert_eq!(
+            regen, committed,
+            "regenerated `{rel}` drifted from committed:\n--- committed ---\n{committed}\
+             \n--- regenerated ---\n{regen}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&dest);
+}
+
+// `doctor --format json` emits the serialized `ProjectProfile` as a stable
+// JSON object for CI/scripts. Pin the contract: top-level scalar fields by
+// type, `diag` ALWAYS present as an array (empty on clean runs, non-empty
+// when a candidate fn pushed a falsy branch), and each diag entry shaped as
+// { stage: string, note: string }. Mirrors `verify_format_json_is_machine
+// _readable`'s role for the verify report.
+#[test]
+fn doctor_format_json_is_machine_readable() {
+    // Fixture without a built binary pushes one falsy-branch note into
+    // `diag` — exercising the populated array shape.
+    let root = copy_fixture("rust-cli");
+    write_skillpack_toml(&root, "sample-rust");
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["doctor", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out)).unwrap();
+
+    // Top-level scalar contract.
+    assert!(v["name"].is_string(), "name must be a string: {v}");
+    assert!(
+        matches!(
+            v["language"].as_str(),
+            Some("rust" | "node" | "python" | "go" | "ruby" | "unknown")
+        ),
+        "language must be a known value: {v}"
+    );
+    assert!(v["has_cli"].is_boolean(), "has_cli must be bool: {v}");
+
+    // `diag` always present as an array — the stability contract for
+    // consumers (`profile["diag"]` MUST NOT KeyError, even on clean runs).
+    let diag = v["diag"]
+        .as_array()
+        .expect("diag must always serialize as an array, even when empty");
+    // Fixture binary un-built → has_cli=false → at least one falsy branch
+    // pushed a note; assert the populated-entry shape here.
+    assert!(
+        !diag.is_empty(),
+        "expected diag notes on unbuilt fixture: {v}"
+    );
+    for note in diag {
+        assert!(
+            note["stage"].is_string(),
+            "diag entry stage must be string: {note}"
+        );
+        assert!(
+            note["note"].is_string(),
+            "diag entry note must be string: {note}"
+        );
+    }
+    assert!(
+        diag.iter()
+            .any(|n| n["stage"].as_str() == Some("detect_cli")),
+        "expected at least one detect_cli-stage note: {v}"
+    );
+
+    // Now exercise the EMPTY-diag contract: doctor against the skillpack
+    // repo itself (built binary on PATH → has_cli=true → clean trace).
+    // `diag` must still serialize as an empty array, NOT be omitted.
+    Command::new("cargo")
+        .args(["build", "--release", "--quiet"])
+        .current_dir(repo_root())
+        .assert()
+        .success();
+    let clean_out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["doctor", "--root", ".", "--format", "json"])
+        .current_dir(repo_root())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let cv: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&clean_out)).unwrap();
+    assert_eq!(cv["has_cli"], serde_json::Value::Bool(true));
+    assert_eq!(
+        cv["diag"].as_array().map(std::vec::Vec::len),
+        Some(0),
+        "diag must be present as [] on clean runs, not omitted: {cv}"
+    );
 }
 
 // --- workspace member walks -------------------------------------------------

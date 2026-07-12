@@ -320,11 +320,13 @@ fn category_hint(lang: Language) -> &'static str {
 fn allowed_tools_hint(lang: Language) -> Option<&'static str> {
     // The skill describes a CLI a user runs; it can use Bash to run the CLI
     // and Read to consult output. We keep this conservative — a library skill
-    // leans on the host project's tooling, so we leave it blank.
+    // leans on the host project's tooling, so we leave it blank. Comma-
+    // separated per the Anthropic `allowed-tools` grammar (matches
+    // `verify`'s discovery.skill.allowed_tools grammar check).
     if let Language::Unknown = lang {
         None
     } else {
-        Some("Read Bash")
+        Some("Read, Bash")
     }
 }
 

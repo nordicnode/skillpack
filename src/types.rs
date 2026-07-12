@@ -38,7 +38,11 @@ pub struct ProjectProfile {
     /// detection branch succeeded (or when `doctor` wasn't run); each falsy
     /// branch in a candidate fn pushes one decision note here so `doctor` can
     /// explain why `has_cli = false` rather than silently reporting it.
-    #[serde(default, skip_serializing_if = "DiagTrace::is_empty")]
+    //
+    // Always serialized (no `skip_serializing_if`): the doctor JSON contract
+    // promises a stable top-level `diag` key — empty array on clean runs,
+    // non-empty when notes were pushed. Consumers can rely on `profile["diag"]`
+    // existing.
     pub diag: DiagTrace,
     /// `git remote get-url origin`, best-effort.
     pub repo_url: Option<String>,

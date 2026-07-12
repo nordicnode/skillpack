@@ -6,6 +6,7 @@
 //! each check degrades gracefully.
 
 pub mod discovery;
+pub mod fix;
 pub mod invocation;
 pub mod result;
 pub mod schema;

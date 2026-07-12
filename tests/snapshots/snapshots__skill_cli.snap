@@ -6,7 +6,7 @@ expression: skill.contents
 name: chronicle
 description: "Journal events to a chronological log"
 when_to_use: "log a journal entry, record an incident"
-allowed-tools: Read Bash
+allowed-tools: Read, Bash
 ---
 
 # chronicle

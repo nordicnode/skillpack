@@ -568,6 +568,36 @@ fn check_one_skill_md(root: &Path, path: &Path, prefix: &str) -> Result<CheckRes
         ));
     }
 
+    // allowed_tools grammar (apply only when the field is present). The
+    // Anthropic spec describes a GRAMMAR (comma-separated tokens, each either a
+    // bare identifier like `Read` or a namespaced call like `Bash(npm test:*)`),
+    // not an enumerated allowlist. Validating membership would false-fail the
+    // moment Anthropic ships a new tool, so we validate the grammar shape only:
+    // each comma-split token non-empty + matches `^[A-Za-z]+(\([^)]*\))?$`.
+    // Warn severity — malformed tools degrade discoverability but don't gate.
+    if let Some(tools) = fm.allowed_tools.as_deref() {
+        let bad: Vec<&str> = tools
+            .split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty() && !is_valid_allowed_tool_token(t))
+            .collect();
+        if !bad.is_empty() {
+            return Ok(CheckResult::warn(
+                &format!("{prefix}.allowed_tools"),
+                "SKILL.md `allowed-tools` tokens match the Anthropic grammar",
+                format!(
+                    "{rel}: `allowed-tools` has malformed token(s): {}",
+                    bad.iter()
+                        .map(|t| format!("`{t}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                "To fix: each comma-separated token must be a bare identifier \
+                 (e.g. `Read`) or a namespaced call (e.g. `Bash(npm test:*)`).",
+            ));
+        }
+    }
+
     // name: if present, kebab + <=64 chars.
     if let Some(name) = fm.name.as_deref() {
         if name.chars().count() > schema::SKILL_NAME_MAX_CHARS {
@@ -631,6 +661,40 @@ pub(crate) fn find_skill_files(root: &Path) -> Vec<std::path::PathBuf> {
 /// deterministic plural form used by discovery.
 pub(crate) fn find_skill_file(root: &Path) -> Option<std::path::PathBuf> {
     find_skill_files(root).into_iter().next()
+}
+
+/// Validate an `allowed-tools` token against the Anthropic grammar:
+/// a bare identifier (`Read`, `Grep`) or a namespaced call
+/// (`Bash(npm test:*)`, `Edit(*)`). Returns false for empty, malformed,
+/// or unbalanced-paren tokens. Ponytail: regex-free char scan — the
+/// grammar is small enough to validate inline without pulling `regex`.
+pub(crate) fn is_valid_allowed_tool_token(token: &str) -> bool {
+    let t = token.trim();
+    if t.is_empty() {
+        return false;
+    }
+    // Bare identifier: all alphabetic.
+    if t.chars().all(char::is_alphabetic) {
+        return true;
+    }
+    // Namespaced call: `Name(args)`. Split on the first `(`.
+    let Some(open) = t.find('(') else {
+        return false;
+    };
+    let (name, rest) = t.split_at(open);
+    if !name.chars().all(char::is_alphabetic) || name.is_empty() {
+        return false;
+    }
+    let rest = rest.strip_prefix('(').unwrap_or(rest);
+    // Must end with `)` and contain the args (any chars except `)` inside).
+    if !rest.ends_with(')') {
+        return false;
+    }
+    let inner = &rest[..rest.len() - 1];
+    if inner.contains(')') {
+        return false;
+    }
+    true
 }
 
 /// Every `.codex/skills/<name>/SKILL.md`, sorted. Same frontmatter shape

@@ -63,6 +63,15 @@ pub enum Commands {
         /// prints a machine-readable object with per-check ids for CI gating.
         #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
         format: crate::verify::OutputFormat,
+
+        /// Apply mechanical fixes for detected drift (e.g. regenerate a stale
+        /// `.claude-plugin/plugin.json` whose `version` drifted from the
+        /// project manifest). Surgical: only the file the drift lives in is
+        /// rewritten — your hand-tailored `SKILL.md` / `marketplace.json`
+        /// stay intact. After fixes are applied, verify re-runs and prints
+        /// the post-fix report. Use `skillpack init` for wholesale regen.
+        #[arg(long)]
+        fix: bool,
     },
     /// Diagnose why introspection chose `has_cli` / language as it did.
     /// Prints the detected profile + a chronological trace of the decision
@@ -72,6 +81,12 @@ pub enum Commands {
         /// Project root to operate on. Defaults to the current directory.
         #[arg(long, value_name = "DIR", default_value = ".")]
         root: PathBuf,
+
+        /// Output format. `human` (default) prints the readable diagnosis;
+        /// `json` emits the serialized `ProjectProfile` (including the
+        /// decision trace) for CI/scripts. Mirrors `verify --format`.
+        #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
+        format: crate::verify::OutputFormat,
     },
 }
 

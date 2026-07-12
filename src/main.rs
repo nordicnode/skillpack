@@ -42,8 +42,10 @@ fn main() {
             license,
             target,
         ),
-        Commands::Verify { root, format } => run_verify(&root, cli.verbose, cli.debug, format),
-        Commands::Doctor { root } => run_doctor(&root, cli.verbose, cli.debug),
+        Commands::Verify { root, format, fix } => {
+            run_verify(&root, cli.verbose, cli.debug, format, fix)
+        }
+        Commands::Doctor { root, format } => run_doctor(&root, cli.verbose, cli.debug, format),
     }) {
         code
     } else {
@@ -378,9 +380,14 @@ fn print_profile(profile: &types::ProjectProfile) {
         }
     }
 }
-
-fn run_verify(root: &Path, verbose: bool, debug: bool, format: verify::OutputFormat) -> i32 {
-    match run_verify_inner(root, verbose, debug, format) {
+fn run_verify(
+    root: &Path,
+    verbose: bool,
+    debug: bool,
+    format: verify::OutputFormat,
+    fix: bool,
+) -> i32 {
+    match run_verify_inner(root, verbose, debug, format, fix) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -394,6 +401,7 @@ fn run_verify_inner(
     verbose: bool,
     debug: bool,
     format: verify::OutputFormat,
+    fix: bool,
 ) -> Result<i32> {
     // Defer to introspect only to recover has_cli + cli_command for the
     // *spawn* stage. CLI *presence* is now derived from the SKILL.md itself
@@ -406,21 +414,68 @@ fn run_verify_inner(
     if verbose {
         print_profile(&profile);
     }
-    let input = VerifyInput {
-        root: root.to_path_buf(),
-        spawn_root: root.to_path_buf(),
-        cli_command: profile.cli_command.clone(),
-        debug,
+    let render = |report: &verify::VerifyReport| match format {
+        verify::OutputFormat::Human => verify::render(report),
+        verify::OutputFormat::Json => format!("{}\n", verify::render_json(report)),
     };
-    let report = verify::run(&input)?;
-    print!(
-        "{}",
-        match format {
-            verify::OutputFormat::Human => verify::render(&report),
-            verify::OutputFormat::Json => format!("{}\n", verify::render_json(&report)),
+    let run_verify = || -> Result<verify::VerifyReport> {
+        let input = VerifyInput {
+            root: root.to_path_buf(),
+            spawn_root: root.to_path_buf(),
+            cli_command: profile.cli_command.clone(),
+            debug,
+        };
+        verify::run(&input)
+    };
+
+    let report = run_verify()?;
+    // Without `--fix`, render + exit on the single report. With `--fix`,
+    // collect the mechanically-fixable drifts (warn OR error severities),
+    // apply each, then re-render from the post-fix report. The pre-fix
+    // report is NOT printed when `--fix` takes effect — the post-fix report
+    // surfaces what (if anything) still drifts, plus a one-line summary of
+    // the files rewritten.
+    let (final_report, applied_summary) = if !fix {
+        (report, None)
+    } else {
+        let actions: Vec<verify::fix::FixAction> = report
+            .results
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.severity,
+                    verify::result::Severity::Warn | verify::result::Severity::Error
+                )
+            })
+            .filter_map(|r| verify::fix::action_for(&r.check_id))
+            .collect();
+        if actions.is_empty() {
+            (report, None)
+        } else {
+            let mut written: Vec<String> = Vec::new();
+            for action in actions {
+                let outcome =
+                    verify::fix::apply(action, root).context("applying a `--fix` action")?;
+                written.extend(outcome.files_written);
+            }
+            let summary: Vec<String> = verify::fix::FixOutcome {
+                files_written: written,
+            }
+            .unique_sorted();
+            let summary_line = format!(
+                "✓ applied {} fix(es), wrote: {}",
+                summary.len(),
+                summary.join(", ")
+            );
+            (run_verify()?, Some(summary_line))
         }
-    );
-    Ok(if report.has_critical_failure() {
+    };
+
+    if let Some(line) = applied_summary {
+        println!("{line}");
+    }
+    print!("{}", render(&final_report));
+    Ok(if final_report.has_critical_failure() {
         exit::VERIFY_FAIL
     } else {
         exit::VERIFY_OK
@@ -431,8 +486,8 @@ fn run_verify_inner(
 /// never writes files. The trace is empty until candidate fns push notes
 /// (the `detect_*` falsy branches); doctor surfaces exactly why `has_cli`
 /// came out false so the maintainer can act.
-fn run_doctor(root: &Path, verbose: bool, debug: bool) -> i32 {
-    match run_doctor_inner(root, verbose, debug) {
+fn run_doctor(root: &Path, verbose: bool, debug: bool, format: crate::verify::OutputFormat) -> i32 {
+    match run_doctor_inner(root, verbose, debug, format) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -441,8 +496,37 @@ fn run_doctor(root: &Path, verbose: bool, debug: bool) -> i32 {
     }
 }
 
-fn run_doctor_inner(root: &Path, verbose: bool, debug: bool) -> Result<i32> {
+fn run_doctor_inner(
+    root: &Path,
+    verbose: bool,
+    debug: bool,
+    format: crate::verify::OutputFormat,
+) -> Result<i32> {
     let profile = introspect::introspect(root).context("introspecting repo for doctor")?;
+
+    match format {
+        crate::verify::OutputFormat::Json => {
+            // The serialized `ProjectProfile` IS the doctor JSON report —
+            // including the `diag` decision trace + every detected field,
+            // exactly what a consumer wants to scrape. No envelope wrapping;
+            // the consumer reads fields by name. Exits 0 (doctor is
+            // read-only diagnostic, non-gating — matches human form).
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&profile)
+                    .context("serializing doctor profile to JSON")?
+            );
+        }
+        crate::verify::OutputFormat::Human => render_doctor_human(&profile, verbose, debug),
+    }
+
+    // Doctor never writes; always exits 0.
+    Ok(exit::VERIFY_OK)
+}
+
+/// Render the human-facing diagnosis. Lifted verbatim from the pre-format
+/// behavior so `doctor` (no flag) and `doctor --format human` are byte-identical.
+fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool, debug: bool) {
     if debug {
         eprintln!(
             "[debug] detected name={} language={} has_cli={} diag_notes={}",
@@ -455,7 +539,7 @@ fn run_doctor_inner(root: &Path, verbose: bool, debug: bool) -> Result<i32> {
     // Reuse the same profile block --verbose prints so doctor's output starts
     // from a known place.
     if verbose {
-        print_profile(&profile);
+        print_profile(profile);
     } else {
         println!("— skillpack doctor —");
         println!("  name:     {}", profile.name);
@@ -483,9 +567,6 @@ fn run_doctor_inner(root: &Path, verbose: bool, debug: bool) -> Result<i32> {
             println!("  [{}] {}", note.stage, note.note);
         }
     }
-
-    // Doctor never writes; always exits 0.
-    Ok(exit::VERIFY_OK)
 }
 
 #[cfg(test)]

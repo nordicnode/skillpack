@@ -4,6 +4,87 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.9.0] - 2026-07-12
+
+### Added — reusable GitHub Action workflow for CI drift gating
+
+- `.github/workflows/skillpack.yml`: a reusable workflow consumers pin via
+  `uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.9.0`. Installs
+  skillpack from crates.io (`cargo install skillpack --version <input> --locked`)
+  and runs `skillpack verify --format json` on a multi-OS + multi-runtime matrix
+  mirroring the project's own `ci.yml`. Inputs: `skillpack-version` (default
+  `0.9.0`). README documents the drop-in usage between Quick start and the
+  dogfood section.
+
+### Added — `doctor --format json` (stable machine-readable diagnosis)
+
+- `doctor --format json` emits the serialized `ProjectProfile` (introspection
+  result + decision trace) as a stable JSON object for CI/scripts. Mirrors
+  `verify --format json`'s contract. The `diag` decision trace is ALWAYS
+  present as an array (empty `[]` on clean runs, non-empty when candidate
+  fns pushed falsy-branch notes) — removed the `skip_serializing_if =
+  DiagTrace::is_empty` so `profile["diag"]` never KeyErrors. Read-only,
+  non-gating — `doctor` always exits 0 (human + JSON form alike). Test
+  `doctor_format_json_is_machine_readable` pins the contract: scalar field
+  types + always-present `diag` array + per-entry `{ stage, note }` shape.
+
+### Added — `discovery.skill.allowed_tools` grammar check
+
+- `verify` now checks `allowed-tools` frontmatter against the Anthropic
+  GRAMMAR (not an enumerated allowlist): each comma-separated token must be a
+  bare identifier (`Read`) or a namespaced call (`Bash(npm test:*)`). Validates
+  unbalanced parens, non-alpha identifiers, and empty tokens; reports
+  `discovery.skill.allowed_tools` at WARN severity (doesn't gate). Applied to
+  both Claude (`skills/<name>/SKILL.md`) and Codex (`.codex/skills/<name>/SKILL.md`)
+  SKILL.md fronts. Membership-validation rejected as a brittle false-fail the
+  moment Anthropic ships new tools. The `allowed_tools_hint` emit also moved
+  from space-separated `"Read Bash"` to comma-separated `"Read, Bash"` to
+  match the grammar — freshly-init'd packs no longer self-warned. Tests:
+  `verify_warns_on_malformed_allowed_tools_grammar` (control: `Read`, `Bash(*)`
+  pass; `Bash(`, `4R3ad` flagged) + `verify_passes_on_valid_allowed_tools_grammar`.
+
+### Added — `verify --fix` (surgical drift repair)
+
+- `verify --fix` mechanically repairs detected drift. Scope is deliberately
+  narrow: only the file the drift lives in is rewritten — never wholesale regen
+  (that's `skillpack init`). One fixable drift supported at launch:
+  `discovery.plugin.version_drift` — regenerates ONLY `.claude-plugin/plugin.json`
+  from the current manifest + intent, leaving `SKILL.md`/`marketplace.json`
+  intact. Pre-fix report is suppressed; the post-fix verify re-runs and prints
+  the post-fix report. An `✓ applied N fix(es), wrote: <files>` summary line
+  precedes the report. Empty when no fixable drift — `--fix` is a no-op.
+  The `FixAction` enum uses exhaustive `apply` match so adding a variant +
+  forgetting an applier arm is a compile error, not a silent skip. Tests:
+  `verify_fix_repairs_version_drift_surgically` (asserts surgical) +
+  `verify_fix_is_noop_when_no_fixable_drift`.
+
+### Added — self-dogfood drift gate (byte-identical regen test)
+
+- `self_dogfood_regenerated_artifacts_match_committed_byte_identical`
+  integration test: copies the repo's minimum files to a temp dir, runs
+  `skillpack init --target <all 5> --non-interactive`, and asserts the five
+  body files (`skills/skillpack/SKILL.md`, `.codex/skills/skillpack/SKILL.md`,
+  `.cursor/rules/skillpack.mdc`, `.opencode/agents/skillpack.md`,
+  `.github/copilot-instructions.md`) are byte-identical to the committed
+  versions. Catches the F1-class drift that `verify`-passing hides:
+  missing `globs:`, wrong opencode `mode`, stale `allowed-tools` grammar.
+  Skips `plugin.json` / `marketplace.json` (their `url` / `repository`
+  fields carry the git origin URL, which differs between the temp-dir copy
+  and the GitHub-hosted source) — `verify`-passes covers those two.
+
+### Fixed
+
+- `DiagTrace` serialization no longer uses `skip_serializing_if = "is_empty"`:
+  the `diag` field now ALWAYS serializes (empty `[]` on clean runs) so
+  consumers of `doctor --format json` can rely on `profile["diag"]` existing.
+
+### Internal
+
+- The 0.8.8-class committed-artifact drift (cursor `globs:` missing, opencode
+  `mode: subagent` when should be `primary`, body-stale subcommand flag lists
+  after adding `--fix` / `doctor --format`) is now caught at test time by
+  the new byte-identical self-dogfood gate, not only by ad-hoc dogfood runs.
 ## [0.8.8] - 2026-07-12
 
 ### Fixed — doctor `desc_hint` surfaces raw HTML when README leads with markup

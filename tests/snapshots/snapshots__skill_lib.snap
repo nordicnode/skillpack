@@ -6,7 +6,7 @@ expression: skill.contents
 name: fastcsv
 description: "Parse CSV files fast"
 when_to_use: "ingest csv, convert rows"
-allowed-tools: Read Bash
+allowed-tools: Read, Bash
 ---
 
 # fastcsv
