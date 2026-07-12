@@ -5,42 +5,40 @@
 //! when a CLI binary is detected ... guarded by a hard timeout and runs in a
 //! working directory restricted to the project root."
 //!
-//! The five supported ecosystems (design §11): Rust, npm, Python, Go, Ruby.
+//! This module is the thin top-level orchestrator: it calls
+//! [`detect_language`] then delegates each concern to a sibling submodule —
+//! [`cli_candidates`] (resolve a candidate argv), [`cli_probe`] (spawn
+//! `--help` + walk workspace members), [`manifest`] (pull scalar fields
+//! from a language manifest), [`repo`] (git origin, LICENSE, README hint),
+//! and [`workspace`] (workspace-only root + member-name heuristics).
+//!
 //! Detection order is deliberate: if both a `Cargo.toml` and a `package.json`
 //! exist we pick the one most likely to *ship a CLI* (Rust, then node), which
 //! matches the polyglot-monorepo reality.
 
-use std::fs;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::Duration;
 
 use anyhow::Result;
 
 use crate::types::{DiagTrace, Language, ProjectProfile};
 mod cli_candidates;
+mod cli_probe;
 mod manifest;
+mod repo;
 mod workspace;
 
-// Re-export the symbols the rest of `introspect` (orchestrators + tests)
-// reaches by the flat path: `detect_cli`/`spawn_candidate`/tests use
-// `CliCandidate`/`DetectCli`/`primary_cli_candidate`/`which_on_path`;
-// `verify::discovery` uses `project_manifest_version`, and
-// `csharp_cli_candidate` (now in `cli_candidates`) uses `select_csproj`.
+// Re-export the symbols external callers reach by the flat path:
+// `verify::discovery` uses `detect_language` + `project_manifest_version`,
+// and `csharp_cli_candidate` (now in `cli_candidates`) uses `select_csproj`.
 // The re-exports keep those call sites unchanged after the split.
 #[cfg(test)]
 pub(crate) use cli_candidates::which_on_path;
-pub(crate) use cli_candidates::{primary_cli_candidate, CliCandidate, DetectCli};
 pub(crate) use manifest::{project_manifest_version, select_csproj};
 #[cfg(test)]
 use std::path::PathBuf;
 pub(crate) use workspace::{
     first_cargo_member_name, first_npm_member_name, is_cargo_workspace_only, is_npm_workspace_only,
-    pyproject_has_tool,
 };
-
-/// We only read the first slice of the README to bound cost.
-const README_HEAD_LINES: usize = 500;
 
 /// Introspect the project at `root`. `root` must be the OSS project root
 /// (the directory containing the language manifest).
@@ -64,19 +62,19 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
             manifest_name = first_npm_member_name(root, &mut diag);
         }
     }
-    let repo_url = detect_repo_url(root);
-    let license = detect_license(root).or_else(|| manifest::manifest_license(root, language));
+    let repo_url = repo::detect_repo_url(root);
+    let license = repo::detect_license(root).or_else(|| manifest::manifest_license(root, language));
     let version = manifest::project_manifest_version(root, language);
     let authors = manifest::project_manifest_authors(root, language);
-    let description_hint = read_readme_hint(root);
-    let d = detect_cli(root, language, manifest_name.clone(), &mut diag);
+    let description_hint = repo::read_readme_hint(root);
+    let d = cli_probe::detect_cli(root, language, manifest_name.clone(), &mut diag);
     let has_cli = d.has_cli;
     let cli_command = d.command;
     let cli_help_output = d.help_output;
     let cli_subcommand_help = d.subcommand_help;
 
     let name = manifest_name
-        .or_else(|| repo_url_name(&repo_url))
+        .or_else(|| repo::repo_url_name(&repo_url))
         .unwrap_or_else(|| {
             // Last resort: the directory name itself. Canonicalize first so a
             // bare `--root .` (the documented default) resolves to the real cwd
@@ -149,9 +147,9 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
         || root.join("build.gradle.kts").exists()
     {
         Language::Jvm
-    } else if has_csproj(root) {
+    } else if cli_probe::has_csproj(root) {
         Language::CSharp
-    } else if root.join("Gemfile").exists() || has_gemspec(root) {
+    } else if root.join("Gemfile").exists() || cli_probe::has_gemspec(root) {
         Language::Ruby
     } else {
         diag.push(
@@ -164,468 +162,6 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
         );
         Language::Unknown
     }
-}
-
-/// Walk a Cargo workspace's members looking for a crate with a CLI binary.
-/// Parses `Cargo.toml` `[workspace].members` (literal paths only — globs
-/// not expanded, keeping V1 simple), then for each `members/<m>` probes
-/// `primary_cli_candidate` against the member's `[package].name`. Pushes a
-/// diag note per member tried so doctor explains the walk; returns `Some`
-/// on the first member that yields a runnable CLI, `None` if none do.
-fn walk_cargo_workspace(root: &Path, _name: &str, diag: &mut DiagTrace) -> Option<DetectCli> {
-    let raw = fs::read_to_string(root.join("Cargo.toml")).ok()?;
-    let v = toml::from_str::<toml::Value>(&raw).ok()?;
-    let members = v.get("workspace")?.get("members")?.as_array()?;
-    diag.push(
-        "detect_cli.rust.workspace",
-        format!(
-            "Cargo workspace root — {} member(s) to probe",
-            members.len()
-        ),
-    );
-    for m in members {
-        let Some(member_rel) = m.as_str() else {
-            continue;
-        };
-        let member_root = root.join(member_rel);
-        if !member_root.join("Cargo.toml").is_file() {
-            diag.push(
-                "detect_cli.rust.workspace",
-                format!("member `{member_rel}` has no Cargo.toml — skipped"),
-            );
-            continue;
-        }
-        // Prefer the member's own [package].name; fall back to the dir tail.
-        let manifest_name = fs::read_to_string(member_root.join("Cargo.toml"))
-            .ok()
-            .and_then(|r| toml::from_str::<toml::Value>(&r).ok())
-            .and_then(|v| {
-                v.get("package")
-                    .and_then(|p| p.get("name"))
-                    .and_then(|n| n.as_str())
-                    .map(String::from)
-            });
-        let Some(member_name) = manifest_name.or_else(|| {
-            member_root
-                .file_name()
-                .map(|f| f.to_string_lossy().into_owned())
-        }) else {
-            diag.push(
-                "detect_cli.rust.workspace",
-                format!("member `{member_rel}` has no name in manifest, skipping"),
-            );
-            continue;
-        };
-        match primary_cli_candidate(&member_root, Language::Rust, &member_name) {
-            Some(candidate) => {
-                diag.push(
-                    "detect_cli.rust.workspace",
-                    format!(
-                        "member `{member_rel}` yielded candidate `{}`",
-                        candidate.argv.join(" ")
-                    ),
-                );
-                return Some(spawn_candidate(&candidate, diag));
-            }
-            None => diag.push(
-                "detect_cli.rust.workspace",
-                format!("member `{member_rel}` (`{member_name}`): no built/installed artifact"),
-            ),
-        }
-    }
-    diag.push(
-        "detect_cli.rust.workspace",
-        "no workspace member yielded a runnable CLI — has_cli=false \
-         (run `skillpack init` inside the member crate that ships the binary)"
-            .to_string(),
-    );
-    None
-}
-
-/// Walk an npm workspace's members (literal `workspaces` paths, no globs)
-/// looking for a package with a `bin`. Parses `package.json` `workspaces`
-/// (string or array of strings). Returns `Some` on the first member that
-/// yields a runnable CLI; `None` otherwise. Pushes a diag note per member.
-fn walk_npm_workspace(root: &Path, _name: &str, diag: &mut DiagTrace) -> Option<DetectCli> {
-    let raw = fs::read_to_string(root.join("package.json")).ok()?;
-    let v = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
-    let ws = v.get("workspaces")?;
-    let paths: Vec<String> = match ws {
-        serde_json::Value::String(s) => vec![s.clone()],
-        serde_json::Value::Array(arr) => arr
-            .iter()
-            .filter_map(|e| e.as_str().map(String::from))
-            .collect(),
-        _ => return None,
-    };
-    diag.push(
-        "detect_cli.node.workspace",
-        format!("npm workspace root — {} member(s) to probe", paths.len()),
-    );
-    for member_rel in paths {
-        let member_root = root.join(&member_rel);
-        let pkg_json = member_root.join("package.json");
-        if !pkg_json.is_file() {
-            diag.push(
-                "detect_cli.node.workspace",
-                format!("member `{member_rel}` has no package.json — skipped"),
-            );
-            continue;
-        }
-        let Ok(mraw) = fs::read_to_string(&pkg_json) else {
-            continue;
-        };
-        let Ok(mv) = serde_json::from_str::<serde_json::Value>(&mraw) else {
-            continue;
-        };
-        let Some(member_name) = mv
-            .get("name")
-            .and_then(|n| n.as_str())
-            .map(String::from)
-            .or_else(|| {
-                member_root
-                    .file_name()
-                    .map(|f| f.to_string_lossy().into_owned())
-            })
-        else {
-            diag.push(
-                "detect_cli.node.workspace",
-                format!("member `{member_rel}` has no name in manifest, skipping"),
-            );
-            continue;
-        };
-        if mv.get("bin").is_none() {
-            diag.push(
-                "detect_cli.node.workspace",
-                format!("member `{member_rel}` (`{member_name}`): no `bin` field — skipped"),
-            );
-            continue;
-        }
-        match primary_cli_candidate(&member_root, Language::Node, &member_name) {
-            Some(candidate) => {
-                diag.push(
-                    "detect_cli.node.workspace",
-                    format!(
-                        "member `{member_rel}` yielded candidate `{}`",
-                        candidate.argv.join(" ")
-                    ),
-                );
-                return Some(spawn_candidate(&candidate, diag));
-            }
-            None => diag.push(
-                "detect_cli.node.workspace",
-                format!("member `{member_rel}` (`{member_name}`): candidate None (node missing?)"),
-            ),
-        }
-    }
-    diag.push(
-        "detect_cli.node.workspace",
-        "no workspace member yielded a runnable CLI — has_cli=false \
-         (run `skillpack init` inside the member package that ships the bin)"
-            .to_string(),
-    );
-    None
-}
-
-/// True if the root contains any `*.gemspec` file.
-fn has_gemspec(root: &Path) -> bool {
-    fs::read_dir(root).is_ok_and(|entries| {
-        entries
-            .flatten()
-            .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("gemspec"))
-    })
-}
-
-/// True if the root contains any `*.csproj` file. Solution-only repos (`.sln`
-/// at root, csproj in subdirs) are not detected — same limitation class as
-/// Cargo workspace-only roots. ponytail: add .sln directory walk when needed.
-fn has_csproj(root: &Path) -> bool {
-    fs::read_dir(root).is_ok_and(|entries| {
-        entries
-            .flatten()
-            .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("csproj"))
-    })
-}
-
-/// Detect whether the project ships an invokable CLI, and if so capture its
-/// `--help` output under a hard timeout. Returns
-/// `(has_cli, command, output, subcommand_help)`.
-///
-/// `command` is the full multi-token `--help` argv the verifier re-spawns (e.g.
-/// `["node","/abs/bin/cli.js","--help"]`, `["go","run",".","--help"]`). The
-/// bare human-facing invocation that SKILL.md publishes is derived separately
-/// from the profile name + interview — this is the internal, machine-specific
-/// spawn argv (design §5.1, §6.3).
-///
-/// `subcommand_help` holds `<cli> <sub> --help` per subcommand (clap-style),
-/// in declaration order, so the generated SKILL.md can document the real
-/// command surface and `verify` can drift-check it. Empty for non-subcommand
-/// CLIs — a flat `--help` yields no `Commands:` section.
-///
-/// Every falsy branch (no name, no root candidate, spawn failure) pushes a
-/// `DiagNote` so `skillpack doctor` explains why `has_cli=false` rather than
-/// silently reporting it. Workspace-only roots (Cargo `[workspace]` only,
-/// npm `workspaces` no `bin`) trigger a member walk before giving up.
-fn detect_cli(
-    root: &Path,
-    language: Language,
-    name: Option<String>,
-    diag: &mut DiagTrace,
-) -> DetectCli {
-    let Some(name) = name else {
-        diag.push(
-            "detect_cli",
-            "no tool name derivable from the manifest or repo; ".to_string()
-                + "cannot probe for a CLI without a name",
-        );
-        return DetectCli::none();
-    };
-
-    let Some(candidate) = primary_cli_candidate(root, language, &name) else {
-        // The root didn't yield a runnable CLI. For workspace roots the binary
-        // lives in a member crate/package; walk members before reporting a
-        // final `has_cli=false`. uv/poetry monorepos are NOT walked yet —
-        // doctor notes the gap so the maintainer can run init in the member.
-        if language == Language::Rust && is_cargo_workspace_only(root) {
-            if let Some(d) = walk_cargo_workspace(root, &name, diag) {
-                return d;
-            }
-        }
-        if language == Language::Node && is_npm_workspace_only(root) {
-            if let Some(d) = walk_npm_workspace(root, &name, diag) {
-                return d;
-            }
-        }
-        diag.push(
-            "detect_cli",
-            format!(
-                "primary_cli_candidate for language `{}` returned None — \
-                 runtime may be missing, no build artifact present, or no bin \
-                 entry point. Run `skillpack doctor --verbose` to see the raw \
-                 profile; if this is a monorepo member, try running \
-                 `skillpack init` inside the member directory.",
-                language.as_str()
-            ),
-        );
-        // uv / poetry Python monorepo: explicitly NOT walked yet.
-        if language == Language::Python
-            && (root.join("uv.toml").exists()
-                || pyproject_has_tool(root, "uv")
-                || pyproject_has_tool(root, "poetry"))
-        {
-            diag.push(
-                "detect_cli.python",
-                "uv/poetry workspace detected; member walking not yet \
-                 implemented — run `skillpack init` in the member package dir"
-                    .to_string(),
-            );
-        }
-        return DetectCli::none();
-    };
-    spawn_candidate(&candidate, diag)
-}
-
-/// Build the `--help` command from `candidate`, spawn it under the hard
-/// timeout, and map the outcome to a `DetectCli`. Pushes a diag note on
-/// every non-clean outcome so `doctor` explains timeouts/non-zero/missing.
-/// Returns `DetectCli::none()` when the spawn can't run at all (NotFound /
-/// SpawnFailed), `has_cli=true` with `help_output=None` on a RanNonZero or
-/// TimedOut result (the binary exists and responded — it's a CLI — but the
-/// help text wasn't captured).
-fn spawn_candidate(candidate: &CliCandidate, diag: &mut DiagTrace) -> DetectCli {
-    // Build the spawn command from the multi-token argv (program + args, minus
-    // `--help`), then append `--help` for the help capture.
-    let mut command = candidate.argv.clone();
-    command.push("--help".to_string());
-
-    let mut cmd = Command::new(&candidate.argv[0]);
-    for arg in &candidate.argv[1..] {
-        cmd.arg(arg);
-    }
-    cmd.arg("--help")
-        .current_dir(&candidate.spawn_cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    match spawn_with_timeout(&mut cmd, HELP_TIMEOUT) {
-        SpawnOutcome::RanClean(output) => {
-            // A subcommand CLI advertises its subcommands in the top-level
-            // `--help`; capture each one's `--help` so the generated SKILL.md
-            // documents the real surface (init/verify + their flags, not the
-            // global flags). Best-effort: a subcommand that fails/times out is
-            // omitted here — `verify` surfaces the gap if the skill documents
-            // a subcommand we couldn't capture.
-            let subs = capture_subcommand_help(candidate, &output);
-            DetectCli {
-                has_cli: true,
-                command: Some(command),
-                help_output: Some(output),
-                subcommand_help: subs,
-            }
-        }
-        SpawnOutcome::RanNonZero => {
-            diag.push(
-                "detect_cli",
-                format!(
-                    "`{} --help` exited non-zero; help output not captured",
-                    command.join(" ")
-                ),
-            );
-            DetectCli {
-                has_cli: true,
-                command: Some(command),
-                help_output: None,
-                subcommand_help: Vec::new(),
-            }
-        }
-        SpawnOutcome::TimedOut => {
-            diag.push(
-                "detect_cli",
-                format!(
-                    "`{} --help` timed out after {HELP_TIMEOUT:?}",
-                    command.join(" ")
-                ),
-            );
-            DetectCli {
-                has_cli: true,
-                command: Some(command),
-                help_output: None,
-                subcommand_help: Vec::new(),
-            }
-        }
-        SpawnOutcome::NotFound => {
-            diag.push(
-                "detect_cli",
-                format!(
-                    "spawn failed — `{}` binary not found on PATH",
-                    command.first().unwrap_or(&candidate.argv[0])
-                ),
-            );
-            DetectCli::none()
-        }
-        // ponytail: permission-denied etc. are rare; mapping to `none()`
-        // means `has_cli=false` (pure-library path) rather than crashing.
-        // verify's spawn will then surface the gap downstream if the CLI IS
-        // documented. The honest path for V1 — doesn't crash.
-        SpawnOutcome::SpawnFailed(_) => {
-            diag.push(
-                "detect_cli",
-                "spawn failed (permission-denied or OS error); treated as has_cli=false"
-                    .to_string(),
-            );
-            DetectCli::none()
-        }
-    }
-}
-
-/// For a subcommand CLI, spawn `<candidate.argv> <sub> --help` per subcommand
-/// advertised in the top-level `--help`, returning `(sub, help)` in declaration
-/// order. Reuses the same guarded spawn + timeout as the top-level capture.
-/// Failures are omitted silently (introspect is best-effort).
-fn capture_subcommand_help(
-    candidate: &CliCandidate,
-    top_level_help: &str,
-) -> Vec<(String, String)> {
-    let subs = crate::verify::invocation::extract_subcommands(top_level_help);
-    let mut out = Vec::with_capacity(subs.len());
-    for sub in subs {
-        let mut cmd = Command::new(&candidate.argv[0]);
-        for arg in &candidate.argv[1..] {
-            cmd.arg(arg);
-        }
-        cmd.arg(&sub)
-            .arg("--help")
-            .current_dir(&candidate.spawn_cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if let SpawnOutcome::RanClean(help) = spawn_with_timeout(&mut cmd, HELP_TIMEOUT) {
-            out.push((sub, help));
-        }
-    }
-    out
-}
-
-use crate::spawn::{self, SpawnOutcome, HELP_TIMEOUT};
-
-fn spawn_with_timeout(cmd: &mut Command, timeout: Duration) -> SpawnOutcome {
-    spawn::run(cmd, timeout)
-}
-
-/// `git remote get-url origin`, best-effort. Never errors the caller.
-fn detect_repo_url(root: &Path) -> Option<String> {
-    let mut cmd = Command::new("git");
-    cmd.args(["remote", "get-url", "origin"]).current_dir(root);
-    match spawn_with_timeout(&mut cmd, Duration::from_secs(3)) {
-        SpawnOutcome::RanClean(out) => Some(out.trim().to_string()),
-        _ => None,
-    }
-}
-
-/// Heuristic: read LICENSE, look for the SPDX id text.
-fn detect_license(root: &Path) -> Option<String> {
-    for filename in &["LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"] {
-        let p = root.join(filename);
-        if let Ok(raw) = fs::read_to_string(&p) {
-            let head = raw.split('\n').take(3).collect::<Vec<_>>().join("\n");
-            let lower = head.to_lowercase();
-            if lower.contains("mit license") || lower.contains("permission is hereby granted") {
-                return Some("MIT".to_string());
-            }
-            if lower.contains("apache license") {
-                return Some("Apache-2.0".to_string());
-            }
-            if lower.contains("bsd 3-clause") || lower.contains("neither the name") {
-                return Some("BSD-3-Clause".to_string());
-            }
-            if lower.contains("gnu general public license") {
-                return Some("GPL-3.0".to_string());
-            }
-        }
-    }
-    None
-}
-
-/// First paragraph(s) of the README, capped for cost. Used only as a *hint*
-/// surfaced under `--verbose`; the interview is the source of truth.
-fn read_readme_hint(root: &Path) -> Option<String> {
-    for filename in &["README.md", "README", "readme.md"] {
-        let p = root.join(filename);
-        if let Ok(raw) = fs::read_to_string(&p) {
-            let head: String = raw
-                .lines()
-                .take(README_HEAD_LINES)
-                .collect::<Vec<_>>()
-                .join("\n");
-            // Find the first non-heading, non-empty prose paragraph. Skip
-            //   raw HTML tags (READMEs often lead with `<div`, `<p`, `<a`)
-            //   as well as markdown headings + image lines so the surfaced
-            //   hint is prose a maintainer would actually want in a
-            //   description, not logo/banner markup.
-            let paragraph = head
-                .lines()
-                .skip_while(|l| {
-                    let t = l.trim();
-                    t.is_empty() || t.starts_with('#') || t.starts_with('!') || t.starts_with('<')
-                })
-                .take_while(|l| !l.trim().is_empty())
-                .collect::<Vec<_>>()
-                .join(" ");
-            let trimmed = paragraph.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn repo_url_name(repo_url: &Option<String>) -> Option<String> {
-    let url = repo_url.as_ref()?;
-    let last = url.rsplit('/').next()?.trim_end();
-    let stem = last.strip_suffix(".git").unwrap_or(last);
-    Some(stem.to_string())
 }
 
 #[cfg(test)]
@@ -650,251 +186,11 @@ impl ProjectProfile {
 }
 
 #[cfg(test)]
-mod candidate_tests {
-    //! Tests for per-language CLI candidate *resolution* (not spawning). These
-    //! assert the argv we'd spawn without running a subprocess, so they stay
-    //! green on machines that don't have every runtime installed.
-
-    use super::*;
-    use crate::types::Language;
-
-    /// Build a throwaway project root under the temp dir, lay down `files`,
-    /// and return its path. Each call gets a unique directory — Rust runs unit
-    /// tests concurrently in threads, so a shared scratch path would race and
-    /// see its files overwritten or removed by a sibling test.
-    fn scratch_root(files: &[(&str, &str)]) -> PathBuf {
-        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let root = std::env::temp_dir()
-            .join(format!("skillpack-test-{}-{}", std::process::id(), n))
-            .join("proj");
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        for (rel, contents) in files {
-            let p = root.join(rel);
-            if let Some(parent) = p.parent() {
-                std::fs::create_dir_all(parent).unwrap();
-            }
-            std::fs::write(&p, contents).unwrap();
-        }
-        root
-    }
-
-    fn cleanup(root: &Path) {
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn node_cli_detected_via_bin_absolute_argv() {
-        // A `package.json` with a `bin` → script maps to `node <abs script>`.
-        if which_on_path("node").is_none() {
-            // node isn't on PATH on this machine; the candidate honestly
-            // returns None. Assert that rather than skipping, so we still
-            // exercise the runtime-present/absent branch.
-            let root = scratch_root(&[
-                ("package.json", r#"{"bin":{"sample-node":"./bin/cli.js"}}"#),
-                ("bin/cli.js", "#!/usr/bin/env node\nconsole.log('x')\n"),
-            ]);
-            assert!(primary_cli_candidate(&root, Language::Node, "sample-node").is_none());
-            cleanup(&root);
-            return;
-        }
-        let root = scratch_root(&[
-            ("package.json", r#"{"bin":{"sample-node":"./bin/cli.js"}}"#),
-            ("bin/cli.js", "#!/usr/bin/env node\nconsole.log('x')\n"),
-        ]);
-        let cand = primary_cli_candidate(&root, Language::Node, "sample-node").unwrap();
-        assert_eq!(cand.argv.len(), 2, "argv should be [node, <abs script>]");
-        let node_stem = Path::new(&cand.argv[0])
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
-        assert!(
-            node_stem.eq_ignore_ascii_case("node"),
-            "got: {:?}",
-            cand.argv
-        );
-        // the script path must be absolute and end with `bin/cli.js`. Use
-        // Path component comparison (ends_with) so it holds cross-platform —
-        // Windows separators are `\` so a string suffix check would miss.
-        let script = Path::new(&cand.argv[1]);
-        assert!(
-            script.is_absolute() && script.ends_with("bin/cli.js"),
-            "expected absolute script path, got {}",
-            cand.argv[1]
-        );
-        assert_eq!(cand.spawn_cwd, root);
-        cleanup(&root);
-    }
-
-    #[test]
-    fn node_cli_string_bin_form() {
-        if which_on_path("node").is_none() {
-            return;
-        }
-        // `bin` as a bare string: {"bin": "./cli.js"}.
-        let root = scratch_root(&[
-            ("package.json", r#"{"bin":"./cli.js"}"#),
-            ("cli.js", "console.log('x')\n"),
-        ]);
-        let cand = primary_cli_candidate(&root, Language::Node, "anything").unwrap();
-        assert_eq!(cand.argv.len(), 2);
-        assert!(cand.argv[1].ends_with("cli.js"));
-        cleanup(&root);
-    }
-
-    #[test]
-    fn go_candidate_none_when_go_missing() {
-        // If `go` is on PATH (a CI machine) this branch isn't exercised; skip
-        // rather than assert, so the test stays green where the runtime exists.
-        if which_on_path("go").is_some() {
-            return;
-        }
-        // Missing runtime AND a real main.go → None (honest has_cli=false).
-        let root = scratch_root(&[("main.go", "package main\nfunc main(){}\n")]);
-        assert!(primary_cli_candidate(&root, Language::Go, "sample-go").is_none());
-        cleanup(&root);
-    }
-
-    #[test]
-    fn go_candidate_uses_run_dot_when_go_present() {
-        if which_on_path("go").is_none() {
-            return;
-        }
-        let root = scratch_root(&[("main.go", "package main\nfunc main(){}\n")]);
-        let cand = primary_cli_candidate(&root, Language::Go, "sample-go").unwrap();
-        assert_eq!(cand.argv, vec!["go", "run", "."]);
-        assert_eq!(cand.spawn_cwd, root);
-        cleanup(&root);
-    }
-
-    #[test]
-    fn go_candidate_none_without_package_main() {
-        if which_on_path("go").is_none() {
-            return;
-        }
-        // A library module (package foo, no main) is not a runnable CLI.
-        let root = scratch_root(&[("main.go", "package foo\nfunc main(){}\n")]);
-        assert!(primary_cli_candidate(&root, Language::Go, "sample-go").is_none());
-        cleanup(&root);
-    }
-
-    #[test]
-    fn python_candidate_uses_m_module_when_importable() {
-        if which_on_path("python")
-            .or_else(|| which_on_path("python3"))
-            .is_none()
-        {
-            return;
-        }
-        let root = scratch_root(&[
-            (
-                "pyproject.toml",
-                "[project]\nname = \"sample-python\"\n[project.scripts]\nsample-python = \"sample_python.cli:main\"\n",
-            ),
-            ("sample_python/__init__.py", ""),
-            ("sample_python/cli.py", "def main(): pass\n"),
-        ]);
-        let cand = primary_cli_candidate(&root, Language::Python, "sample-python").unwrap();
-        assert_eq!(cand.argv.len(), 3, "got: {:?}", cand.argv);
-        let stem = Path::new(&cand.argv[0])
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
-        assert!(
-            stem.eq_ignore_ascii_case("python"),
-            "expected python interpreter, got {}",
-            cand.argv[0]
-        );
-        assert_eq!(cand.argv[1], "-m");
-        assert_eq!(cand.argv[2], "sample_python");
-        assert_eq!(cand.spawn_cwd, root);
-        cleanup(&root);
-    }
-
-    #[test]
-    fn ruby_candidate_none_without_runtime() {
-        if which_on_path("ruby")
-            .or_else(|| which_on_path("bundle"))
-            .is_some()
-        {
-            return;
-        }
-        // No binstub AND no runtime → None.
-        let root = scratch_root(&[("Gemfile", "source \"https://rubygems.org\"\n")]);
-        assert!(primary_cli_candidate(&root, Language::Ruby, "sample-ruby").is_none());
-        cleanup(&root);
-    }
-
-    #[test]
-    fn rust_candidate_fallback_to_path_probe() {
-        // No built artifact in this scratch root → falls back to PATH, which
-        // won't find a "totally-fake-bin-xyz" → None (honest).
-        let root = scratch_root(&[("Cargo.toml", "[package]\nname = \"totally-fake-bin-xyz\"\n")]);
-        let cand = primary_cli_candidate(&root, Language::Rust, "totally-fake-bin-xyz");
-        assert!(cand.is_none());
-        cleanup(&root);
-    }
-
-    /// A crate may rename its binary via `[[bin]] name = "..."` (e.g. fd-find
-    /// publishes the `fd` binary). `rust_cli_candidate` must probe the
-    /// `[[bin]].name` artifact, not just the package-name artifact.
-    #[test]
-    fn rust_candidate_probes_bin_name_not_package_name() {
-        let root = scratch_root(&[(
-            "Cargo.toml",
-            "[package]\nname = \"fd-find\"\n[[bin]]\nname = \"fd\"\n",
-        )]);
-        // Pre-built artifact named after [[bin]].name, NOT package name.
-        let bin_dir = root.join("target").join("release");
-        std::fs::create_dir_all(&bin_dir).unwrap();
-        let bin_name = if cfg!(windows) { "fd.exe" } else { "fd" };
-        std::fs::write(bin_dir.join(bin_name), "#!/bin/sh\necho fd\n").unwrap();
-        let cand = primary_cli_candidate(&root, Language::Rust, "fd-find");
-        assert!(cand.is_some(), "expected [[bin]].name artifact probed");
-        let cand = cand.unwrap();
-        assert!(
-            cand.argv[0].ends_with(bin_name),
-            "expected argv to target [[bin]] artifact, got {}",
-            cand.argv[0]
-        );
-        // Package-name artifact must NOT be probed first when [[bin]] differs.
-        assert!(!cand.argv[0].ends_with("fd-find"));
-        cleanup(&root);
-    }
-
-    #[test]
-    fn csharp_candidate_uses_dotnet_run_with_dash_dash_separator() {
-        if which_on_path("dotnet").is_none() {
-            return;
-        }
-        let csproj = r#"<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
-  </PropertyGroup>
-</Project>
-"#;
-        let root = scratch_root(&[("sample.csproj", csproj)]);
-        let cand = primary_cli_candidate(&root, Language::CSharp, "sample").unwrap();
-        // The trailing "--" separates dotnet's flags from the app's argv
-        // so an appended --help reaches the app, not dotnet.
-        assert_eq!(cand.argv[0], "dotnet");
-        assert_eq!(cand.argv[1], "run");
-        assert_eq!(cand.argv[2], "--project");
-        assert!(cand.argv[3].ends_with("sample.csproj"));
-        assert_eq!(cand.argv[4], "--");
-        assert_eq!(cand.spawn_cwd, root);
-        cleanup(&root);
-    }
-}
-
-#[cfg(test)]
 mod parse_tests {
-    //! Orchestrator tests that stayed in `introspect.rs` after the manifest-
-    //! parsing tests moved to `super::manifest`: directory-tail fallback
-    //! (Bug #3: canonicalize a bare `--root .`), workspace walking past
-    //! CLI-less members, and the `which_on_path` real-exercise check.
+    //! Orchestrator tests that stayed in `introspect.rs`: directory-tail
+    //! fallback (Bug #3: canonicalize a bare `--root .`) and the
+    //! `which_on_path` real-exercise check. Workspace-walk + readme tests
+    //! live in `cli_probe::tests` / `repo::tests` now.
 
     use super::*;
 
@@ -944,98 +240,6 @@ mod parse_tests {
             .unwrap_or_default();
         assert_eq!(p.name, cwd_tail);
     }
-    // ponytail: walk_*_workspace skip branch (member with no name in manifest
-    // AND dir-tail file_name() None) is unreachable for non-root member paths —
-    // the path-tail fallback always yields a name. These tests assert the
-    // observable contract we DO hit: the walk continues past every member to the
-    // end, not aborting on the first no-artifact member. Skip-and-continue vs
-    // early-return-None is indistinguishable here only if a name resolution
-    // failure occured; the `?`→`continue` fix guards that pathological case.
-    #[test]
-    fn walk_cargo_workspace_continues_past_no_artifact_member() {
-        let root = std::env::temp_dir().join(format!(
-            "skillpack-walk-cargo-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("members/m1")).unwrap();
-        std::fs::create_dir_all(root.join("members/m2")).unwrap();
-        std::fs::write(
-            root.join("Cargo.toml"),
-            "[workspace]\nmembers = [\"members/m1\", \"members/m2\"]\n",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("members/m1/Cargo.toml"),
-            "[package]\nname = \"m1\"\n",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("members/m2/Cargo.toml"),
-            "[package]\nname = \"m2\"\n",
-        )
-        .unwrap();
-        let mut diag = DiagTrace::default();
-        let res = walk_cargo_workspace(&root, "ws", &mut diag);
-        assert!(res.is_none(), "no member has a built artifact → None");
-        let notes: Vec<&str> = diag.0.iter().map(|d| d.note.as_str()).collect();
-        assert!(
-            notes.iter().any(|n| n.contains("m1")),
-            "m1 probed: {notes:?}"
-        );
-        assert!(
-            notes.iter().any(|n| n.contains("m2")),
-            "m2 probed: {notes:?}"
-        );
-        cleanup(&root);
-    }
-
-    #[test]
-    fn walk_npm_workspace_continues_past_no_cli_member() {
-        let root = std::env::temp_dir().join(format!(
-            "skillpack-walk-npm-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("members/m1")).unwrap();
-        std::fs::create_dir_all(root.join("members/m2")).unwrap();
-        std::fs::write(
-            root.join("package.json"),
-            "{ \"workspaces\": [\"members/m1\", \"members/m2\"] }",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("members/m1/package.json"),
-            "{ \"name\": \"m1\", \"bin\": {} }",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("members/m2/package.json"),
-            "{ \"name\": \"m2\", \"bin\": {} }",
-        )
-        .unwrap();
-        let mut diag = DiagTrace::default();
-        let res = walk_npm_workspace(&root, "ws", &mut diag);
-        assert!(res.is_none(), "bin:{{}} → both candidate None → walk None");
-        let notes: Vec<&str> = diag.0.iter().map(|d| d.note.as_str()).collect();
-        assert!(
-            notes.iter().any(|n| n.contains("m1")),
-            "m1 probed: {notes:?}"
-        );
-        assert!(
-            notes.iter().any(|n| n.contains("m2")),
-            "m2 probed: {notes:?}"
-        );
-        cleanup(&root);
-    }
 
     #[test]
     fn which_on_path_returns_existing_file() {
@@ -1052,40 +256,5 @@ mod parse_tests {
         if let Some(p) = probe {
             assert!(p.is_file(), "which_on_path returned non-file: {p:?}");
         }
-    }
-    #[test]
-    fn read_readme_hint_skips_leading_html_div() {
-        // Reproduces the skillpack self-dogfood gap (README leading with a
-        // `<div align="center"><img ...></div>` logo block): the surfaced
-        // `desc_hint` was raw HTML markup, not prose. After the fix the
-        // `skip_while` predicate also skips lines starting with `<`, so the
-        // hint lands on the first real prose line.
-        let dir = std::env::temp_dir().join(format!(
-            "skillpack-readme-html-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("README.md"),
-            "<div align=\"center\"><img src=\"logo.png\" alt=\"logo\"></div>\n\n\
-             # mytool\n\n\
-             A sample tool that frobs widgets.\n",
-        )
-        .unwrap();
-        let hint = super::read_readme_hint(&dir).unwrap_or_default();
-        let _ = std::fs::remove_dir_all(&dir);
-        assert!(
-            !hint.contains('<'),
-            "desc_hint must drop raw HTML, got: {hint:?}"
-        );
-        assert!(
-            hint.contains("frobs widgets"),
-            "desc_hint must land on first prose line, got: {hint:?}"
-        );
     }
 }

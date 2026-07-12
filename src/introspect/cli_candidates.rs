@@ -4,8 +4,8 @@
 //! language runtime is missing rather than failing — an honest `has_cli=false`
 //! is better than a spurious error.
 //!
-//! Split out of `introspect.rs` (0.8.5); the orchestrator (`detect_cli`,
-//! `spawn_candidate`, `capture_subcommand_help`) stays in the parent.
+//! Split out of `introspect.rs` (0.8.5); the spawn/walk orchestrator now
+//! lives in `super::cli_probe`, and the manifest-scalar readers in `super::manifest`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -447,5 +447,244 @@ fn canonicalize_for_argv(p: &Path) -> String {
         path[4..].to_string()
     } else {
         path
+    }
+}
+#[cfg(test)]
+mod candidate_tests {
+    //! Tests for per-language CLI candidate *resolution* (not spawning). These
+    //! assert the argv we'd spawn without running a subprocess, so they stay
+    //! green on machines that don't have every runtime installed.
+
+    use super::*;
+    use crate::types::Language;
+
+    /// Build a throwaway project root under the temp dir, lay down `files`,
+    /// and return its path. Each call gets a unique directory — Rust runs unit
+    /// tests concurrently in threads, so a shared scratch path would race and
+    /// see its files overwritten or removed by a sibling test.
+    fn scratch_root(files: &[(&str, &str)]) -> PathBuf {
+        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir()
+            .join(format!("skillpack-test-{}-{}", std::process::id(), n))
+            .join("proj");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        for (rel, contents) in files {
+            let p = root.join(rel);
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&p, contents).unwrap();
+        }
+        root
+    }
+
+    fn cleanup(root: &Path) {
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn node_cli_detected_via_bin_absolute_argv() {
+        // A `package.json` with a `bin` → script maps to `node <abs script>`.
+        if which_on_path("node").is_none() {
+            // node isn't on PATH on this machine; the candidate honestly
+            // returns None. Assert that rather than skipping, so we still
+            // exercise the runtime-present/absent branch.
+            let root = scratch_root(&[
+                ("package.json", r#"{"bin":{"sample-node":"./bin/cli.js"}}"#),
+                ("bin/cli.js", "#!/usr/bin/env node\nconsole.log('x')\n"),
+            ]);
+            assert!(primary_cli_candidate(&root, Language::Node, "sample-node").is_none());
+            cleanup(&root);
+            return;
+        }
+        let root = scratch_root(&[
+            ("package.json", r#"{"bin":{"sample-node":"./bin/cli.js"}}"#),
+            ("bin/cli.js", "#!/usr/bin/env node\nconsole.log('x')\n"),
+        ]);
+        let cand = primary_cli_candidate(&root, Language::Node, "sample-node").unwrap();
+        assert_eq!(cand.argv.len(), 2, "argv should be [node, <abs script>]");
+        let node_stem = Path::new(&cand.argv[0])
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        assert!(
+            node_stem.eq_ignore_ascii_case("node"),
+            "got: {:?}",
+            cand.argv
+        );
+        // the script path must be absolute and end with `bin/cli.js`. Use
+        // Path component comparison (ends_with) so it holds cross-platform —
+        // Windows separators are `\` so a string suffix check would miss.
+        let script = Path::new(&cand.argv[1]);
+        assert!(
+            script.is_absolute() && script.ends_with("bin/cli.js"),
+            "expected absolute script path, got {}",
+            cand.argv[1]
+        );
+        assert_eq!(cand.spawn_cwd, root);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn node_cli_string_bin_form() {
+        if which_on_path("node").is_none() {
+            return;
+        }
+        // `bin` as a bare string: {"bin": "./cli.js"}.
+        let root = scratch_root(&[
+            ("package.json", r#"{"bin":"./cli.js"}"#),
+            ("cli.js", "console.log('x')\n"),
+        ]);
+        let cand = primary_cli_candidate(&root, Language::Node, "anything").unwrap();
+        assert_eq!(cand.argv.len(), 2);
+        assert!(cand.argv[1].ends_with("cli.js"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn go_candidate_none_when_go_missing() {
+        // If `go` is on PATH (a CI machine) this branch isn't exercised; skip
+        // rather than assert, so the test stays green where the runtime exists.
+        if which_on_path("go").is_some() {
+            return;
+        }
+        // Missing runtime AND a real main.go → None (honest has_cli=false).
+        let root = scratch_root(&[("main.go", "package main\nfunc main(){}\n")]);
+        assert!(primary_cli_candidate(&root, Language::Go, "sample-go").is_none());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn go_candidate_uses_run_dot_when_go_present() {
+        if which_on_path("go").is_none() {
+            return;
+        }
+        let root = scratch_root(&[("main.go", "package main\nfunc main(){}\n")]);
+        let cand = primary_cli_candidate(&root, Language::Go, "sample-go").unwrap();
+        assert_eq!(cand.argv, vec!["go", "run", "."]);
+        assert_eq!(cand.spawn_cwd, root);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn go_candidate_none_without_package_main() {
+        if which_on_path("go").is_none() {
+            return;
+        }
+        // A library module (package foo, no main) is not a runnable CLI.
+        let root = scratch_root(&[("main.go", "package foo\nfunc main(){}\n")]);
+        assert!(primary_cli_candidate(&root, Language::Go, "sample-go").is_none());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn python_candidate_uses_m_module_when_importable() {
+        if which_on_path("python")
+            .or_else(|| which_on_path("python3"))
+            .is_none()
+        {
+            return;
+        }
+        let root = scratch_root(&[
+            (
+                "pyproject.toml",
+                "[project]\nname = \"sample-python\"\n[project.scripts]\nsample-python = \"sample_python.cli:main\"\n",
+            ),
+            ("sample_python/__init__.py", ""),
+            ("sample_python/cli.py", "def main(): pass\n"),
+        ]);
+        let cand = primary_cli_candidate(&root, Language::Python, "sample-python").unwrap();
+        assert_eq!(cand.argv.len(), 3, "got: {:?}", cand.argv);
+        let stem = Path::new(&cand.argv[0])
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        assert!(
+            stem.eq_ignore_ascii_case("python"),
+            "expected python interpreter, got {}",
+            cand.argv[0]
+        );
+        assert_eq!(cand.argv[1], "-m");
+        assert_eq!(cand.argv[2], "sample_python");
+        assert_eq!(cand.spawn_cwd, root);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn ruby_candidate_none_without_runtime() {
+        if which_on_path("ruby")
+            .or_else(|| which_on_path("bundle"))
+            .is_some()
+        {
+            return;
+        }
+        // No binstub AND no runtime → None.
+        let root = scratch_root(&[("Gemfile", "source \"https://rubygems.org\"\n")]);
+        assert!(primary_cli_candidate(&root, Language::Ruby, "sample-ruby").is_none());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rust_candidate_fallback_to_path_probe() {
+        // No built artifact in this scratch root → falls back to PATH, which
+        // won't find a "totally-fake-bin-xyz" → None (honest).
+        let root = scratch_root(&[("Cargo.toml", "[package]\nname = \"totally-fake-bin-xyz\"\n")]);
+        let cand = primary_cli_candidate(&root, Language::Rust, "totally-fake-bin-xyz");
+        assert!(cand.is_none());
+        cleanup(&root);
+    }
+
+    /// A crate may rename its binary via `[[bin]] name = "..."` (e.g. fd-find
+    /// publishes the `fd` binary). `rust_cli_candidate` must probe the
+    /// `[[bin]].name` artifact, not just the package-name artifact.
+    #[test]
+    fn rust_candidate_probes_bin_name_not_package_name() {
+        let root = scratch_root(&[(
+            "Cargo.toml",
+            "[package]\nname = \"fd-find\"\n[[bin]]\nname = \"fd\"\n",
+        )]);
+        // Pre-built artifact named after [[bin]].name, NOT package name.
+        let bin_dir = root.join("target").join("release");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let bin_name = if cfg!(windows) { "fd.exe" } else { "fd" };
+        std::fs::write(bin_dir.join(bin_name), "#!/bin/sh\necho fd\n").unwrap();
+        let cand = primary_cli_candidate(&root, Language::Rust, "fd-find");
+        assert!(cand.is_some(), "expected [[bin]].name artifact probed");
+        let cand = cand.unwrap();
+        assert!(
+            cand.argv[0].ends_with(bin_name),
+            "expected argv to target [[bin]] artifact, got {}",
+            cand.argv[0]
+        );
+        // Package-name artifact must NOT be probed first when [[bin]] differs.
+        assert!(!cand.argv[0].ends_with("fd-find"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn csharp_candidate_uses_dotnet_run_with_dash_dash_separator() {
+        if which_on_path("dotnet").is_none() {
+            return;
+        }
+        let csproj = r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+"#;
+        let root = scratch_root(&[("sample.csproj", csproj)]);
+        let cand = primary_cli_candidate(&root, Language::CSharp, "sample").unwrap();
+        // The trailing "--" separates dotnet's flags from the app's argv
+        // so an appended --help reaches the app, not dotnet.
+        assert_eq!(cand.argv[0], "dotnet");
+        assert_eq!(cand.argv[1], "run");
+        assert_eq!(cand.argv[2], "--project");
+        assert!(cand.argv[3].ends_with("sample.csproj"));
+        assert_eq!(cand.argv[4], "--");
+        assert_eq!(cand.spawn_cwd, root);
+        cleanup(&root);
     }
 }
