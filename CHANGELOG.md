@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 
+## [0.8.4] - 2026-07-11
+
+### Changed — internal: introspect module split
+
+- Extracted the per-language manifest field parsers (name, version, authors,
+  license) plus their helpers (`extract_xml_tag`, `extract_gradle_string`,
+  `extract_ruby_string_value`, `select_csproj`, `strip_author_email`) from
+  `src/introspect.rs` into a new sibling module `src/introspect/manifest.rs`.
+  `introspect.rs` shrank from 2055 to 1578 lines (-23 %); the new
+  `manifest.rs` holds 535 lines, including the 5 manifest-field regression
+  tests that moved with the code. Pure refactor — no public-API or
+  behavior change: the public `introspect()` entry and the `pub(crate)`
+  re-exports (`project_manifest_version`, `select_csproj`) keep the old
+  flat import paths unchanged, so `verify::discovery` and
+  `csharp_cli_candidate` call sites need no edits. `strip_author_email`
+  now strips inside `project_manifest_authors` (was at the call site).
+
+
 ## [0.8.3] - 2026-07-11
 
 ### Added — discoverability score in verify output
