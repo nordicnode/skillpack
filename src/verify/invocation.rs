@@ -603,7 +603,7 @@ fn diff_one_subcommand(skill_md: &str, sub: &str, help: &str, report: &mut Verif
         .cloned()
         .collect();
     if !undocumented.is_empty() {
-        let warn_name = format!("subcommand `{sub}` advertises no undocumented flags");
+        let warn_name = format!("subcommand `{sub}` advertises undocumented flags");
         report.push(CheckResult::warn(
             "invocation.subcommand_drift",
             &warn_name,
@@ -893,11 +893,14 @@ x --new
         assert!(extract_documented_subcommands(skill).is_empty());
     }
 
-    /// Regression for ce2a892: the reverse-drift "To fix" hint was a bare
-    /// `&str` literal so `{sub}` rendered verbatim. Reach the production
-    /// string via `diff_one_subcommand` (no spawn) and assert the suggestion
-    /// carries the real subcommand name, not the `{sub}` placeholder. If
-    /// someone reverts the `format!` wrap this assertion fails.
+    /// Regression for ce2a892 + the `no`-inversion it shipped: the reverse-drift
+    /// "To fix" hint was a bare `&str` literal so `{sub}` rendered verbatim, and
+    /// the warn check_name read "advertises no undocumented flags" — a double
+    /// negative in a branch that fires when undocumented flags DO exist. Reach
+    /// the production strings via `diff_one_subcommand` (no spawn) and assert
+    /// both the suggestion (interpolated name, no `{sub}`) and the check_name
+    /// ("undocumented flags", no leading "no"). If someone reverts either
+    /// fix this test fails.
     #[test]
     fn subcommand_reverse_drift_hint_interpolates_name() {
         // `init` bullet documents `--foo`; the help advertises `--foo` PLUS
@@ -921,5 +924,18 @@ x --new
             "suggestion must NOT leak the literal `{{sub}}` placeholder, got: {s}"
         );
         assert!(s.contains("SKILL.md"), "suggestion should name SKILL.md");
+        // The warn check_name must read "advertises undocumented flags", NOT
+        // "advertises no undocumented flags" — the branch fires when the set
+        // is non-empty, so the old negation inverted the meaning.
+        assert!(
+            warn.check_name.contains("undocumented flags"),
+            "check_name should describe undocumented flags, got: {}",
+            warn.check_name
+        );
+        assert!(
+            !warn.check_name.contains("no undocumented"),
+            "check_name must NOT carry the old `no undocumented` inversion, got: {}",
+            warn.check_name
+        );
     }
 }
