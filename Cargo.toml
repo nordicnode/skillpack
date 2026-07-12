@@ -13,6 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
 exclude = [
     "/.claude",
+    "/docs/logo.png",
 ]
 
 [lib]
