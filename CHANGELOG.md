@@ -6,6 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 
+## [0.8.5] - 2026-07-11
+
+### Changed — internal: introspect module split
+
+- Extracted the per-language CLI candidate resolvers (rust, node, go, python,
+  ruby, php, jvm, csharp) plus their backing structs (`CliCandidate`,
+  `DetectCli`), the language dispatch (`primary_cli_candidate`), the private
+  helpers (`cargo_bin_names`, `has_go_main`, `python_script_package`,
+  `canonicalize_for_argv`), and the Windows-aware `which_on_path` PATH resolver
+  from `src/introspect.rs` into a new sibling module
+  `src/introspect/cli_candidates.rs`. `introspect.rs` shrank from 1578 to 1153
+  lines (-27 %); the new `cli_candidates.rs` holds 451 lines. Pure refactor —
+  no public-API or behavior change: the `pub(crate)` re-exports
+  (`CliCandidate`, `DetectCli`, `primary_cli_candidate`, `which_on_path`) keep
+  the flat import paths unchanged, so `detect_cli`/`spawn_candidate`/
+  `capture_subcommand_help` and the candidate/parse test modules need no edits.
+  The `which_on_path` re-export and the `std::path::PathBuf` import are
+  `#[cfg(test)]`-gated since only the test modules consume them.
+
 ## [0.8.4] - 2026-07-11
 
 ### Changed — internal: introspect module split
