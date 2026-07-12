@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.7] - 2026-07-12
+
+### Changed — internal: introspect workspace helpers split
+
+- Extracted the workspace-root heuristics from `src/introspect.rs` into a new
+  sibling module `src/introspect/workspace.rs` (123 lines): `is_cargo_workspace_only`,
+  `is_npm_workspace_only`, `pyproject_has_tool`, `first_cargo_member_name`, and
+  `first_npm_member_name`. These are pure manifest-structure reads (no spawn)
+  shared by `detect_language` and `detect_cli`; kept separate from
+  `manifest.rs` because `manifest`'s contract is "pull a scalar from one
+  manifest", whereas these walk `[workspace].members` / `workspaces` arrays
+  and reason about structure. `introspect.rs` shrank from 1153 to 1052 lines
+  (-9 %). Pure refactor — no public-API or behavior change: a `pub(crate) use
+  workspace::{…}` re-export at the parent root preserves the flat
+  `crate::introspect::is_*_workspace_only` / `first_*_member_name` import paths,
+  so `detect_language`, `introspect`, and `detect_cli` bare call sites are
+  unchanged. `walk_cargo_workspace` + `walk_npm_workspace` stay in the parent
+  (they call parent-side `spawn_candidate`); `has_gemspec` / `has_csproj` stay
+  parent-side (pure presence checks used only by `detect_language`).
+  Self-dogfood: `skillpack verify` on this repo still reports 12 passed,
+  discoverability score 100/100.
+
 ## [0.8.6] - 2026-07-12
 
 ### Changed — internal: discovery module split
