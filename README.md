@@ -140,6 +140,7 @@ schema:
 - marketplace `source` paths use the `./` prefix and forward slashes only
 - `version` is present in `plugin.json` (warns on missing/empty)
 - `author` is present in `plugin.json` (warns on missing or `"Unspecified"`)
+- `version` in `plugin.json` matches the project manifest version (warns on drift; a stale 0.6.4 vs 0.8.1 self-dogfood caught by this check)
 
 **Cursor** (`.cursor/rules/<name>.mdc`) — frontmatter is parsed and
 validated against cursor.com/docs/rules: `description` present, non-empty,

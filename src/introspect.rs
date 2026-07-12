@@ -93,7 +93,7 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
 /// explain why an `Unknown` language came out, and the workspace-only edge
 /// case (a `Cargo.toml` with `[workspace]` members but no `[package]`)
 /// surfaces as a note pointing at member walking.
-fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
+pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
     if root.join("Cargo.toml").exists() {
         // A workspace-only `Cargo.toml` (no `[package]`) has no binary of its
         // own; its members may. Push a note so doctor explains the walk below.
@@ -593,7 +593,7 @@ fn project_manifest_name(root: &Path, language: Language) -> Option<String> {
 /// Mirrors [`project_manifest_name`] per language. Returns `None` for Go
 /// (`go.mod` has no version field — versioning is via Git tags or a
 /// separately-versioned file) and for manifests lacking a version key.
-fn project_manifest_version(root: &Path, language: Language) -> Option<String> {
+pub(crate) fn project_manifest_version(root: &Path, language: Language) -> Option<String> {
     match language {
         Language::Rust => {
             let raw = fs::read_to_string(root.join("Cargo.toml")).ok()?;

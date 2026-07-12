@@ -18,6 +18,8 @@ use super::schema;
 
 static NAME_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(schema::NAME_KEBAB_REGEX).expect("compiled constant regex"));
+use super::super::introspect::{detect_language, project_manifest_version};
+use crate::types::DiagTrace;
 
 /// Render `path` as a forward-slash-separated string relative-ish to `root`.
 /// Windows `Path` uses `\`, but the verify report and snapshot paths are
@@ -353,6 +355,24 @@ fn check_plugin_json(root: &Path) -> Result<CheckResult> {
             "plugin.json has no `version`",
             "To fix: set `version` in your manifest (Cargo.toml [package].version, package.json \"version\", pyproject.toml [project].version); then re-run `skillpack init`.",
         ));
+    }
+
+    // Version drift: plugin.json version should match the project manifest
+    // version. `init` writes plugin.json from the manifest, so drift means a
+    // stale hand-edited plugin.json or a manifest bump that wasn't regenerated.
+    // We warn (not fail) — maintainers may intentionally pin a different
+    // plugin version (e.g. a pre-release plugin for a stable library).
+    let mut diag = DiagTrace::default();
+    let lang = detect_language(root, &mut diag);
+    if let Some(mv) = project_manifest_version(root, lang) {
+        if mv != version {
+            return Ok(CheckResult::warn(
+                "discovery.plugin.version_drift",
+                "plugin.json version matches the project manifest version",
+                format!("plugin.json version `{version}` != manifest version `{mv}`"),
+                "To fix: re-run `skillpack init` to regenerate plugin.json from the manifest, or intentionally pin the plugin version.",
+            ));
+        }
     }
 
     let author = v

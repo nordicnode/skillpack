@@ -294,6 +294,95 @@ fn verify_format_json_is_machine_readable() {
         .any(|r| r["check_id"].as_str().unwrap().starts_with("invocation.")));
 }
 
+// Version drift: plugin.json `version` must match the project manifest
+// version. `init` writes them in sync; hand-editing plugin.json (or bumping
+// the manifest without regenerating) must surface as a `version_drift`
+// WARNING — invisible before this check existed (self-dogfood surfaced it).
+#[test]
+fn verify_warns_on_plugin_json_version_drift() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Control: a freshly-generated pack must have NO version drift.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert!(
+        !v["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["check_id"].as_str().unwrap() == "discovery.plugin.version_drift"),
+        "freshly-init'd pack must not report version drift, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // Mutate plugin.json version to diverge from the manifest (0.1.0).
+    let pj = root.join(".claude-plugin/plugin.json");
+    let mut pjv: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pj).unwrap()).unwrap();
+    pjv["version"] = serde_json::Value::String("9.9.9-fake".into());
+    fs::write(&pj, serde_json::to_string_pretty(&pjv).unwrap()).unwrap();
+
+    // Exercise: verify must surface a `version_drift` WARNING mentioning both
+    // the plugin version and the manifest version, and must NOT fail the run.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "warnings must not fail verify; got status {} and stderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    let drift = v["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["check_id"].as_str().unwrap() == "discovery.plugin.version_drift")
+        .unwrap_or_else(|| {
+            panic!(
+                "version_drift warning missing in:\n{}",
+                String::from_utf8_lossy(&out.stdout)
+            )
+        });
+    assert_eq!(drift["severity"].as_str().unwrap(), "warn");
+    let msg = drift["message"].as_str().unwrap();
+    assert!(
+        msg.contains("9.9.9-fake"),
+        "message must name plugin version: {msg}"
+    );
+    assert!(
+        msg.contains("0.1.0"),
+        "message must name manifest version: {msg}"
+    );
+}
+
 // Improvement C: a plugin shipping multiple skills must verify each (the old
 // code checked only an arbitrary first one — non-deterministic).
 #[test]

@@ -5,6 +5,30 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.8.2] - 2026-07-11
+
+### Added — verify catches plugin.json version drift
+
+- New `discovery.plugin.version_drift` check: `verify` now compares the
+  `version` in `.claude-plugin/plugin.json` against the project manifest
+  version (`Cargo.toml [package].version`, `package.json "version"`,
+  `pyproject.toml [project].version`, etc.) and warns on mismatch. Drift
+  is the canonical stale-dogfood / bumped-manifest-without-regeneration bug;
+  warns (not fails) so maintainers may intentionally pin a plugin version.
+  Previously drift was invisible — `verify` only checked plugin.json had *a*
+  version field, never compared it to the manifest.
+- `detect_language` and `project_manifest_version` in `src/introspect.rs`
+  bumped to `pub(crate)` so verify's discovery checks reuse the canonical
+  per-language version parser (no duplicate logic, no new public API).
+- Self-dogfood surfaced real drift: committed `.claude-plugin/plugin.json`
+  was `0.6.4` while `Cargo.toml` was `0.8.1` (stale from a 0.6.4-era dogfood
+  run, never refreshed). Fixed committed `plugin.json` to `0.8.2`.
+- New integration test `verify_warns_on_plugin_json_version_drift`
+  exercises both control (fresh `init` → no drift) and drift (mutate to
+  `9.9.9-fake` → warning fires naming both versions, `verify` exits 0).
+- README "What verify checks" adds a bullet for `version_drift`. Plugin.json
+  version updated 0.6.4 → 0.8.2 to match Cargo.toml.
+
 ## [0.8.1] - 2026-07-11
 
 ### Fixed — introspection + flag extraction (self-dogfood on fd-find)
