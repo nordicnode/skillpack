@@ -4,6 +4,42 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.8] - 2026-07-12
+
+### Fixed — doctor `desc_hint` surfaces raw HTML when README leads with markup
+
+- `doctor --verbose`'s `desc_hint` (the surfaced README preview) returned raw
+  `<div align="center"><img src="docs/logo.png" ...></div>` markup on READMEs
+  that begin with an HTML block (logos, banners). The `read_readme_hint`
+  `skip_while` predicate only skipped markdown headings (`#`) and image lines
+  (`!`); it didn't skip raw HTML tags. Extended the predicate to also skip
+  lines starting with `<`, so the hint lands on the first real prose line.
+  Affects the `--verbose` diagnostic display only — generated distribution
+  files (`SKILL.md`, `plugin.json`, etc.) never read `desc_hint`; their
+  description comes from `intent.one_line_description` in `skillpack.toml`,
+  so no shipped artifacts changed.
+  Regression test `read_readme_hint_skips_leading_html_div` in
+  `src/introspect.rs` asserts the predicate drops HTML and lands on prose;
+  reproduces the skillpack self-dogfood gap (this repo's own README leading
+  with a div-wrapped logo).
+
+### Fixed — committed distribution artifacts regenerated after introspection drift
+
+- Re-running `skillpack init` on this repo (self-dogfood) surfaced two
+  committed-artifact drifts caused by hand-edits + a changed default heuristic:
+  - `.cursor/rules/skillpack.mdc` was missing `globs: ["*.rs"]` (the cursor
+    auto-attach frontmatter line derived from `Language::Rust` via
+    `cursor_globs_hint`).
+  - `.opencode/agents/skillpack.md` carried `mode: subagent`; for a detected
+    Rust CLI `opencode_mode_hint` correctly returns `"primary"` (Unknown →
+    `"subagent"`). The demo doc (`docs/agent-demo.md` condition-B) confirms
+    `primary` is the right mode for a Rust CLI agent invoked via
+    `opencode run --agent <name>`.
+  Neither was a code bug — the binary was correct; the committed files were
+  stale. Regenerated all 5 targets so the committed artifacts match what a
+  fresh `skillpack init` produces on this repo. Also picks up the new
+  transparent-background `docs/logo.png`.
+
 ## [0.8.7] - 2026-07-12
 
 ### Changed — internal: introspect workspace helpers split

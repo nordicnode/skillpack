@@ -53,3 +53,4 @@ Run `skillpack <subcommand> --help` for a subcommand's full options.
 - Verify the tool is installed before relying on it; do not assume availability.
 - Prefer the documented `skillpack` flags; undocumented flags may change without notice.
 - This file is authoritative for agent invocation; if it drifts from the CLI's real `--help`, run `skillpack verify` to catch it.
+

@@ -598,12 +598,16 @@ fn read_readme_hint(root: &Path) -> Option<String> {
                 .take(README_HEAD_LINES)
                 .collect::<Vec<_>>()
                 .join("\n");
-            // Find the first non-heading, non-empty prose paragraph.
+            // Find the first non-heading, non-empty prose paragraph. Skip
+            //   raw HTML tags (READMEs often lead with `<div`, `<p`, `<a`)
+            //   as well as markdown headings + image lines so the surfaced
+            //   hint is prose a maintainer would actually want in a
+            //   description, not logo/banner markup.
             let paragraph = head
                 .lines()
                 .skip_while(|l| {
                     let t = l.trim();
-                    t.is_empty() || t.starts_with('#') || t.starts_with('!')
+                    t.is_empty() || t.starts_with('#') || t.starts_with('!') || t.starts_with('<')
                 })
                 .take_while(|l| !l.trim().is_empty())
                 .collect::<Vec<_>>()
@@ -1048,5 +1052,40 @@ mod parse_tests {
         if let Some(p) = probe {
             assert!(p.is_file(), "which_on_path returned non-file: {p:?}");
         }
+    }
+    #[test]
+    fn read_readme_hint_skips_leading_html_div() {
+        // Reproduces the skillpack self-dogfood gap (README leading with a
+        // `<div align="center"><img ...></div>` logo block): the surfaced
+        // `desc_hint` was raw HTML markup, not prose. After the fix the
+        // `skip_while` predicate also skips lines starting with `<`, so the
+        // hint lands on the first real prose line.
+        let dir = std::env::temp_dir().join(format!(
+            "skillpack-readme-html-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("README.md"),
+            "<div align=\"center\"><img src=\"logo.png\" alt=\"logo\"></div>\n\n\
+             # mytool\n\n\
+             A sample tool that frobs widgets.\n",
+        )
+        .unwrap();
+        let hint = super::read_readme_hint(&dir).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            !hint.contains('<'),
+            "desc_hint must drop raw HTML, got: {hint:?}"
+        );
+        assert!(
+            hint.contains("frobs widgets"),
+            "desc_hint must land on first prose line, got: {hint:?}"
+        );
     }
 }
