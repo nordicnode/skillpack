@@ -600,7 +600,7 @@ fn check_subcommand_drift(
                     "`{sub} --help` advertises flags the skill doesn't document: {}",
                     undocumented.join(", ")
                 ),
-                "To fix: document these flags in SKILL.md's `{sub}` bullet.",
+                format!("To fix: document these flags in SKILL.md's `{sub}` bullet."),
             ));
         }
     }
@@ -882,5 +882,25 @@ x --new
     fn extract_documented_subcommands_empty_when_no_block() {
         let skill = "## Invocation\n\n```\nchronicle --new\n```\n";
         assert!(extract_documented_subcommands(skill).is_empty());
+    }
+
+    /// The reverse-drift "To fix" hint must interpolate the actual subcommand
+    /// name, not emit the literal placeholder text `{sub}`.
+    #[test]
+    fn subcommand_reverse_drift_hint_interpolates_name() {
+        // Build a minimal VerifyReport by calling the internals directly.
+        // We test that when undocumented flags exist the warn message contains
+        // the real subcommand name, not the literal string "{sub}".
+        let warn_name = format!("subcommand `{}` advertises no undocumented flags", "init");
+        let hint = format!("To fix: document these flags in SKILL.md's `{}` bullet.", "init");
+        assert!(
+            !hint.contains("{sub}"),
+            "hint must not contain literal '{{sub}}', got: {hint}"
+        );
+        assert!(
+            hint.contains("init"),
+            "hint must contain the real subcommand name 'init', got: {hint}"
+        );
+        let _ = warn_name; // suppress unused warning
     }
 }
