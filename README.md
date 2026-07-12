@@ -169,6 +169,9 @@ schema:
 - `version` is present in `plugin.json` (warns on missing/empty)
 - `author` is present in `plugin.json` (warns on missing or `"Unspecified"`)
 - `version` in `plugin.json` matches the project manifest version (warns on drift; a stale 0.6.4 vs 0.8.1 self-dogfood caught by this check)
+- `allowed-tools` in `SKILL.md` frontmatter matches the Anthropic grammar (comma-separated; each token a bare identifier like `Read` or a namespaced call like `Bash(npm test:*)`) — warns on malformed tokens (unbalanced parens, non-alpha identifiers). Applied to Codex `SKILL.md` too.
+
+**Drift repair (`--fix`)** — `verify --fix` mechanically regenerates *only the file the drift lives in* (never wholesale regen — that's `skillpack init`). Currently repairs `plugin.json` version drift: rewrites `.claude-plugin/plugin.json` from the current manifest + intent, leaving your `SKILL.md`/`marketplace.json` intact. No-op when there's no fixable drift.
 
 **Cursor** (`.cursor/rules/<name>.mdc`) — frontmatter is parsed and
 validated against cursor.com/docs/rules: `description` present, non-empty,
@@ -218,10 +221,12 @@ counts, `ok` flag, `discoverability_score`) for scripting.
 |-------------------------|------------------------------------------------------------------|
 | `init --non-interactive` | skip prompts; requires a `skillpack.toml` (for CI)             |
 | `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
-| `init --license <SPDX>`  | override the license for this run                              |
+| `init --license <SPDX>` | override the license for this run                              |
 | `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`. Repeatable. |
-| `doctor` | read-only diagnosis: print detected language, CLI, and diag trace (exit 0) |
 | `verify --format human\|json` | human report (default) or machine-readable JSON for CI   |
+| `verify --fix` | mechanically repair detected drift (rewrites only the file the drift lives in; surgical). No-op when nothing is fixable. |
+| `doctor` | read-only diagnosis: print detected language, CLI, and diag trace (exit 0) |
+| `doctor --format human\|json` | read-only diagnosis as serialized `ProjectProfile` for CI (default: human) |
 | `--verbose`             | print what `skillpack` detected in the repo (introspection)      |
 | `--debug`             | print every subprocess call                                       |
 

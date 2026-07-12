@@ -85,6 +85,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `mode: subagent` when should be `primary`, body-stale subcommand flag lists
   after adding `--fix` / `doctor --format`) is now caught at test time by
   the new byte-identical self-dogfood gate, not only by ad-hoc dogfood runs.
+
 ## [0.8.8] - 2026-07-12
 
 ### Fixed — doctor `desc_hint` surfaces raw HTML when README leads with markup
