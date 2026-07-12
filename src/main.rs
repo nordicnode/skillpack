@@ -97,7 +97,7 @@ fn run_init_inner(
 ) -> Result<i32> {
     let profile = introspect::introspect(root).context("introspecting repo")?;
     if verbose {
-        print_profile(&profile);
+        print_profile(&profile, false);
     }
     if debug {
         eprintln!(
@@ -360,28 +360,40 @@ pub(crate) fn with_confirm<R>(answer: bool, f: impl FnOnce() -> R) -> R {
     f()
 }
 
-fn print_profile(profile: &types::ProjectProfile) {
-    println!("— introspection —");
-    println!("  name:        {}", profile.name);
-    println!("  language:    {}", profile.language.as_str());
-    println!("  has_cli:     {}", profile.has_cli);
+fn print_profile(profile: &types::ProjectProfile, to_stderr: bool) {
+    // `to_stderr` lets `verify --verbose --format json` show the
+    // introspection block without corrupting the JSON body on stdout
+    // (stdout stays parseable for `jq`-style CI pipelines).
+    macro_rules! emit {
+        ($($arg:tt)*) => {
+            if to_stderr {
+                eprintln!($($arg)*);
+            } else {
+                println!($($arg)*);
+            }
+        };
+    }
+    emit!("— introspection —");
+    emit!("  name:        {}", profile.name);
+    emit!("  language:    {}", profile.language.as_str());
+    emit!("  has_cli:     {}", profile.has_cli);
     if let Some(cmd) = &profile.cli_command {
-        println!("  cli_command: {}", cmd.join(" "));
+        emit!("  cli_command: {}", cmd.join(" "));
     }
     if let Some(url) = &profile.repo_url {
-        println!("  repo_url:    {url}");
+        emit!("  repo_url:    {url}");
     }
     if let Some(lic) = &profile.license {
-        println!("  license:     {lic}");
+        emit!("  license:     {lic}");
     }
     if let Some(hint) = &profile.description_hint {
         if hint.chars().count() > 120 {
-            println!(
+            emit!(
                 "  desc_hint:   {}…",
                 hint.chars().take(120).collect::<String>()
             );
         } else {
-            println!("  desc_hint:   {hint}");
+            emit!("  desc_hint:   {hint}");
         }
     }
 }
@@ -419,7 +431,7 @@ fn run_verify_inner(
     // a warning (not a silent skip) so the gap is visible.
     let profile = introspect::introspect(root).context("introspecting repo for verify")?;
     if verbose {
-        print_profile(&profile);
+        print_profile(&profile, matches!(format, verify::OutputFormat::Json));
     }
     let render = |report: &verify::VerifyReport| match format {
         verify::OutputFormat::Human => verify::render(report),
@@ -481,7 +493,7 @@ fn run_verify_inner(
     };
 
     if let Some(line) = applied_summary {
-        println!("{line}");
+        eprintln!("{line}");
     }
     print!("{}", render(&final_report));
     // Exit precedence: critical failure (1) > score-below-min (2) > ok (0).
@@ -562,7 +574,7 @@ fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool, debug: bo
     // Reuse the same profile block --verbose prints so doctor's output starts
     // from a known place.
     if verbose {
-        print_profile(profile);
+        print_profile(profile, false);
     } else {
         println!("— skillpack doctor —");
         println!("  name:     {}", profile.name);
@@ -633,6 +645,6 @@ mod confirm_tests {
             diag: types::DiagTrace::default(),
         };
         // Must not panic.
-        print_profile(&profile);
+        print_profile(&profile, false);
     }
 }

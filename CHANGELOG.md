@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.4] - 2026-07-12
+
+### Fixed — `verify --fix --format json` no longer corrupts JSON stdout
+
+- The "✓ applied N fix(es), wrote: ..." summary line was `println!`ed to
+  stdout BEFORE the JSON body, so `skillpack verify --fix --format json | jq
+  '.ok'` failed with a JSON parse error in CI pipelines. The summary now
+  goes to stderr (`eprintln!`); stdout is pure, directly-parseable JSON in
+  every `--format json` mode. Regression test:
+  `verify_fix_json_stdout_is_pure_json_no_summary_prefix`.
+
+### Fixed — `verify --verbose --format json` no longer corrupts JSON stdout
+
+- `print_profile` used `println!` unconditionally — the "— introspection —"
+  block went to stdout before the JSON body, breaking
+  `skillpack verify --verbose --format json | jq '.ok'`. `print_profile` now
+  takes a `to_stderr: bool` param; in JSON mode the introspection block goes
+  to stderr (still visible to humans), while stdout stays pure JSON. Human
+  mode is unchanged (introspection on stdout). Regression test:
+  `verify_verbose_json_stdout_is_pure_json_introspection_on_stderr`.
+
 ## [0.9.3] - 2026-07-12
 
 

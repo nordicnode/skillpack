@@ -743,13 +743,8 @@ fn verify_fix_repairs_name_drift_preserving_body() {
         out.status,
         String::from_utf8_lossy(&out.stderr)
     );
-    let raw = String::from_utf8_lossy(&out.stdout);
-    let json_str = raw
-        .lines()
-        .skip_while(|l| !l.trim_start().starts_with('{'))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let v: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let has_drift = v["results"]
         .as_array()
         .unwrap()
@@ -757,7 +752,7 @@ fn verify_fix_repairs_name_drift_preserving_body() {
         .any(|r| r["check_id"].as_str().unwrap() == "discovery.skill.name_drift");
     assert!(
         !has_drift,
-        "post-fix report must not still emit name_drift, got:\n{raw}"
+        "post-fix report must not still emit name_drift, got:\n{stdout}"
     );
 
     let after = fs::read_to_string(&skill).unwrap();
@@ -1154,7 +1149,10 @@ fn verify_min_score_fails_below_threshold() {
 // warning by regenerating ONLY `.claude-plugin/plugin.json` (surgical: the
 // committed `SKILL.md` + `marketplace.json` stay intact). After the fix,
 // the re-run report must have no version_drift warning and exit 0. The fix
-// summary line is printed for the human via stdout.
+// summary line is printed for the human via stderr — it must NOT
+// corrupt the JSON body on stdout (regression: the summary used to be
+// `println!`ed to stdout before the JSON, breaking `verify --fix
+// --format json | jq` in CI pipelines).
 #[test]
 fn verify_fix_repairs_version_drift_surgically() {
     let root = copy_fixture("rust-cli");
@@ -1190,7 +1188,8 @@ fn verify_fix_repairs_version_drift_surgically() {
 
     // Run `verify --fix --format json`. The final report (post-fix re-run)
     // is the JSON body on stdout. Pre-fix report is suppressed; an
-    // "✓ applied N fix(es), wrote: ..." summary line precedes it.
+    // "✓ applied N fix(es), wrote: ..." summary line goes to stderr so it
+    // does not corrupt the machine-readable JSON on stdout.
     let out = Command::cargo_bin("skillpack")
         .unwrap()
         .args(["verify", "--root", ".", "--fix", "--format", "json"])
@@ -1203,19 +1202,17 @@ fn verify_fix_repairs_version_drift_surgically() {
         String::from_utf8_lossy(&out.stdout)
     );
 
-    let raw = String::from_utf8_lossy(&out.stdout);
-    // The human-readable fix summary line precedes the JSON body.
+    // The human-readable fix summary line must be on stderr, NOT stdout.
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        raw.contains("✓ applied 1 fix(es), wrote: .claude-plugin/plugin.json"),
-        "must report the surgical fix in stdout: {raw}"
+        stderr.contains("✓ applied 1 fix(es), wrote: .claude-plugin/plugin.json"),
+        "must report the surgical fix in stderr: {stderr}"
     );
+    // stdout must be pure JSON — directly parseable, no skip-past-summary shim.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout)
+        .expect("verify --fix --format json stdout must be pure JSON, got:\n{stdout}");
     // The final JSON report must NOT contain the version_drift warning.
-    let json_str = raw
-        .lines()
-        .skip_while(|l| !l.trim_start().starts_with('{'))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let v: serde_json::Value = serde_json::from_str(&json_str).unwrap();
     let has_drift = v["results"]
         .as_array()
         .unwrap()
@@ -1223,7 +1220,7 @@ fn verify_fix_repairs_version_drift_surgically() {
         .any(|r| r["check_id"].as_str().unwrap() == "discovery.plugin.version_drift");
     assert!(
         !has_drift,
-        "post-fix report must not still emit version_drift, got:\n{raw}"
+        "post-fix report must not still emit version_drift, got:\n{stdout}"
     );
 
     // Plugin.json version is back to the manifest version.
@@ -1241,6 +1238,129 @@ fn verify_fix_repairs_version_drift_surgically() {
     assert_eq!(
         skill_before, skill_after,
         "verify --fix must NOT touch SKILL.md (surgical to plugin.json only)"
+    );
+}
+
+/// Regression: `verify --fix --format json` MUST keep stdout as pure JSON.
+/// Before the fix, `println!`ed the "✓ applied N fix(es)" summary to stdout
+/// BEFORE the JSON body — breaking CI pipelines like
+/// `skillpack verify --fix --format json | jq '.ok'` with a JSON parse error.
+/// The summary now goes to stderr; stdout is parseable end-to-end.
+#[test]
+fn verify_fix_json_stdout_is_pure_json_no_summary_prefix() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let pj = root.join(".claude-plugin/plugin.json");
+    let mut pjv: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pj).unwrap()).unwrap();
+    pjv["version"] = serde_json::Value::String("9.9.9-fake".into());
+    fs::write(&pj, serde_json::to_string_pretty(&pjv).unwrap()).unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--fix", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "verify --fix must exit 0");
+    // stdout must be pure JSON — no human summary prefix. A `jq`-style
+    // `from_str` with no preprocessing is the regression guard.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout)
+        .expect("verify --fix --format json stdout must be pure JSON (no summary prefix)");
+    assert_eq!(v["ok"], serde_json::Value::Bool(true));
+    assert!(
+        !stdout.contains("✓ applied"),
+        "summary must not leak to stdout"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("✓ applied 1 fix(es)"),
+        "summary must go to stderr"
+    );
+}
+
+/// Regression: `verify --verbose --format json` MUST keep stdout as pure JSON.
+/// Before the fix, `print_profile` used `println!` unconditionally — the
+/// introspection block went to stdout BEFORE the JSON body, breaking
+/// `skillpack verify --verbose --format json | jq '.ok'`. The introspection
+/// block now goes to stderr in JSON mode (visible to humans, invisible to
+/// `jq`); stdout is parseable end-to-end. In human mode, introspection stays
+/// on stdout (unchanged).
+#[test]
+fn verify_verbose_json_stdout_is_pure_json_introspection_on_stderr() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // JSON mode: introspection on stderr, pure JSON on stdout.
+    let out_json = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--verbose", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(out_json.status.success(), "verify must exit 0");
+    let stdout = String::from_utf8_lossy(&out_json.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect(
+        "verify --verbose --format json stdout must be pure JSON (no introspection prefix)",
+    );
+    assert_eq!(v["ok"], serde_json::Value::Bool(true));
+    assert!(
+        !stdout.contains("— introspection —"),
+        "introspection block must not leak to stdout in JSON mode: {stdout}"
+    );
+    let stderr = String::from_utf8_lossy(&out_json.stderr);
+    assert!(
+        stderr.contains("— introspection —"),
+        "introspection block must be visible on stderr in JSON mode: {stderr}"
+    );
+
+    // Human mode: introspection on stdout (unchanged behavior).
+    let out_human = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--verbose", "--format", "human"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(out_human.status.success(), "verify must exit 0");
+    let human_stdout = String::from_utf8_lossy(&out_human.stdout);
+    assert!(
+        human_stdout.contains("— introspection —"),
+        "introspection block must stay on stdout in human mode: {human_stdout}"
     );
 }
 
@@ -1283,18 +1403,12 @@ fn verify_fix_is_noop_when_no_fixable_drift() {
         "no-op --fix must exit 0, got:\n{}",
         String::from_utf8_lossy(&out.stdout)
     );
-    let raw = String::from_utf8_lossy(&out.stdout);
+    let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        !raw.contains("✓ applied"),
-        "no-op --fix must NOT emit fix summary, got: {raw}"
+        !stdout.contains("✓ applied"),
+        "no-op --fix must NOT emit fix summary, got: {stdout}"
     );
-    // Post-json JSON body still parses — verify functionality intact.
-    let json_str = raw
-        .lines()
-        .skip_while(|l| !l.trim_start().starts_with('{'))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let v: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(v["ok"], serde_json::Value::Bool(true));
 }
 

@@ -117,10 +117,10 @@ a PR gate. A reusable workflow ships in this repo — one line in your workflow:
 ```yaml
 jobs:
   skillpack:
-    uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.9.0
+    uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.9.4
 ```
 
-Pin to a released tag (e.g. `@v0.9.0`); bump the pin when you want new
+Pin to a released tag (e.g. `@v0.9.4`); bump the pin when you want new
 features. The job installs `skillpack` from crates.io and runs
 `skillpack verify --format json` against the consumer repo, mirroring
 skillpack's own CI matrix (ubuntu / macOS / Windows, same runtime setup-*
@@ -128,7 +128,7 @@ actions per supported language). Override the installed crate version:
 
 ```yaml
 with:
-  skillpack-version: '0.9.0'   # any crates.io-published version
+  skillpack-version: '0.9.4'   # any crates.io-published version
 ```
 
 Prefer wiring your own workflow? `cargo install skillpack --locked` and run
