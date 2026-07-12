@@ -1,3 +1,5 @@
+<p align="right"><img src="docs/logo.png" width="200" alt="skillpack logo"></p>
+
 # skillpack — the distribution-layer generator + verifier for AI agents, not a skill library.
 
 [![CI](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml/badge.svg)](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml)
