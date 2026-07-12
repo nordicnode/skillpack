@@ -552,59 +552,68 @@ fn check_subcommand_drift(
             ));
             continue;
         };
-
         // Documented flags for THIS subcommand: the SKILL.md's subcommand
         // bullet, parsed back out. Reusing extract_flags on the bullet line
         // keeps the comparison consistent with the top-level drift check.
-        let bullet = subcommand_bullet(skill_md, sub);
-        let doc_flags: Vec<String> = extract_flags(&bullet)
-            .into_iter()
-            .filter(|f| !is_meta_flag(f))
-            .collect();
-        let help_flags = extract_flags(&help);
-
-        let drifted: Vec<String> = doc_flags
-            .iter()
-            .filter(|f| !help_flags.contains(*f))
-            .cloned()
-            .collect();
-
-        let check_name = format!("documented subcommand `{sub}` flags match `--help`");
-        if drifted.is_empty() {
-            report.push(CheckResult::pass(
-                "invocation.subcommand_drift",
-                &check_name,
-                format!("`{sub}` documented flags all present in --help"),
-            ));
-        } else {
-            report.push(CheckResult::fail(
-                "invocation.subcommand_drift",
-                &check_name,
-                format!("subcommand `{sub}` documents flags missing from `--help`: {}", drifted.join(", ")),
-                format!("To fix: remove the flags from SKILL.md's `{sub}` bullet, or add them to `{sub}`'s `--help`."),
-            ));
-        }
-
-        // Reverse drift (help advertises flags the skill's bullet omits) → warn.
-        let undocumented: Vec<String> = help_flags
-            .iter()
-            .filter(|f| !is_meta_flag(f) && !doc_flags.contains(*f))
-            .cloned()
-            .collect();
-        if !undocumented.is_empty() {
-            let warn_name = format!("subcommand `{sub}` advertises no undocumented flags");
-            report.push(CheckResult::warn(
-                "invocation.subcommand_drift",
-                &warn_name,
-                format!(
-                    "`{sub} --help` advertises flags the skill doesn't document: {}",
-                    undocumented.join(", ")
-                ),
-                format!("To fix: document these flags in SKILL.md's `{sub}` bullet."),
-            ));
-        }
+        diff_one_subcommand(skill_md, sub, &help, report);
     }
     Ok(())
+}
+
+/// Pure drift + reverse-drift diff for one documented subcommand against its
+/// captured `--help` text. Split out of `check_subcommand_drift` so the
+/// suggestion strings can be regression-tested without spawning a real CLI —
+/// `check_subcommand_drift` is responsible only for the spawn + the
+/// spawn-fail result; this fn owns every message that depends on actually
+/// reading the captured help.
+fn diff_one_subcommand(skill_md: &str, sub: &str, help: &str, report: &mut VerifyReport) {
+    let bullet = subcommand_bullet(skill_md, sub);
+    let doc_flags: Vec<String> = extract_flags(&bullet)
+        .into_iter()
+        .filter(|f| !is_meta_flag(f))
+        .collect();
+    let help_flags = extract_flags(help);
+
+    let drifted: Vec<String> = doc_flags
+        .iter()
+        .filter(|f| !help_flags.contains(*f))
+        .cloned()
+        .collect();
+
+    let check_name = format!("documented subcommand `{sub}` flags match `--help`");
+    if drifted.is_empty() {
+        report.push(CheckResult::pass(
+            "invocation.subcommand_drift",
+            &check_name,
+            format!("`{sub}` documented flags all present in --help"),
+        ));
+    } else {
+        report.push(CheckResult::fail(
+            "invocation.subcommand_drift",
+            &check_name,
+            format!("subcommand `{sub}` documents flags missing from `--help`: {}", drifted.join(", ")),
+            format!("To fix: remove the flags from SKILL.md's `{sub}` bullet, or add them to `{sub}`'s `--help`."),
+        ));
+    }
+
+    // Reverse drift (help advertises flags the skill's bullet omits) → warn.
+    let undocumented: Vec<String> = help_flags
+        .iter()
+        .filter(|f| !is_meta_flag(f) && !doc_flags.contains(*f))
+        .cloned()
+        .collect();
+    if !undocumented.is_empty() {
+        let warn_name = format!("subcommand `{sub}` advertises no undocumented flags");
+        report.push(CheckResult::warn(
+            "invocation.subcommand_drift",
+            &warn_name,
+            format!(
+                "`{sub} --help` advertises flags the skill doesn't document: {}",
+                undocumented.join(", ")
+            ),
+            format!("To fix: document these flags in SKILL.md's `{sub}` bullet."),
+        ));
+    }
 }
 
 /// The single SKILL.md bullet line for a documented subcommand (the line
@@ -884,23 +893,33 @@ x --new
         assert!(extract_documented_subcommands(skill).is_empty());
     }
 
-    /// The reverse-drift "To fix" hint must interpolate the actual subcommand
-    /// name, not emit the literal placeholder text `{sub}`.
+    /// Regression for ce2a892: the reverse-drift "To fix" hint was a bare
+    /// `&str` literal so `{sub}` rendered verbatim. Reach the production
+    /// string via `diff_one_subcommand` (no spawn) and assert the suggestion
+    /// carries the real subcommand name, not the `{sub}` placeholder. If
+    /// someone reverts the `format!` wrap this assertion fails.
     #[test]
     fn subcommand_reverse_drift_hint_interpolates_name() {
-        // Build a minimal VerifyReport by calling the internals directly.
-        // We test that when undocumented flags exist the warn message contains
-        // the real subcommand name, not the literal string "{sub}".
-        let warn_name = format!("subcommand `{}` advertises no undocumented flags", "init");
-        let hint = format!("To fix: document these flags in SKILL.md's `{}` bullet.", "init");
+        // `init` bullet documents `--foo`; the help advertises `--foo` PLUS
+        // `--secret` → reverse drift fires with `init` as the sub name.
+        let skill_md = "### Subcommands\n\n- `init`: create\n  `--foo`\n";
+        let help = "Usage: init\n\nOptions:\n  --foo   f\n  --secret   s\n";
+        let mut report = VerifyReport::default();
+        diff_one_subcommand(skill_md, "init", help, &mut report);
+        let warn = report
+            .results
+            .iter()
+            .find(|r| r.suggestion.is_some())
+            .expect("reverse-drift warn should produce a suggestion");
+        let s = warn.suggestion.as_deref().unwrap();
         assert!(
-            !hint.contains("{sub}"),
-            "hint must not contain literal '{{sub}}', got: {hint}"
+            s.contains("`init`"),
+            "suggestion must carry the real subcommand name `init`, got: {s}"
         );
         assert!(
-            hint.contains("init"),
-            "hint must contain the real subcommand name 'init', got: {hint}"
+            !s.contains("{sub}"),
+            "suggestion must NOT leak the literal `{{sub}}` placeholder, got: {s}"
         );
-        let _ = warn_name; // suppress unused warning
+        assert!(s.contains("SKILL.md"), "suggestion should name SKILL.md");
     }
 }
