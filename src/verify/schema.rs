@@ -90,6 +90,14 @@ pub const OPENCODE_AGENTS_DIR: &str = ".opencode/agents";
 /// Verified July 2026.
 pub const COPILOT_INSTRUCTIONS_PATH: &str = ".github/copilot-instructions.md";
 
+/// AGENTS.md lives at the repository root. Source: agents.md (Linux Foundation
+/// stewarded, aaif.io/projects/agents-md) — "AGENTS.md is just standard Markdown.
+/// Use any headings you like; the agent simply parses the text you provide."
+/// Plain markdown, no frontmatter, no required fields. Read natively by 20+
+/// coding agents (Codex, Cursor, Windsurf, Copilot, Aider, Zed, Warp, JetBrains
+/// Junie, etc.). Verified July 2026.
+pub const AGENTS_MD_PATH: &str = "AGENTS.md";
+
 // Action-verb heuristic: the first word of a good skill description is an
 // action verb (e.g. "Lint", "Generate", "Format"). We don't enforce grammar —
 // we only flag descriptions that don't begin with an alphabetic word, a

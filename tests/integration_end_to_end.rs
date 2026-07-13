@@ -2716,8 +2716,9 @@ fn self_dogfood_regenerated_artifacts_match_committed_byte_identical() {
         .assert()
         .success();
 
-    // Regenerate all 5 targets non-interactively from the copied
-    // skillpack.toml (no interview prompts).
+    // Regenerate all 6 targets non-interactively from the copied
+    // skillpack.toml (no interview prompts). Uses `--target all` to exercise
+    // the all-expansion path.
     let out = Command::cargo_bin("skillpack")
         .unwrap()
         .args([
@@ -2725,15 +2726,8 @@ fn self_dogfood_regenerated_artifacts_match_committed_byte_identical() {
             "--non-interactive",
             "--accept-warnings",
             "--target",
-            "claude",
-            "--target",
-            "cursor",
-            "--target",
-            "codex",
-            "--target",
-            "opencode",
-            "--target",
-            "copilot",
+            "all",
+            "--force",
         ])
         .current_dir(&dest)
         .output()
@@ -2744,7 +2738,7 @@ fn self_dogfood_regenerated_artifacts_match_committed_byte_identical() {
         String::from_utf8_lossy(&out.stdout)
     );
 
-    // Byte-equalize the 5 body files that don't carry URL-derived fields.
+    // Byte-equalize the 6 body files that don't carry URL-derived fields.
     // Drift in `globs:`, `mode:`, language-derived `allowed-tools`, the
     // `## Invocation` block, trailing newlines, or template polish all
     // surface here.
@@ -2754,6 +2748,7 @@ fn self_dogfood_regenerated_artifacts_match_committed_byte_identical() {
         ".cursor/rules/skillpack.mdc",
         ".opencode/agents/skillpack.md",
         ".github/copilot-instructions.md",
+        "AGENTS.md",
     ] {
         let regen = fs::read_to_string(dest.join(rel)).unwrap_or_default();
         let committed = fs::read_to_string(repo_root().join(rel)).unwrap_or_default();
@@ -3330,7 +3325,7 @@ fn codex_empty_skills_dir_fails_verify() {
 // --- All-5-targets round trip ------------------------------------------------
 
 #[test]
-fn all_five_targets_init_then_verify_round_trip() {
+fn all_six_targets_init_then_verify_round_trip() {
     let root = copy_fixture("rust-cli");
     Command::new("cargo")
         .args(["build", "--quiet"])
@@ -3344,15 +3339,7 @@ fn all_five_targets_init_then_verify_round_trip() {
         .args([
             "init",
             "--target",
-            "claude",
-            "--target",
-            "cursor",
-            "--target",
-            "codex",
-            "--target",
-            "opencode",
-            "--target",
-            "copilot",
+            "all",
             "--root",
             ".",
             "--non-interactive",
@@ -3362,14 +3349,15 @@ fn all_five_targets_init_then_verify_round_trip() {
         .assert()
         .success();
 
-    // All 5 file types exist.
+    // All 6 file types exist.
     assert!(root.join(".claude-plugin/marketplace.json").exists());
     assert!(root.join(".cursor/rules/sample-rust.mdc").exists());
     assert!(root.join(".codex/skills/sample-rust/SKILL.md").exists());
     assert!(root.join(".opencode/agents/sample-rust.md").exists());
     assert!(root.join(".github/copilot-instructions.md").exists());
+    assert!(root.join("AGENTS.md").exists());
 
-    // Verify all 5 discovery check_ids have severity pass.
+    // Verify all 6 discovery check_ids have severity pass.
     let out = Command::cargo_bin("skillpack")
         .unwrap()
         .args(["verify", "--root", ".", "--format", "json"])
@@ -3389,6 +3377,7 @@ fn all_five_targets_init_then_verify_round_trip() {
         "discovery.cursor.mdc",
         "discovery.opencode.agent",
         "discovery.copilot.instructions",
+        "discovery.agentsmd",
     ];
     for id in &expected_ids {
         let matches: Vec<&serde_json::Value> =
@@ -3459,6 +3448,7 @@ fn self_dogfood_verify_asserts_all_ecosystems() {
         ("discovery.codex.skill", "pass"),
         ("discovery.opencode.agent", "pass"),
         ("discovery.copilot.instructions", "pass"),
+        ("discovery.agentsmd", "pass"),
     ];
 
     for (id, severity) in &check_expectations {
@@ -3498,4 +3488,159 @@ fn doctor_on_plain_rust_cli_reports_has_cli_true() {
         s.contains("has_cli:  true"),
         "doctor should report has_cli: true, got:\n{s}"
     );
+}
+
+// --- --target all dedup: `all --target claude` must not double-write ---------
+
+#[test]
+fn target_all_with_dup_does_not_double_write() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--target",
+            "all",
+            "--target",
+            "claude",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "init must exit 0, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // Each file is written exactly once — no duplicate-write panic, no double
+    // content. The marketplace.json is a single plugin entry; if Claude ran
+    // twice, render would push two GeneratedFileOutputs with the same rel_path
+    // and write_files would write twice (harmless to disk but the summary count
+    // would be 7 not 6). Assert the summary line says 8 (6 targets + plugin.json
+    // + skillpack.toml).
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        s.contains("wrote 8 file(s)"),
+        "dedup must reduce all+claude to 6 targets (+2 metadata), got:\n{s}"
+    );
+
+    // Verify still passes — no corruption from the dedup path.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .assert()
+        .success();
+}
+
+// --- AGENTS.md collision guard: skip without --force, overwrite with -----------
+
+#[test]
+fn agents_md_collision_guard_skips_without_force() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    // Pre-existing hand-written AGENTS.md at repo root.
+    let existing = "# My custom agent instructions\n\nDo not touch.\n";
+    std::fs::write(root.join("AGENTS.md"), existing).unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--target",
+            "agentsmd",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "init must exit 0 even when skipping collision, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // The pre-existing file is untouched.
+    let after = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+    assert_eq!(
+        after, existing,
+        "collision guard must not overwrite without --force"
+    );
+
+    // Warning was emitted on stderr.
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("AGENTS.md already exists") && err.contains("skipping"),
+        "must warn about skipped AGENTS.md, got:\n{err}"
+    );
+}
+
+#[test]
+fn agents_md_collision_guard_overwrites_with_force() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    // Pre-existing hand-written AGENTS.md at repo root.
+    std::fs::write(root.join("AGENTS.md"), "# Old instructions\n\nStale.\n").unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--target",
+            "agentsmd",
+            "--force",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // The file was overwritten with generated content.
+    let after = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+    assert_ne!(
+        after, "# Old instructions\n\nStale.\n",
+        "--force must overwrite the pre-existing AGENTS.md"
+    );
+    assert!(
+        after.contains("skillpack"),
+        "generated AGENTS.md must contain the tool name, got:\n{after}"
+    );
+
+    // Verify the overwritten file passes discovery.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .assert()
+        .success();
 }

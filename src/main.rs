@@ -14,7 +14,7 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 
-use skillpack::cli::{Cli, Commands};
+use skillpack::cli::{resolve_targets, Cli, Commands, Target};
 use skillpack::config::Config;
 use skillpack::exit;
 use skillpack::generate::{coerce_kebab, render_targets, GeneratedFileOutput};
@@ -33,6 +33,7 @@ fn main() {
             accept_warnings,
             license,
             target,
+            force,
         } => run_init(
             &root,
             cli.verbose,
@@ -41,6 +42,7 @@ fn main() {
             accept_warnings,
             license,
             target,
+            force,
         ),
         Commands::Verify {
             root,
@@ -58,6 +60,7 @@ fn main() {
     std::process::exit(code);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_init(
     root: &Path,
     verbose: bool,
@@ -65,7 +68,8 @@ fn run_init(
     non_interactive: bool,
     accept_warnings: bool,
     license_override: Option<String>,
-    targets: Vec<skillpack::cli::Target>,
+    raw_targets: Vec<String>,
+    force: bool,
 ) -> i32 {
     match run_init_inner(
         root,
@@ -74,11 +78,11 @@ fn run_init(
         non_interactive,
         accept_warnings,
         license_override,
-        targets,
+        raw_targets,
+        force,
     ) {
         Ok(c) => c,
         Err(e) => {
-            // teach, don't just complain (design §8.1).
             eprintln!("fatal: {e:#}");
             std::process::exit(exit::INIT_FATAL);
         }
@@ -93,12 +97,20 @@ fn run_init_inner(
     non_interactive: bool,
     accept_warnings: bool,
     license_override: Option<String>,
-    targets: Vec<skillpack::cli::Target>,
+    raw_targets: Vec<String>,
+    force: bool,
 ) -> Result<i32> {
     let profile = introspect::introspect(root).context("introspecting repo")?;
     if verbose {
         print_profile(&profile, false);
     }
+
+    // Resolve `--target all` + validate every value. Empty → `[Claude]`.
+    let targets = if raw_targets.is_empty() {
+        vec![Target::Claude]
+    } else {
+        resolve_targets(&raw_targets)?
+    };
     if debug {
         eprintln!(
             "[debug] detected name={} language={} has_cli={}",
@@ -143,11 +155,6 @@ fn run_init_inner(
     }
 
     // Step 3 — render in memory.
-    let targets = if targets.is_empty() {
-        vec![skillpack::cli::Target::Claude]
-    } else {
-        targets
-    };
     let files =
         render_targets(&profile, &intent, &targets).context("rendering distribution files")?;
 
@@ -200,11 +207,15 @@ fn run_init_inner(
     }
 
     // Step 5 — write files + save config.
-    write_files(root, &files)?;
+    let written = write_files(root, &files, force)?;
     let name = coerce_kebab(&profile.name);
     Config::from_intent(&name, &intent).save(root)?;
-    println!("✓ wrote {} file(s) under {}:", files.len(), root.display());
-    for f in &files {
+    println!(
+        "✓ wrote {} file(s) under {}:",
+        written.len(),
+        root.display()
+    );
+    for f in &written {
         println!("   - {}", f.rel_path);
     }
     println!("   - {}", Config::path(root).display());
@@ -252,16 +263,32 @@ fn verify_rendered(
     verify::run(&input)
 }
 
-fn write_files(root: &Path, files: &[GeneratedFileOutput]) -> Result<()> {
+fn write_files<'a>(
+    root: &Path,
+    files: &'a [GeneratedFileOutput],
+    force: bool,
+) -> Result<Vec<&'a GeneratedFileOutput>> {
+    let mut written = Vec::new();
     for f in files {
         let p = root.join(&f.rel_path);
+        // Collision guard: AGENTS.md lives at repo root (not a skillpack-owned
+        // directory). If it already exists and --force was not passed, skip it
+        // with a warning so we never silently stomp a hand-written file.
+        if f.rel_path == crate::verify::schema::AGENTS_MD_PATH && p.exists() && !force {
+            eprintln!(
+                "⚠ AGENTS.md already exists at {}; skipping (pass --force to overwrite).",
+                p.display()
+            );
+            continue;
+        }
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
         }
         std::fs::write(&p, &f.contents).with_context(|| format!("writing {}", p.display()))?;
+        written.push(f);
     }
-    Ok(())
+    Ok(written)
 }
 
 // --- pre-commit confirmation (Improvement E: testable) ---------------------

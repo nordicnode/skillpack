@@ -23,10 +23,12 @@ static NAME_RE: Lazy<Regex> =
 use super::super::introspect::{detect_language, project_manifest_version};
 use crate::types::DiagTrace;
 
+mod agentsmd;
 mod copilot;
 mod cursor;
 mod opencode;
 
+use agentsmd::{check_agents_md, find_agents_md};
 use copilot::{check_copilot_instructions, find_copilot_instructions};
 use cursor::{check_one_mdc, find_cursor_mdc_files};
 pub use cursor::{parse_cursor_mdc_frontmatter, CursorFrontmatter};
@@ -160,14 +162,21 @@ pub fn run(
         out.push(check_copilot_instructions(root, &p)?);
     }
 
+    // AGENTS.md: root-level instructions file, plain markdown, no frontmatter.
+    // Per agents.md (Linux Foundation stewarded) — read natively by 20+ coding
+    // agents. Same structural check as Copilot: file exists, non-empty, `#` heading.
+    if let Some(p) = find_agents_md(root) {
+        out.push(check_agents_md(root, &p)?);
+    }
+
     // When no ecosystem files are present at all, the plugin is malformed —
     // emit a single honest failure so a bare `skillpack verify` on an empty
     // repo doesn't silently pass.
     if out.is_empty() {
         out.push(CheckResult::fail(
             "discovery.empty",
-            "at least one ecosystem is present (Claude / Codex / Cursor / OpenCode / Copilot)",
-            "no distribution files found (none of: .claude-plugin/, .codex/skills/, .cursor/rules/, .opencode/agents/, .github/copilot-instructions.md)",
+            "at least one ecosystem is present (Claude / Codex / Cursor / OpenCode / Copilot / AGENTS.md)",
+            "no distribution files found (none of: .claude-plugin/, .codex/skills/, .cursor/rules/, .opencode/agents/, .github/copilot-instructions.md, AGENTS.md)",
             "To fix: run `skillpack init --target <ecosystem>` first.",
         ));
     }

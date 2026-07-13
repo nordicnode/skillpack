@@ -5,6 +5,42 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.10.0] - 2026-07-13
+
+### Added — AGENTS.md support (6th agent target)
+
+- `--target agentsmd` generates `AGENTS.md` at the repo root — a plain
+  markdown instructions file (no frontmatter) read natively by 20+ coding
+  agents (Codex, Cursor, Windsurf, Copilot, Aider, Zed, Warp, JetBrains
+  Junie, etc.) per the [agents.md](https://agents.md/) spec stewarded by the
+  Linux Foundation. Template: `templates/AGENTS.md.tera` (skill_body
+  partial, same as Copilot). Discovery: `src/verify/discovery/agentsmd.rs`
+  validates presence, non-empty, `#` heading, no frontmatter.
+
+### Added — `--target all` shortcut
+
+- `--target all` expands to all six concrete targets (claude, cursor, codex,
+  opencode, copilot, agentsmd) pre-dispatch. No `All` variant on the `Target`
+  enum — expansion happens in `resolve_targets` before dispatch, so
+  generate/verify/fix match arms stay clean. Dedup preserves canonical order:
+  `--target all --target claude` emits Claude once (no double-write).
+
+### Added — `--force` flag for AGENTS.md root collision guard
+
+- AGENTS.md lives at the repo root (not a skillpack-owned directory). If it
+  already exists, `init` skips it with a warning unless `--force` is passed.
+  Other targets are unaffected (they write to skillpack-owned paths). The
+  `write_files` function now returns the actually-written subset so the
+  summary count reflects what hit disk.
+
+### Changed
+
+- `verify` `discovery.empty` message now lists all six ecosystems
+  (Claude / Codex / Cursor / OpenCode / Copilot / AGENTS.md).
+- `Cargo.toml` description updated to mention AGENTS.md.
+- README flags table + Quick start + Status section updated for 6 targets.
+
+
 ## [0.9.4] - 2026-07-12
 
 ### Fixed — `verify --fix --format json` no longer corrupts JSON stdout

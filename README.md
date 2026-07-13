@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust 1.74+](https://img.shields.io/badge/rust-1.74%2B-orange.svg)](https://www.rust-lang.org)
 
-Coding agents (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot) now discover and invoke
+Coding agents (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, and any AGENTS.md reader — Codex, Windsurf, Aider, Zed, Warp, JetBrains Junie, etc.) now discover and invoke
 tools by reading marketplace manifests, skill files, and CLIs — not by `npm install`-ing
 on instinct. An OSS project's code quality no longer matters if the agent can't find,
 understand, and autonomously invoke the tool. That wiring around a library or CLI is the
@@ -15,7 +15,7 @@ understand, and autonomously invoke the tool. That wiring around a library or CL
 agent coming in cold could actually use what you shipped.
 
 `skillpack` takes any OSS project and generates the agent distribution files for
-one or more coding-agent ecosystems (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot),
+one or more coding-agent ecosystems (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, AGENTS.md),
 then runs a verification suite that simulates an agent's first read and actually invokes
 the documented CLI to catch drift before it reaches a user.
 
@@ -23,7 +23,8 @@ the documented CLI to catch drift before it reaches a user.
 
 From your repo, `skillpack init` writes (purely additive — nothing existing is touched).
 By default it targets Claude Code; pass `--target cursor` / `--target codex` /
-`--target opencode` / `--target copilot` to emit for additional agents (repeatable):
+`--target opencode` / `--target copilot` / `--target agentsmd` to emit for additional
+agents (repeatable), or `--target all` to emit for every supported ecosystem:
 
 **Claude Code** (`--target claude`, default):
 
@@ -46,6 +47,10 @@ By default it targets Claude Code; pass `--target cursor` / `--target codex` /
 **GitHub Copilot** (`--target copilot`):
 
 - `.github/copilot-instructions.md` — a Copilot instructions file (plain markdown, no frontmatter) with the same invocation body
+
+**AGENTS.md** (`--target agentsmd`):
+
+- `AGENTS.md` — a root-level instructions file (plain markdown, no frontmatter) with the same invocation body, read natively by 20+ agent clients (Codex, Cursor, Windsurf, Copilot, Aider, Zed, Warp, JetBrains Junie, etc.) per the [agents.md](https://agents.md/) spec (Linux Foundation stewarded)
 
 A `skillpack.toml` at your project root captures your answers so re-runs are deterministic
 and CI-friendly.
@@ -91,9 +96,8 @@ Requires Rust 1.74+. Published on [crates.io](https://crates.io/crates/skillpack
 # In your OSS project root:
 skillpack init            # introspect → interview → generate → pre-commit verify
 
-# Generate for multiple agent ecosystems at once:
-skillpack init --target claude --target cursor --target codex --target opencode --target copilot
-
+# Generate for all six agent ecosystems at once:
+skillpack init --target all
 # Re-run anywhere / in CI (deterministic, non-interactive):
 skillpack init --non-interactive --accept-warnings
 
@@ -222,7 +226,8 @@ counts, `ok` flag, `discoverability_score`) for scripting.
 | `init --non-interactive` | skip prompts; requires a `skillpack.toml` (for CI)             |
 | `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
 | `init --license <SPDX>` | override the license for this run                              |
-| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`. Repeatable. |
+| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, or `all` (all six). Repeatable. |
+| `init --force` | overwrite an existing `AGENTS.md` at repo root (skip+warn otherwise). Has no effect on other targets, which write to skillpack-owned paths. |
 | `verify --format human\|json` | human report (default) or machine-readable JSON for CI   |
 | `verify --fix` | mechanically repair detected drift (rewrites only the file the drift lives in; surgical). No-op when nothing is fixable. |
 | `verify --min-score <N>` | minimum discoverability score (0–100) the run must reach to exit zero; gate runs against the post-fix report. Omitted by default. Pairs with `--format json` for CI. |
@@ -237,10 +242,11 @@ counts, `ok` flag, `discoverability_score`) for scripting.
 `init` + `verify` + `doctor` across the eight language ecosystems above. Generates and
 verifies distribution files for **Claude Code** (default), **Cursor**
 (`.cursor/rules/*.mdc`), **Codex CLI** (`.codex/skills/`), **OpenCode**
-(`.opencode/agents/`), and **GitHub Copilot** (`.github/copilot-instructions.md`).
+(`.opencode/agents/`), **GitHub Copilot** (`.github/copilot-instructions.md`), and
+**AGENTS.md** (`AGENTS.md`).
 MIT-licensed. `verify` runs the discovery suite against every ecosystem `init` targets —
-a broken `.mdc`, Codex `SKILL.md`, OpenCode agent, or Copilot instructions file fails CI
-alongside a Claude-side defect. A bundled skill-pack marketplace is a later phase.
+a broken `.mdc`, Codex `SKILL.md`, OpenCode agent, Copilot instructions file, or
+`AGENTS.md` fails CI alongside a Claude-side defect. A bundled skill-pack marketplace is a later phase.
 
 ## Contributing
 

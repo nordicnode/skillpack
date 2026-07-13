@@ -13,6 +13,7 @@ use tera::{Context as TeraContext, Tera};
 
 use crate::cli::Target;
 use crate::types::{Intent, Language, ProjectProfile};
+use crate::verify::schema;
 
 /// Name → template source. Embedded via `include_str!` so templates ship inside
 /// the binary but still live as editable `.tera` files in the repo for
@@ -23,6 +24,7 @@ const SKILL_TPL: &str = include_str!("../templates/SKILL.md.tera");
 const CURSOR_RULE_TPL: &str = include_str!("../templates/cursor-rule.mdc.tera");
 const OPENCODE_AGENT_TPL: &str = include_str!("../templates/opencode-agent.md.tera");
 const COPILOT_INSTRUCTIONS_TPL: &str = include_str!("../templates/copilot-instructions.md.tera");
+const AGENTS_MD_TPL: &str = include_str!("../templates/AGENTS.md.tera");
 const SKILL_BODY_TPL: &str = include_str!("../templates/skill_body.md.tera");
 
 static TERA: Lazy<Tera> = Lazy::new(|| {
@@ -41,6 +43,8 @@ static TERA: Lazy<Tera> = Lazy::new(|| {
         .expect("skill body partial template is valid");
     tera.add_raw_template("copilot-instructions.md", COPILOT_INSTRUCTIONS_TPL)
         .expect("copilot instructions template is valid");
+    tera.add_raw_template("AGENTS.md", AGENTS_MD_TPL)
+        .expect("AGENTS.md template is valid");
     // json_encode is built into Tera; nothing custom to register.
     tera
 });
@@ -260,6 +264,20 @@ pub fn render_targets(
                 out.push(GeneratedFileOutput {
                     rel_path: ".github/copilot-instructions.md".to_string(),
                     contents: instr,
+                });
+            }
+            Target::AgentsMd => {
+                // AGENTS.md: root-level instructions file, plain markdown, no
+                // frontmatter. Per agents.md (Linux Foundation stewarded) —
+                // read natively by 20+ coding agents.
+                let mut c = ctx.clone();
+                c.insert("noun", "tool");
+                let agents = TERA
+                    .render("AGENTS.md", &c)
+                    .context("rendering AGENTS.md")?;
+                out.push(GeneratedFileOutput {
+                    rel_path: schema::AGENTS_MD_PATH.to_string(),
+                    contents: agents,
                 });
             }
         }
