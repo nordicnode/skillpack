@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.10.1] - 2026-07-13
+
+### Fixed
+
+- `init` summary now surfaces skipped targets when the collision guard
+  skips `AGENTS.md` (existing file held, `--force` not passed). Previously
+  the dropped target was invisible — `--target agentsmd` with a pre-existing
+  `AGENTS.md` printed "wrote 0 file(s)" and exited 0 with no audible signal.
+  Now `write_files` returns `(written, skipped)` and the summary prints an
+  `ℹ skipped N target file(s)` footer on stderr. Exit code unchanged
+  (collision is not user-abort).
+
+
 ## [0.10.0] - 2026-07-13
 
 ### Added — AGENTS.md support (6th agent target)
