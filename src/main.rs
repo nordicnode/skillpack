@@ -207,7 +207,7 @@ fn run_init_inner(
     }
 
     // Step 5 — write files + save config.
-    let written = write_files(root, &files, force)?;
+    let (written, skipped) = write_files(root, &files, force)?;
     let name = coerce_kebab(&profile.name);
     Config::from_intent(&name, &intent).save(root)?;
     println!(
@@ -219,6 +219,19 @@ fn run_init_inner(
         println!("   - {}", f.rel_path);
     }
     println!("   - {}", Config::path(root).display());
+    // Surface any targets the collision guard skipped so the summary never
+    // hides a user-requested target as silent success (design §8.2: "exit
+    // 0 unless critical fail" — collision is not critical; the footer makes
+    // the skip visible without changing the exit code).
+    if !skipped.is_empty() {
+        eprintln!(
+            "ℹ skipped {} target file(s) (existing file held; pass --force to overwrite):",
+            skipped.len()
+        );
+        for f in &skipped {
+            eprintln!("   - {}", f.rel_path);
+        }
+    }
     Ok(exit::INIT_OK)
 }
 
@@ -267,8 +280,9 @@ fn write_files<'a>(
     root: &Path,
     files: &'a [GeneratedFileOutput],
     force: bool,
-) -> Result<Vec<&'a GeneratedFileOutput>> {
+) -> Result<(Vec<&'a GeneratedFileOutput>, Vec<&'a GeneratedFileOutput>)> {
     let mut written = Vec::new();
+    let mut skipped = Vec::new();
     for f in files {
         let p = root.join(&f.rel_path);
         // Collision guard: AGENTS.md lives at repo root (not a skillpack-owned
@@ -279,6 +293,7 @@ fn write_files<'a>(
                 "⚠ AGENTS.md already exists at {}; skipping (pass --force to overwrite).",
                 p.display()
             );
+            skipped.push(f);
             continue;
         }
         if let Some(parent) = p.parent() {
@@ -288,7 +303,7 @@ fn write_files<'a>(
         std::fs::write(&p, &f.contents).with_context(|| format!("writing {}", p.display()))?;
         written.push(f);
     }
-    Ok(written)
+    Ok((written, skipped))
 }
 
 // --- pre-commit confirmation (Improvement E: testable) ---------------------
