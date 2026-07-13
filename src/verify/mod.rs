@@ -51,6 +51,9 @@ pub struct VerifyInput {
     pub profile_name: Option<String>,
     /// Print every subprocess spawn to stderr (design §8.2 --debug).
     pub debug: bool,
+    /// Stdin bytes to feed the CLI during `verify` spawns. For interactive
+    /// CLIs that block on stdin. `None` uses `/dev/null` (default).
+    pub verify_stdin: Option<String>,
 }
 
 /// Run the full verify suite against `root`, returning the aggregate report.
@@ -115,6 +118,7 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
         &skill_md,
         input.cli_command.as_deref(),
         input.debug,
+        input.verify_stdin.as_deref(),
     );
     invocation::run(&inv, &mut report)?;
 

@@ -59,6 +59,7 @@ fn cli_intent() -> Intent {
         import_pattern: None,
         author: Some("Mikey".to_string()),
         license: Some("MIT".to_string()),
+        ..Default::default()
     }
 }
 
@@ -85,8 +86,8 @@ fn lib_intent() -> Intent {
         when_to_use_phrases: vec!["ingest csv".to_string(), "convert rows".to_string()],
         invocation_command: None,
         import_pattern: Some("import { parse } from 'fastcsv'".to_string()),
-        author: None,
         license: Some("MIT".to_string()),
+        ..Default::default()
     }
 }
 

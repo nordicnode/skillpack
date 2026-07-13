@@ -8,6 +8,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-07-13
+
+### Added
+
+- `verify_stdin` field in `skillpack.toml` `[skill]` table — feeds stdin bytes
+  to the CLI during `verify` spawns (`--help`, subcommand `--help`). For
+  interactive CLIs that block on stdin (auth prompts, confirm dialogs); without
+  this, `verify` times out and false-flags drift. `None` (default) uses
+  `/dev/null`, preserving all existing behavior. Not fed to `--version` (non-
+  interactive).
+
 ## [0.11.1] - 2026-07-13
 
 ### Added

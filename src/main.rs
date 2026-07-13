@@ -208,7 +208,7 @@ fn run_init_inner(
         .context("rendering distribution files")?;
 
     // Step 4 — pre-commit verify against the rendered output (design §5.3).
-    let report = verify_rendered(&files, &profile, root, debug)?;
+    let report = verify_rendered(&files, &profile, root, debug, intent.verify_stdin.clone())?;
 
     if report.has_critical_failure() {
         eprintln!("\n❌ pre-commit verification FAILED. skillpack will NOT write files.");
@@ -299,6 +299,7 @@ fn verify_rendered(
     profile: &types::ProjectProfile,
     root: &Path,
     debug: bool,
+    verify_stdin: Option<String>,
 ) -> Result<VerifyReport> {
     // Materialize the rendered files into a temp dir so verify (which expects
     // files on disk) can read them exactly as an agent coming in cold would.
@@ -324,6 +325,7 @@ fn verify_rendered(
         repo_url: profile.repo_url.clone(),
         profile_name: Some(coerce_kebab(&profile.name)),
         debug,
+        verify_stdin,
     };
     verify::run(&input)
 }
@@ -565,6 +567,12 @@ fn run_verify_inner(
     // If the skill documents a CLI but introspect found none, `verify` emits
     // a warning (not a silent skip) so the gap is visible.
     let profile = introspect::introspect(root).context("introspecting repo for verify")?;
+    // Load verify_stdin from skillpack.toml if present (silent fallback to
+    // None — verify stays usable on hand-written packs without a config).
+    let verify_stdin = Config::load(root)
+        .ok()
+        .and_then(|opt| opt.and_then(|cfg| cfg.to_intent()))
+        .and_then(|intent| intent.verify_stdin);
     if verbose {
         print_profile(
             &profile,
@@ -586,6 +594,7 @@ fn run_verify_inner(
             cli_command: profile.cli_command.clone(),
             profile_name: Some(coerce_kebab(&profile.name)),
             debug,
+            verify_stdin: verify_stdin.clone(),
             repo_url: profile.repo_url.clone(),
         };
         verify::run(&input)

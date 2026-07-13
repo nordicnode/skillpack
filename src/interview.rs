@@ -96,6 +96,7 @@ pub fn run(profile: &ProjectProfile, prompter: &dyn Prompter) -> Result<Intent> 
             import_pattern: None,
             author,
             license,
+            ..Default::default()
         })
     } else {
         let q3 = prompter.text(
@@ -113,6 +114,7 @@ pub fn run(profile: &ProjectProfile, prompter: &dyn Prompter) -> Result<Intent> 
             },
             author,
             license,
+            ..Default::default()
         })
     }
 }

@@ -45,6 +45,12 @@ pub struct SkillConfig {
     pub author: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+    /// Stdin bytes to feed the CLI during `verify` spawns (e.g. `--help`,
+    /// `--version`). For interactive CLIs that block on stdin — without this,
+    /// `verify` times out and false-flags drift. Raw bytes are written then
+    /// stdin closes; `None` (default) uses `/dev/null`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_stdin: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -136,6 +142,7 @@ impl Config {
             import_pattern: s.import_pattern.clone(),
             author: s.author.clone().or_else(|| self.defaults.author.clone()),
             license: s.license.clone().or_else(|| self.defaults.license.clone()),
+            verify_stdin: s.verify_stdin.clone(),
         })
     }
 
@@ -149,6 +156,7 @@ impl Config {
             import_pattern: intent.import_pattern.clone(),
             author: intent.author.clone(),
             license: intent.license.clone(),
+            verify_stdin: intent.verify_stdin.clone(),
         };
         Self {
             skill: Some(skill),
@@ -175,6 +183,7 @@ mod tests {
                 import_pattern: None,
                 author: None,
                 license: None,
+                verify_stdin: None,
             }),
             defaults: Defaults::default(),
         };
@@ -200,6 +209,7 @@ mod tests {
                 import_pattern: None,
                 author: None,
                 license: None,
+                verify_stdin: None,
             }),
             defaults: Defaults::default(),
         };
@@ -225,9 +235,31 @@ mod tests {
                 import_pattern: None,
                 author: None,
                 license: None,
+                verify_stdin: None,
             }),
             defaults: Defaults::default(),
         };
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn verify_stdin_round_trips_through_toml() {
+        let cfg = Config {
+            skill: Some(SkillConfig {
+                name: "sample-rust".into(),
+                one_line_description: "desc".into(),
+                when_to_use_phrases: vec!["trigger".into()],
+                invocation_command: Some("cmd".into()),
+                import_pattern: None,
+                author: None,
+                license: None,
+                verify_stdin: Some("\n".into()),
+            }),
+            defaults: Defaults::default(),
+        };
+        let intent = cfg.to_intent().expect("intent from config");
+        assert_eq!(intent.verify_stdin.as_deref(), Some("\n"));
+        let back = Config::from_intent("sample-rust", &intent);
+        assert_eq!(back.skill.unwrap().verify_stdin, Some("\n".into()));
     }
 }

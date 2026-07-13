@@ -579,6 +579,7 @@ mod tests {
             import_pattern: None,
             author: Some("Mikey".into()),
             license: Some("MIT".into()),
+            ..Default::default()
         }
     }
 
@@ -635,8 +636,8 @@ mod tests {
             when_to_use_phrases: vec!["ingest csv".into()],
             invocation_command: None,
             import_pattern: Some("import { parse } from 'fastcsv'".into()),
-            author: None,
             license: Some("MIT".into()),
+            ..Default::default()
         };
         let files = render(&p, &i, None).unwrap();
         let skill = &files[2].contents;
@@ -685,8 +686,8 @@ mod tests {
             when_to_use_phrases: vec![],
             invocation_command: None,
             import_pattern: Some("import { x } from 'y'".into()),
-            author: None,
             license: Some("MIT".into()),
+            ..Default::default()
         };
         let skill = render(&p, &i, None).unwrap()[2].contents.clone();
         assert!(

@@ -127,7 +127,7 @@ impl Language {
 /// What `skillpack` learned from the interactive interview (or from
 /// `skillpack.toml` when re-running non-interactively). The `generate` and
 /// `verify` stages depend on these answers.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Intent {
     /// One sentence describing the *task* the tool accomplishes, not the tool
     /// itself (design §5.1 Q1). Leads the `SKILL.md` description.
@@ -145,6 +145,11 @@ pub struct Intent {
     pub author: Option<String>,
     /// SPDX license id, written to `plugin.json` and `skillpack.toml`.
     pub license: Option<String>,
+    /// Stdin bytes to feed the CLI during `verify` spawns. For interactive
+    /// CLIs that block on stdin. `None` uses `/dev/null` (default, preserves
+    /// all existing behavior).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_stdin: Option<String>,
 }
 
 impl Intent {

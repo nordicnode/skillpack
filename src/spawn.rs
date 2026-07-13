@@ -10,7 +10,7 @@
 //! `kill()` and `wait()` (reap) so the drain threads complete promptly; the
 //! outcome still maps to `TimedOut` upstream, just for real now.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -56,21 +56,43 @@ fn pipe_drain(r: impl Read + Send + 'static) -> mpsc::Receiver<Vec<u8>> {
     rx
 }
 
-/// Spawn `cmd` (already configured by the caller) under a hard `timeout`.
-///
-/// The caller sets `current_dir`, args, and stdin via `Command`. This function
-/// forces piped stdout/stderr (it needs the handles to drain them), polls the
-/// child until it exits or the deadline fires, and kills on timeout.
-pub fn run(cmd: &mut Command, timeout: Duration) -> SpawnOutcome {
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+/// How stdin should be configured for a spawn.
+enum StdinMode {
+    /// `/dev/null` — the default for all non-interactive spawns.
+    Null,
+    /// Piped, written then closed before polling so the child sees EOF.
+    /// For interactive CLIs that block on stdin (otherwise they hang until
+    /// timeout and false-flag drift).
+    Piped(Vec<u8>),
+}
+
+/// Shared spawn-and-poll core used by both [`run`] and [`run_with_stdin`].
+fn run_inner(cmd: &mut Command, timeout: Duration, stdin_mode: StdinMode) -> SpawnOutcome {
+    let maybe_data: Option<Vec<u8>> = match stdin_mode {
+        StdinMode::Null => {
+            cmd.stdin(Stdio::null());
+            None
+        }
+        StdinMode::Piped(d) => {
+            cmd.stdin(Stdio::piped());
+            Some(d)
+        }
+    };
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return SpawnOutcome::NotFound,
         Err(e) => return SpawnOutcome::SpawnFailed(e.to_string()),
     };
+
+    // Write stdin payload then drop the handle so the child sees EOF.
+    if let Some(data) = &maybe_data {
+        if let Some(mut child_stdin) = child.stdin.take() {
+            let _ = child_stdin.write_all(data);
+            drop(child_stdin);
+        }
+    }
 
     // Move the piped handles to reader threads so they drain continuously
     // while we poll. Without this the child blocks on a >64KB write.
@@ -122,6 +144,31 @@ pub fn run(cmd: &mut Command, timeout: Duration) -> SpawnOutcome {
         String::from_utf8_lossy(&stderr_buf)
     );
     SpawnOutcome::RanClean(combined)
+}
+
+/// Spawn `cmd` (already configured by the caller) under a hard `timeout`.
+///
+/// The caller sets `current_dir`, args, and stdin via `Command`. This function
+/// forces piped stdout/stderr (it needs the handles to drain them), polls the
+/// child until it exits or the deadline fires, and kills on timeout.
+/// stdin is `/dev/null` — use [`run_with_stdin`] for interactive CLIs.
+pub fn run(cmd: &mut Command, timeout: Duration) -> SpawnOutcome {
+    run_inner(cmd, timeout, StdinMode::Null)
+}
+
+/// Spawn `cmd` with an optional stdin payload — for interactive CLIs that
+/// block on stdin (otherwise they hang until timeout and false-flag drift).
+///
+/// `None` → `Stdio::null()` (identical to [`run`]). `Some(bytes)` → piped,
+/// written then closed before polling so the child sees EOF.
+///
+/// Only the `verify` path should use this; `introspect` and `git` spawns stay
+/// on [`run`] (feeding stdin during flag extraction would corrupt the parse).
+pub fn run_with_stdin(cmd: &mut Command, timeout: Duration, stdin: Option<&[u8]>) -> SpawnOutcome {
+    match stdin {
+        Some(data) => run_inner(cmd, timeout, StdinMode::Piped(data.to_vec())),
+        None => run_inner(cmd, timeout, StdinMode::Null),
+    }
 }
 
 #[cfg(test)]
@@ -179,5 +226,34 @@ mod tests {
             s.contains("hello"),
             "expected capture beyond 64KB pipe buffer"
         );
+    }
+
+    /// `run_with_stdin` feeds bytes then closes stdin so the child sees EOF.
+    /// `cat` echoes stdin to stdout — proves the write+close path works.
+    #[cfg(unix)]
+    #[test]
+    fn run_with_stdin_feeds_bytes_and_closes() {
+        let mut cmd = Command::new("cat");
+        let out = run_with_stdin(&mut cmd, Duration::from_secs(5), Some(b"hello stdin"));
+        let SpawnOutcome::RanClean(s) = out else {
+            panic!("expected RanClean, got {out:?}");
+        };
+        assert!(
+            s.contains("hello stdin"),
+            "expected cat to echo fed stdin, got: {s}"
+        );
+    }
+
+    /// `run_with_stdin(None)` must behave identically to `run` — null stdin.
+    #[cfg(unix)]
+    #[test]
+    fn run_with_stdin_none_is_null_stdin() {
+        let mut cmd = Command::new("echo");
+        cmd.arg("no stdin needed");
+        let out = run_with_stdin(&mut cmd, Duration::from_secs(5), None);
+        let SpawnOutcome::RanClean(s) = out else {
+            panic!("expected RanClean, got {out:?}");
+        };
+        assert!(s.contains("no stdin needed"));
     }
 }

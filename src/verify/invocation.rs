@@ -44,6 +44,9 @@ pub struct InvocationInput {
     pub spawn_cwd: std::path::PathBuf,
     /// When true, print every subprocess spawn to stderr (design §8.2 --debug).
     pub debug: bool,
+    /// Stdin bytes to feed the CLI during verify spawns. For interactive
+    /// CLIs that block on stdin. `None` uses `/dev/null` (default).
+    pub verify_stdin: Option<String>,
 }
 
 impl InvocationInput {
@@ -55,6 +58,7 @@ impl InvocationInput {
         skill_md: &str,
         cli_command: Option<&[String]>,
         debug: bool,
+        verify_stdin: Option<&str>,
     ) -> Self {
         Self {
             skill_md: skill_md.to_string(),
@@ -62,6 +66,7 @@ impl InvocationInput {
             skill_root: skill_root.to_path_buf(),
             spawn_cwd: spawn_cwd.to_path_buf(),
             debug,
+            verify_stdin: verify_stdin.map(|s| s.to_string()),
         }
     }
 }
@@ -112,7 +117,13 @@ pub fn run(input: &InvocationInput, report: &mut VerifyReport) -> Result<()> {
         return Ok(());
     }
 
-    let help = run_help(cmd, &input.spawn_cwd, input.debug, report)?;
+    let help = run_help(
+        cmd,
+        &input.spawn_cwd,
+        input.debug,
+        input.verify_stdin.as_deref(),
+        report,
+    )?;
     if report.has_critical_failure() {
         return Ok(());
     }
@@ -125,7 +136,14 @@ pub fn run(input: &InvocationInput, report: &mut VerifyReport) -> Result<()> {
     // one's `--help` and set-diff its flags against what the SKILL.md advertises
     // for that subcommand. Skipped (no check pushed) when the skill documents
     // no subcommands — non-subcommand CLIs behave exactly as before.
-    check_subcommand_drift(cmd, &input.spawn_cwd, &input.skill_md, input.debug, report)?;
+    check_subcommand_drift(
+        cmd,
+        &input.spawn_cwd,
+        &input.skill_md,
+        input.debug,
+        input.verify_stdin.as_deref(),
+        report,
+    )?;
 
     // Version drift: spawn `<cli> --version`, compare against plugin.json version.
     // Tolerates non-zero exit (some CLIs print version to stdout but exit 1).
@@ -215,7 +233,13 @@ fn heading_block(skill_md: &str, heading: &str) -> Option<String> {
 /// Spawn `<cmd[0]> [cmd[1..]]` (e.g. `chronicle --help`) under a hard timeout,
 /// push the outcome as a check, and return the captured stdout+stderr on
 /// success. When `debug` is set, the spawn argv is printed to stderr (§8.2).
-fn run_help(cmd: &[String], root: &Path, debug: bool, report: &mut VerifyReport) -> Result<String> {
+fn run_help(
+    cmd: &[String],
+    root: &Path,
+    debug: bool,
+    stdin: Option<&str>,
+    report: &mut VerifyReport,
+) -> Result<String> {
     let program = &cmd[0];
     if debug {
         eprintln!(
@@ -234,7 +258,7 @@ fn run_help(cmd: &[String], root: &Path, debug: bool, report: &mut VerifyReport)
     // The shared spawn helper forces piped stdout/stderr and drains them on
     // reader threads while polling, so a >64KB `--help` can't deadlock (the
     // old poll-without-draining loop would false-fail a fat CLI).
-    match crate::spawn::run(&mut c, HELP_TIMEOUT) {
+    match crate::spawn::run_with_stdin(&mut c, HELP_TIMEOUT, stdin.map(|s| s.as_bytes())) {
         crate::spawn::SpawnOutcome::NotFound => {
             report.push(CheckResult::fail(
                 "invocation.help_present",
@@ -500,13 +524,18 @@ pub fn extract_documented_subcommands(skill_md: &str) -> Vec<String> {
 /// couldn't be spawned/reaped. Mirrors `run_help`'s poll loop without pushing
 /// the top-level `help_present` check — per-subcommand drift owns its own
 /// single `subcommand_drift` result.
-fn spawn_capture(cmd: &[String], root: &Path, timeout: Duration) -> Option<String> {
+fn spawn_capture(
+    cmd: &[String],
+    root: &Path,
+    timeout: Duration,
+    stdin: Option<&str>,
+) -> Option<String> {
     let mut c = Command::new(&cmd[0]);
     for arg in &cmd[1..] {
         c.arg(arg);
     }
     c.current_dir(root);
-    match crate::spawn::run(&mut c, timeout) {
+    match crate::spawn::run_with_stdin(&mut c, timeout, stdin.map(|s| s.as_bytes())) {
         crate::spawn::SpawnOutcome::RanClean(out) => Some(out),
         _ => None,
     }
@@ -523,6 +552,7 @@ fn check_subcommand_drift(
     spawn_cwd: &Path,
     skill_md: &str,
     debug: bool,
+    stdin: Option<&str>,
     report: &mut VerifyReport,
 ) -> Result<()> {
     let documented = extract_documented_subcommands(skill_md);
@@ -547,7 +577,7 @@ fn check_subcommand_drift(
                 cmd.join(" ")
             );
         }
-        let captured = spawn_capture(&cmd, spawn_cwd, HELP_TIMEOUT);
+        let captured = spawn_capture(&cmd, spawn_cwd, HELP_TIMEOUT, stdin);
         let Some(help) = captured else {
             report.push(CheckResult::fail(
                 "invocation.subcommand_drift",
@@ -655,8 +685,7 @@ fn check_version_drift(
         version_cmd.pop();
     }
     version_cmd.push("--version".to_string());
-
-    let Some(stdout) = spawn_capture(&version_cmd, spawn_cwd, HELP_TIMEOUT) else {
+    let Some(stdout) = spawn_capture(&version_cmd, spawn_cwd, HELP_TIMEOUT, None) else {
         report.push(CheckResult::skipped(
             "invocation.version_drift",
             "CLI --version matches plugin.json version",
