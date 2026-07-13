@@ -9,6 +9,7 @@
 
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
+use std::path::Path;
 use tera::{Context as TeraContext, Tera};
 
 use crate::cli::Target;
@@ -164,18 +165,23 @@ fn one_line_description_yaml(s: &str) -> String {
 
 /// Renders all three files and returns them with their root-relative paths.
 /// The skill path uses the kebab name.
-pub fn render(profile: &ProjectProfile, intent: &Intent) -> Result<Vec<GeneratedFileOutput>> {
+pub fn render(
+    profile: &ProjectProfile,
+    intent: &Intent,
+    template_dir: Option<&Path>,
+) -> Result<Vec<GeneratedFileOutput>> {
+    let tera = build_tera(template_dir)?;
     let mut ctx = build_context(profile, intent);
     ctx.insert("noun", "skill");
     let name = coerce_kebab(&profile.name);
 
-    let marketplace = TERA
+    let marketplace = tera
         .render("marketplace.json", &ctx)
         .context("rendering marketplace.json")?;
-    let plugin = TERA
+    let plugin = tera
         .render("plugin.json", &ctx)
         .context("rendering plugin.json")?;
-    let skill = TERA
+    let skill = tera
         .render("SKILL.md", &ctx)
         .context("rendering SKILL.md")?;
 
@@ -194,16 +200,13 @@ pub fn render(profile: &ProjectProfile, intent: &Intent) -> Result<Vec<Generated
         },
     ])
 }
-
-/// Render distribution files for one or more agent ecosystems. Calls
-/// [`render`] for Claude (the three-file set) and emits additional files
-/// for each extra target in `targets`. Dedupes: if `targets` contains
-/// `Claude` plus others, Claude files are emitted once.
 pub fn render_targets(
     profile: &ProjectProfile,
     intent: &Intent,
     targets: &[Target],
+    template_dir: Option<&Path>,
 ) -> Result<Vec<GeneratedFileOutput>> {
+    let tera = build_tera(template_dir)?;
     let ctx = build_context(profile, intent);
     let name = coerce_kebab(&profile.name);
     let mut out = Vec::new();
@@ -215,11 +218,11 @@ pub fn render_targets(
             continue;
         }
         match target {
-            Target::Claude => out.extend(render(profile, intent)?),
+            Target::Claude => out.extend(render(profile, intent, template_dir)?),
             Target::Cursor => {
                 let mut c = ctx.clone();
                 c.insert("noun", "rule");
-                let mdc = TERA
+                let mdc = tera
                     .render("cursor-rule.mdc", &c)
                     .context("rendering cursor-rule.mdc")?;
                 out.push(GeneratedFileOutput {
@@ -232,7 +235,7 @@ pub fn render_targets(
                 // reuse the same template, different output path.
                 let mut c = ctx.clone();
                 c.insert("noun", "skill");
-                let skill = TERA
+                let skill = tera
                     .render("SKILL.md", &c)
                     .context("rendering codex SKILL.md")?;
                 out.push(GeneratedFileOutput {
@@ -245,7 +248,7 @@ pub fn render_targets(
                 // (required) + `mode` frontmatter. Per opencode.ai/docs/agents.
                 let mut c = ctx.clone();
                 c.insert("noun", "agent");
-                let agent = TERA
+                let agent = tera
                     .render("opencode-agent.md", &c)
                     .context("rendering opencode-agent.md")?;
                 out.push(GeneratedFileOutput {
@@ -258,7 +261,7 @@ pub fn render_targets(
                 // markdown, no frontmatter. Per docs.github.com/copilot.
                 let mut c = ctx.clone();
                 c.insert("noun", "tool");
-                let instr = TERA
+                let instr = tera
                     .render("copilot-instructions.md", &c)
                     .context("rendering copilot-instructions.md")?;
                 out.push(GeneratedFileOutput {
@@ -272,7 +275,7 @@ pub fn render_targets(
                 // read natively by 20+ coding agents.
                 let mut c = ctx.clone();
                 c.insert("noun", "tool");
-                let agents = TERA
+                let agents = tera
                     .render("AGENTS.md", &c)
                     .context("rendering AGENTS.md")?;
                 out.push(GeneratedFileOutput {
@@ -286,6 +289,41 @@ pub fn render_targets(
     Ok(out)
 }
 
+/// Map `.tera` filenames → embedded Tera template names.
+/// Most are identity after stripping `.tera`; the two exceptions are
+/// `skill_body.md.tera` → `skill_body_partial` (a shared partial)
+/// and the `.mdc` file → `cursor-rule.mdc`.
+const TEMPLATE_MAP: &[(&str, &str)] = &[
+    ("marketplace.json.tera", "marketplace.json"),
+    ("plugin.json.tera", "plugin.json"),
+    ("SKILL.md.tera", "SKILL.md"),
+    ("cursor-rule.mdc.tera", "cursor-rule.mdc"),
+    ("opencode-agent.md.tera", "opencode-agent.md"),
+    ("copilot-instructions.md.tera", "copilot-instructions.md"),
+    ("AGENTS.md.tera", "AGENTS.md"),
+    ("skill_body.md.tera", "skill_body_partial"),
+];
+
+/// Build a `Tera` instance, optionally overriding embedded templates from
+/// a directory of `.tera` files. Missing templates fall back to the embedded
+/// defaults — a user can override just one or two templates without
+/// re-declaring the others. Template names must match the `.tera` filenames
+/// in `templates/` (see `TEMPLATE_MAP`).
+fn build_tera(template_dir: Option<&Path>) -> Result<Tera> {
+    let Some(dir) = template_dir else {
+        return Ok(TERA.clone());
+    };
+    let mut tera = Tera::clone(&*TERA);
+    for (filename, internal_name) in TEMPLATE_MAP {
+        let path = dir.join(filename);
+        if let Ok(src) = std::fs::read_to_string(&path) {
+            tera.add_raw_template(internal_name, &src)
+                .map_err(|e| anyhow::anyhow!("failed to load template {filename}: {e}"))?;
+        }
+    }
+    Ok(tera)
+}
+
 // ----- helpers --------------------------------------------------------------
 
 /// A transparent newtype wrapper so the JSON / Tera context exposes the inner
@@ -297,8 +335,13 @@ pub struct Keywords {
     pub inner: Vec<String>,
 }
 
-/// Derive a small, stable keyword list from language + intent so the generated
-/// marketplace entry is discoverable without the maintainer hand-curating it.
+/// Derive a small, stable keyword list from language + intent + CLI surface
+/// so the generated marketplace entry is discoverable without the maintainer
+/// hand-curating it. Always seeded with language + cli/library, then enriched:
+///   - all trigger-phrase first-words (deduped)
+///   - CLI subcommand NAMES (from `cli_subcommand_help`) — high-signal verbs
+///     like `init`, `verify`, `doctor` that a marketplace searcher would type
+///   - one content word from the README `description_hint` (longest non-stopword)
 fn derive_keywords(profile: &ProjectProfile, intent: &Intent) -> Vec<String> {
     let mut kws = vec![profile.language.as_str().to_string()];
     if profile.has_cli {
@@ -306,19 +349,87 @@ fn derive_keywords(profile: &ProjectProfile, intent: &Intent) -> Vec<String> {
     } else {
         kws.push("library".to_string());
     }
-    // First trigger phrase, lowercased + first-word, as a cheap extra keyword.
-    if let Some(first) = intent.when_to_use_phrases.first() {
-        let kw = first
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .trim_matches(|c: char| !c.is_alphanumeric())
-            .to_lowercase();
-        if !kw.is_empty() && !kws.contains(&kw) {
-            kws.push(kw);
+
+    // All trigger-phrase first-words (deduped, lowercased, alphanumeric only).
+    for phrase in &intent.when_to_use_phrases {
+        if let Some(word) = phrase.split_whitespace().next().map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        }) {
+            if !word.is_empty() && !kws.contains(&word) {
+                kws.push(word);
+            }
         }
     }
+
+    // CLI subcommand NAMES — high-signal marketplace keywords.
+    for (sub, _help) in &profile.cli_subcommand_help {
+        let sub = sub.to_lowercase();
+        if !sub.is_empty() && !kws.contains(&sub) {
+            kws.push(sub);
+        }
+    }
+
+    // One content word from the README description_hint — the longest non-stopword.
+    if let Some(hint) = &profile.description_hint {
+        let best = hint
+            .split_whitespace()
+            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+            .filter(|w| w.len() > 4 && w.chars().all(|c| c.is_alphanumeric()) && !is_stopword(w))
+            .max_by_key(|w| w.len());
+        if let Some(w) = best {
+            let w = w.to_lowercase();
+            if !w.is_empty() && !kws.contains(&w) {
+                kws.push(w);
+            }
+        }
+    }
+
     kws
+}
+
+/// Tiny stopword set for keyword extraction. Keeps "generate" but drops
+/// "this", "with", "about". Ponytail: inline set beats pulling a crate.
+fn is_stopword(w: &str) -> bool {
+    matches!(
+        w.to_lowercase().as_str(),
+        "the"
+            | "this"
+            | "that"
+            | "with"
+            | "from"
+            | "about"
+            | "your"
+            | "have"
+            | "will"
+            | "they"
+            | "them"
+            | "their"
+            | "what"
+            | "when"
+            | "which"
+            | "would"
+            | "could"
+            | "should"
+            | "into"
+            | "onto"
+            | "over"
+            | "under"
+            | "also"
+            | "just"
+            | "only"
+            | "than"
+            | "then"
+            | "these"
+            | "those"
+            | "using"
+            | "being"
+            | "been"
+            | "more"
+            | "most"
+            | "such"
+            | "some"
+    )
 }
 
 fn category_hint(lang: Language) -> &'static str {
@@ -475,7 +586,7 @@ mod tests {
     fn renders_three_files_with_valid_paths() {
         let p = cli_profile();
         let i = cli_intent();
-        let files = render(&p, &i).unwrap();
+        let files = render(&p, &i, None).unwrap();
         assert_eq!(files.len(), 3);
         assert_eq!(files[0].rel_path, ".claude-plugin/marketplace.json");
         assert_eq!(files[1].rel_path, ".claude-plugin/plugin.json");
@@ -486,7 +597,7 @@ mod tests {
     fn rendered_marketplace_is_valid_json_and_points_at_dot_slash() {
         let p = cli_profile();
         let i = cli_intent();
-        let mp = render(&p, &i).unwrap()[0].contents.clone();
+        let mp = render(&p, &i, None).unwrap()[0].contents.clone();
         let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
         assert_eq!(v["plugins"][0]["source"], "./");
         assert_eq!(v["plugins"][0]["name"], "chronicle");
@@ -496,7 +607,7 @@ mod tests {
     fn rendered_plugin_json_has_kebab_name_and_license() {
         let p = cli_profile();
         let i = cli_intent();
-        let pj = render(&p, &i).unwrap()[1].contents.clone();
+        let pj = render(&p, &i, None).unwrap()[1].contents.clone();
         let v: serde_json::Value = serde_json::from_str(&pj).unwrap();
         assert_eq!(v["name"], "chronicle");
         assert_eq!(v["license"], "MIT");
@@ -506,7 +617,7 @@ mod tests {
     fn skill_md_has_description_and_when_to_use_in_frontmatter() {
         let p = cli_profile();
         let i = cli_intent();
-        let skill = render(&p, &i).unwrap()[2].contents.clone();
+        let skill = render(&p, &i, None).unwrap()[2].contents.clone();
         assert!(skill.starts_with("---\n"));
         // description holds the one-liner only; when_to_use carries the triggers.
         assert!(skill.contains("description: \"Journal events to a chronological log\""));
@@ -527,7 +638,7 @@ mod tests {
             author: None,
             license: Some("MIT".into()),
         };
-        let files = render(&p, &i).unwrap();
+        let files = render(&p, &i, None).unwrap();
         let skill = &files[2].contents;
         assert!(skill.contains("import { parse } from 'fastcsv'"));
         assert!(!skill.contains("Invocation"));
@@ -553,8 +664,8 @@ mod tests {
     fn idempotent_byte_identical_renders() {
         let p = cli_profile();
         let i = cli_intent();
-        let a = render(&p, &i).unwrap();
-        let b = render(&p, &i).unwrap();
+        let a = render(&p, &i, None).unwrap();
+        let b = render(&p, &i, None).unwrap();
         for (x, y) in a.iter().zip(b.iter()) {
             assert_eq!(x.contents, y.contents);
         }
@@ -577,7 +688,7 @@ mod tests {
             author: None,
             license: Some("MIT".into()),
         };
-        let skill = render(&p, &i).unwrap()[2].contents.clone();
+        let skill = render(&p, &i, None).unwrap()[2].contents.clone();
         assert!(
             skill.contains("when_to_use: \"\""),
             "empty phrases must yield when_to_use: \"\", got:\n{skill}"
@@ -599,7 +710,7 @@ mod tests {
         let p = cli_profile(); // has_cli=true, cli_command=["chronicle","--help"]
         let mut i = cli_intent();
         i.invocation_command = None; // simulates config replay without the field
-        let skill = render(&p, &i).unwrap()[2].contents.clone();
+        let skill = render(&p, &i, None).unwrap()[2].contents.clone();
         assert!(
             skill.contains("## Invocation"),
             "CLI project must still emit an Invocation section, got:\n{skill}"

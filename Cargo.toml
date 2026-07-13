@@ -1,6 +1,6 @@
 [package]
 name = "skillpack"
-version = "0.10.1"
+version = "0.11.1"
 edition = "2021"
 rust-version = "1.74"
 authors = ["nordicnode <128633122+nordicnode@users.noreply.github.com>"]
@@ -38,6 +38,7 @@ regex = "1"
 once_cell = "1"
 indexmap = "2"
 tempfile = "3"
+notify = "8"
 
 [dev-dependencies]
 proptest = "1"

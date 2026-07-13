@@ -5,6 +5,101 @@ All notable changes to this project are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+
+## [Unreleased]
+
+## [0.11.1] - 2026-07-13
+
+### Added
+
+- `--template-dir <DIR>` flag on `init`, `update`, `diff`, and `verify` —
+  overlay custom `.tera` templates from a directory. Missing templates fall
+  back to embedded defaults, so you override only the files you need. Template
+  filenames must match the `templates/` directory (e.g. `SKILL.md.tera`,
+  `plugin.json.tera`). `verify --template-dir` threads the override into
+  `--fix` replays so a custom-template-init followed by `--fix` doesn't
+  produce a drift loop from embedded-template output.
+
+### Future direction (not shipped)
+
+- Multi-skill pack support (`[[skill]]` array in `skillpack.toml` with multiple
+  `skills/<name>/SKILL.md` entries per ecosystem and looping in `generate`).
+  The verify side already handles multiple skill files (`find_skill_files`
+  loops `skills/*/SKILL.md`); the gap is in the emit side (one-skill
+  hardcoded paths in `generate.rs`). Deferred as YAGNI — no user demand, and
+  the config schema change (`[skill]` → `[[skill]]`) is a silent breaking
+  change to every shipped `skillpack.toml` that needs a migration guard and
+  upgrade tooling before it's safe to ship.
+
+## [0.11.0] - 2026-07-13
+
+### Added
+
+- `update` subcommand — incrementally refresh distribution files from a
+  committed `skillpack.toml` without re-running the interview or the
+  pre-commit verify gate. Re-introspects, re-renders every target, and
+  writes only files whose content changed. For frontmatter-bearing files
+  (`SKILL.md`, cursor `.mdc`, opencode `.md`) the body prose is preserved
+  by splicing the fresh frontmatter onto the committed body; the
+  frontmatter block is regenerated wholesale. For other files
+  (`plugin.json`, `marketplace.json`, `AGENTS.md`, Copilot instructions)
+  the content is overwritten wholesale. Common workflow: bump version →
+  `skillpack update` → commit. Note: `update` preserves the body, so it
+  can't add new subcommand bullets or refresh CLI-surface flags — use
+  `init --target all` when the CLI surface changed.
+
+- `diff` subcommand — CI gate for stale distribution files. Re-renders
+  every target in memory, compares against on-disk content, reports
+  drifted/missing files, and exits 1 if any differ (0 if all clean, 3
+  on fatal error). Uses the same candidate computation as `update`
+  (frontmatter splice for body files, wholesale for fully-generated
+  files), so `diff` and `update` agree on what counts as drift. The
+  AGENTS.md collision guard mirrors `update`/`init` — skipped without
+  `--force`.
+
+- `verify --format sarif` — SARIF 2.1.0 output for GitHub Code Scanning.
+  Each `Warn`/`Error` CheckResult maps to a SARIF result (`ruleId` =
+  check_id, `level` = `"warning"` or `"error"`, `message.text` = message +
+  suggestion). Pass/Skipped results are omitted (SARIF reports failures
+  only). Wires into the `github/codeql-action/upload-sarif` action for
+  PR-level discoverability gating. `doctor --format sarif` is rejected
+  with a clear error (doctor has no CheckResults).
+
+- `invocation.version_drift` advisory check — `verify` now spawns
+  `<cli> --version` and warns when the stdout output does not contain the
+  `plugin.json` version string. Skips silently when `--version` exits
+  non-zero or prints nothing (older or non-conforming CLIs). Distinct
+  from `discovery.plugin.version_drift` which compares plugin.json
+  against the project manifest. Surfaces stale CLI↔plugin.json version
+  drift that was previously invisible until a user reported a mismatch.
+
+- `init` pre-commit preview — before writing, `init` now prints a
+  `+ new` / `~ changed` / `= N unchanged` summary on stderr so you can
+  see exactly which distribution files will change before they are
+  overwritten. Silent when nothing differs (no noise on idempotent
+  re-runs).
+
+- `doctor` category preview — `doctor` now prints a verify-namespace
+  preview (`discovery.*` + `invocation.*`) at the end of its human
+  output, showing what `verify` would check per category. Honest about
+  the gap: when no CLI is detected, `invocation.*` is marked N/A. No
+  fabricated score — tells users to run `verify` after `init`.
+
+- `verify --watch` — debounced file watcher that re-runs `verify` on
+  every change to the project root. Prints the initial report immediately,
+  then clears + re-renders on each debounced event. Filters common noise
+  dirs (`target/`, `.git/`, `node_modules/`). Only valid with
+  `--format human`; `--watch --format json` exits with `VERIFY_USAGE` (4).
+  Ctrl-C terminates the process directly (standard SIGINT behavior).
+
+### Fixed
+
+- `Config::load` now validates `skill.name` at the trust boundary: a
+  non-kebab name in `skillpack.toml` is rejected with an actionable error
+  instead of silently corrupting every generated artifact. Description
+  and trigger phrases remain soft checks left to `verify` (load stays
+  lossless).
+
 ## [0.10.1] - 2026-07-13
 
 ### Fixed

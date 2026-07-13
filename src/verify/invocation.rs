@@ -127,6 +127,11 @@ pub fn run(input: &InvocationInput, report: &mut VerifyReport) -> Result<()> {
     // no subcommands — non-subcommand CLIs behave exactly as before.
     check_subcommand_drift(cmd, &input.spawn_cwd, &input.skill_md, input.debug, report)?;
 
+    // Version drift: spawn `<cli> --version`, compare against plugin.json version.
+    // Tolerates non-zero exit (some CLIs print version to stdout but exit 1).
+    // Skips silently when `--version` produces no output or the CLI lacks the flag.
+    check_version_drift(cmd, &input.spawn_cwd, &input.skill_root, report);
+
     Ok(())
 }
 
@@ -612,6 +617,76 @@ fn diff_one_subcommand(skill_md: &str, sub: &str, help: &str, report: &mut Verif
                 undocumented.join(", ")
             ),
             format!("To fix: document these flags in SKILL.md's `{sub}` bullet."),
+        ));
+    }
+}
+
+/// Spawn `<cli> --version`, read the output as a version string, and compare
+/// against the `.version` in `plugin.json` (under `skill_root`). Skips
+/// silently when `--version` won't spawn (non-zero / timeout / not found)
+/// or when plugin.json is missing — this is advisory, not a gate. Warns on
+/// mismatch. The compare is substring-based: `stdout.contains(plugin_version)`
+/// so `chronicle 0.1.0\n` matches `0.1.0`.
+fn check_version_drift(
+    base_cmd: &[String],
+    spawn_cwd: &Path,
+    skill_root: &Path,
+    report: &mut VerifyReport,
+) {
+    // Read plugin.json version (advisory — skip if missing/unparseable).
+    let plugin_path = skill_root.join(".claude-plugin").join("plugin.json");
+    let plugin_version = std::fs::read_to_string(&plugin_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.get("version").and_then(|v| v.as_str()).map(String::from));
+
+    let Some(plugin_version) = plugin_version else {
+        report.push(CheckResult::skipped(
+            "invocation.version_drift",
+            "CLI --version matches plugin.json version",
+            "Skipped: no plugin.json found or no version field",
+        ));
+        return;
+    };
+
+    // Build `<cli> --version` from base_cmd (drop trailing --help if present).
+    let mut version_cmd = base_cmd.to_vec();
+    if version_cmd.last().is_some_and(|t| t == "--help") {
+        version_cmd.pop();
+    }
+    version_cmd.push("--version".to_string());
+
+    let Some(stdout) = spawn_capture(&version_cmd, spawn_cwd, HELP_TIMEOUT) else {
+        report.push(CheckResult::skipped(
+            "invocation.version_drift",
+            "CLI --version matches plugin.json version",
+            "Skipped: `--version` did not exit 0 or produced no output (some CLIs lack --version)",
+        ));
+        return;
+    };
+
+    let stdout = stdout.trim();
+    if stdout.is_empty() {
+        report.push(CheckResult::skipped(
+            "invocation.version_drift",
+            "CLI --version matches plugin.json version",
+            "Skipped: `--version` produced empty output",
+        ));
+        return;
+    }
+
+    if !stdout.contains(&plugin_version) {
+        report.push(CheckResult::warn(
+            "invocation.version_drift",
+            "CLI --version matches plugin.json version",
+            format!("`--version` output `{stdout}` does not contain plugin.json version `{plugin_version}`"),
+            "To fix: re-run `skillpack update` to sync plugin.json with the CLI's version, or pin the version intentionally.",
+        ));
+    } else {
+        report.push(CheckResult::pass(
+            "invocation.version_drift",
+            "CLI --version matches plugin.json version",
+            format!("`{stdout}` contains plugin.json version `{plugin_version}`"),
         ));
     }
 }

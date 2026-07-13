@@ -92,7 +92,7 @@ fn lib_intent() -> Intent {
 
 #[test]
 fn snapshot_cli_marketplace_json() {
-    let files = render(&cli_profile(), &cli_intent()).unwrap();
+    let files = render(&cli_profile(), &cli_intent(), None).unwrap();
     let mp = files
         .iter()
         .find(|f| f.rel_path.ends_with("marketplace.json"))
@@ -102,7 +102,7 @@ fn snapshot_cli_marketplace_json() {
 
 #[test]
 fn snapshot_cli_plugin_json() {
-    let files = render(&cli_profile(), &cli_intent()).unwrap();
+    let files = render(&cli_profile(), &cli_intent(), None).unwrap();
     let pj = files
         .iter()
         .find(|f| f.rel_path.ends_with("plugin.json"))
@@ -112,7 +112,7 @@ fn snapshot_cli_plugin_json() {
 
 #[test]
 fn snapshot_cli_skill_md() {
-    let files = render(&cli_profile(), &cli_intent()).unwrap();
+    let files = render(&cli_profile(), &cli_intent(), None).unwrap();
     let skill = files
         .iter()
         .find(|f| f.rel_path.ends_with("SKILL.md"))
@@ -122,7 +122,7 @@ fn snapshot_cli_skill_md() {
 
 #[test]
 fn snapshot_lib_marketplace_json() {
-    let files = render(&lib_profile(), &lib_intent()).unwrap();
+    let files = render(&lib_profile(), &lib_intent(), None).unwrap();
     let mp = files
         .iter()
         .find(|f| f.rel_path.ends_with("marketplace.json"))
@@ -132,7 +132,7 @@ fn snapshot_lib_marketplace_json() {
 
 #[test]
 fn snapshot_lib_plugin_json() {
-    let files = render(&lib_profile(), &lib_intent()).unwrap();
+    let files = render(&lib_profile(), &lib_intent(), None).unwrap();
     let pj = files
         .iter()
         .find(|f| f.rel_path.ends_with("plugin.json"))
@@ -142,7 +142,7 @@ fn snapshot_lib_plugin_json() {
 
 #[test]
 fn snapshot_lib_skill_md() {
-    let files = render(&lib_profile(), &lib_intent()).unwrap();
+    let files = render(&lib_profile(), &lib_intent(), None).unwrap();
     let skill = files
         .iter()
         .find(|f| f.rel_path.ends_with("SKILL.md"))
@@ -155,8 +155,8 @@ fn snapshot_render_is_idempotent_byte_identical() {
     // Two independent renders of the same inputs must be byte-identical — the
     // property that lets snapshots be meaningful. Guards against any hidden
     // nondeterminism (e.g. a template filter that inserts iteration order).
-    let a = render(&cli_profile(), &cli_intent()).unwrap();
-    let b = render(&cli_profile(), &cli_intent()).unwrap();
+    let a = render(&cli_profile(), &cli_intent(), None).unwrap();
+    let b = render(&cli_profile(), &cli_intent(), None).unwrap();
     for (x, y) in a.iter().zip(b.iter()) {
         assert_eq!(x.contents, y.contents, "{} not idempotent", x.rel_path);
     }
@@ -169,21 +169,21 @@ fn snapshot_render_is_idempotent_byte_identical() {
 
 #[test]
 fn snapshot_cli_cursor_mdc() {
-    let files = render_targets(&cli_profile(), &cli_intent(), &[Target::Cursor]).unwrap();
+    let files = render_targets(&cli_profile(), &cli_intent(), &[Target::Cursor], None).unwrap();
     let mdc = files.iter().find(|f| f.rel_path.ends_with(".mdc")).unwrap();
     insta::assert_snapshot!("cursor_cli", mdc.contents);
 }
 
 #[test]
 fn snapshot_cli_opencode_agent() {
-    let files = render_targets(&cli_profile(), &cli_intent(), &[Target::OpenCode]).unwrap();
+    let files = render_targets(&cli_profile(), &cli_intent(), &[Target::OpenCode], None).unwrap();
     let agent = files.iter().find(|f| f.rel_path.ends_with(".md")).unwrap();
     insta::assert_snapshot!("opencode_cli", agent.contents);
 }
 
 #[test]
 fn snapshot_cli_copilot_instructions() {
-    let files = render_targets(&cli_profile(), &cli_intent(), &[Target::Copilot]).unwrap();
+    let files = render_targets(&cli_profile(), &cli_intent(), &[Target::Copilot], None).unwrap();
     let instr = files
         .iter()
         .find(|f| f.rel_path.ends_with("copilot-instructions.md"))
@@ -196,7 +196,7 @@ fn snapshot_cli_copilot_instructions() {
 fn snapshot_php_cursor_globs() {
     let mut p = cli_profile();
     p.language = Language::Php;
-    let files = render_targets(&p, &cli_intent(), &[Target::Cursor]).unwrap();
+    let files = render_targets(&p, &cli_intent(), &[Target::Cursor], None).unwrap();
     let mdc = files.iter().find(|f| f.rel_path.ends_with(".mdc")).unwrap();
     insta::assert_snapshot!("cursor_php", mdc.contents);
 }
@@ -207,7 +207,7 @@ fn snapshot_php_cursor_globs() {
 fn snapshot_jvm_cursor_globs() {
     let mut p = cli_profile();
     p.language = Language::Jvm;
-    let files = render_targets(&p, &cli_intent(), &[Target::Cursor]).unwrap();
+    let files = render_targets(&p, &cli_intent(), &[Target::Cursor], None).unwrap();
     let mdc = files.iter().find(|f| f.rel_path.ends_with(".mdc")).unwrap();
     insta::assert_snapshot!("cursor_jvm", mdc.contents);
 }
@@ -217,7 +217,30 @@ fn snapshot_jvm_cursor_globs() {
 fn snapshot_csharp_cursor_globs() {
     let mut p = cli_profile();
     p.language = Language::CSharp;
-    let files = render_targets(&p, &cli_intent(), &[Target::Cursor]).unwrap();
+    let files = render_targets(&p, &cli_intent(), &[Target::Cursor], None).unwrap();
     let mdc = files.iter().find(|f| f.rel_path.ends_with(".mdc")).unwrap();
     insta::assert_snapshot!("cursor_csharp", mdc.contents);
+}
+
+/// `--target all` must produce exactly these six distribution-file paths
+/// in canonical order. Catches a new target being added without wiring
+/// into the `all` expansion, or a target being silently dropped.
+#[test]
+fn snapshot_target_all_produces_all_six_ecosystems() {
+    let files = render_targets(
+        &cli_profile(),
+        &cli_intent(),
+        &[
+            Target::Claude,
+            Target::Cursor,
+            Target::Codex,
+            Target::OpenCode,
+            Target::Copilot,
+            Target::AgentsMd,
+        ],
+        None,
+    )
+    .unwrap();
+    let rel_paths: Vec<&str> = files.iter().map(|f| f.rel_path.as_str()).collect();
+    insta::assert_snapshot!("target_all_rel_paths", rel_paths.join("\n"));
 }

@@ -200,6 +200,8 @@ failures from the other ecosystems.
 - for CLIs with subcommands (clap-style `Commands:` sections), `init` captures each
   subcommand's `--help` and documents them in a `### Subcommands` block; `verify`
   spawns `<cli> <sub> --help` per documented subcommand and drift-checks its flags
+- `<cli> --version` output contains the `plugin.json` version (advisory — warns on
+  mismatch, skips silently if `--version` exits non-zero or prints nothing)
 
 `verify` works on hand-written skill packs too, not just `init` output: it derives whether a
 CLI is documented from the `SKILL.md` itself (a `## Invocation` section, or a fenced block
@@ -221,25 +223,38 @@ counts, `ok` flag, `discoverability_score`) for scripting.
 
 ## Flags
 
-| Flag                    | Purpose                                                          |
-|-------------------------|------------------------------------------------------------------|
-| `init --non-interactive` | skip prompts; requires a `skillpack.toml` (for CI)             |
+| Flag                    | Purpose                                                                          |
+|-------------------------|----------------------------------------------------------------------------------|
+| `init --non-interactive` | skip prompts; requires a `skillpack.toml` (for CI)                             |
 | `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
 | `init --license <SPDX>` | override the license for this run                              |
 | `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, or `all` (all six). Repeatable. |
 | `init --force` | overwrite an existing `AGENTS.md` at repo root (skip+warn otherwise). Has no effect on other targets, which write to skillpack-owned paths. |
-| `verify --format human\|json` | human report (default) or machine-readable JSON for CI   |
+| `init --template-dir <DIR>` | overlay custom `.tera` templates from a dir; missing files fall back to embedded defaults |
+| `update` | incrementally refresh distribution files from an existing `skillpack.toml` — no interview, no verify gate. Writes only changed files; preserves body prose by splicing fresh frontmatter. |
+| `update --target <ecosystem>` | same target syntax as `init --target` (default: `claude`). Pass `all` to refresh all six. |
+| `update --force` | overwrite an existing `AGENTS.md` (same collision guard as `init --force`). |
+| `update --template-dir <DIR>` | same template override semantics as `init --template-dir` |
+| `diff` | check whether distribution files are stale; exit 1 if any differs, 0 if all clean (CI gate). Same body-preservation semantics as `update`. |
+| `diff --target <ecosystem>` | same target syntax as `update --target` (default: `claude`). Pass `all` to check all six. |
+| `diff --force` | check `AGENTS.md` too (same collision guard as `update --force`). |
+| `diff --template-dir <DIR>` | same override semantics — use when checking a pack generated with custom templates (avoids spurious drift) |
+| `verify --format human\|json\|sarif` | human report (default), machine-readable JSON for CI, or SARIF 2.1.0 for GitHub Code Scanning upload-sarif |
 | `verify --fix` | mechanically repair detected drift (rewrites only the file the drift lives in; surgical). No-op when nothing is fixable. |
 | `verify --min-score <N>` | minimum discoverability score (0–100) the run must reach to exit zero; gate runs against the post-fix report. Omitted by default. Pairs with `--format json` for CI. |
-| `doctor` | read-only diagnosis: print detected language, CLI, and diag trace (exit 0) |
-| `doctor --format human\|json` | read-only diagnosis as serialized `ProjectProfile` for CI (default: human) |
-| `--root <DIR>`           | project root to operate on (default: current dir); available on `init`, `verify`, `doctor`      |
+| `verify --watch` | re-run verify on every file change (debounced); iterative feedback during SKILL.md / skillpack.toml edits. Only valid with `--format human` (Ctrl-C stops). |
+| `verify --template-dir <DIR>` | use custom templates when `--fix` re-renders drifted files; pass the same dir used at `init` to avoid a drift loop |
+| `doctor` | read-only diagnosis: print detected language, CLI, diag trace, and verify-category preview (exit 0) |
+| `doctor --format human\|json` | read-only diagnosis as serialized `ProjectProfile` for CI (default: human) — JSON form does not include category preview |
+| `--root <DIR>`           | project root to operate on (default: current dir); available on `init`, `verify`, `doctor`, `update`, `diff`      |
 | `--verbose`             | print what `skillpack` detected in the repo (introspection)      |
 | `--debug`             | print every subprocess call                                       |
 
+Note: `update` preserves the body prose, so it can't add new `### Subcommands` entries or refresh CLI-surface flags — use `init --target all` when the CLI surface changed.
+
 ## Status
 
-`init` + `verify` + `doctor` across the eight language ecosystems above. Generates and
+`init` + `update` + `diff` + `verify` + `doctor` across the eight language ecosystems above. Generates and
 verifies distribution files for **Claude Code** (default), **Cursor**
 (`.cursor/rules/*.mdc`), **Codex CLI** (`.codex/skills/`), **OpenCode**
 (`.opencode/agents/`), **GitHub Copilot** (`.github/copilot-instructions.md`), and

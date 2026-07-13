@@ -12,7 +12,7 @@
       "description": "Generate and verify the agent-distribution layer for any OSS project",
       "license": "MIT",
       "repository": "https://github.com/nordicnode/skillpack.git",
-      "keywords": ["rust", "cli", "generate"],
+      "keywords": ["rust", "cli", "generate", "verify", "scaffold", "init", "doctor", "update", "diff", "license"],
       "category": "developer-tools"
     }
   ]

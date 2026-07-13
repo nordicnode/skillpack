@@ -16,7 +16,7 @@ expression: mp.contents
       "description": "Journal events to a chronological log",
       "license": "MIT",
       "repository": "https://github.com/example/chronicle",
-      "keywords": ["rust", "cli", "log"],
+      "keywords": ["rust", "cli", "log", "record"],
       "category": "developer-tools"
     }
   ]

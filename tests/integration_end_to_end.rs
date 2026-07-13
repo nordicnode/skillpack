@@ -311,10 +311,11 @@ fn verify_format_json_is_machine_readable() {
         .iter()
         .any(|r| r["check_id"].as_str().unwrap().starts_with("invocation.")));
     // The score field is always present and numeric. The rust-cli fixture
-    // emits one warning (discovery.plugin.author — no author in
-    // skillpack.toml) so 4 pass + 1 warn = 4.5/5 = 90, not 100.
+    // emits two warnings (discovery.plugin.author — no author in
+    // skillpack.toml, invocation.version_drift — fixture's --version
+    // doesn't print a version string) so 4 pass + 2 warn = 5.0/6 ≈ 83.
     assert!(v["discoverability_score"].is_number());
-    assert_eq!(v["discoverability_score"], serde_json::Value::from(90));
+    assert_eq!(v["discoverability_score"], serde_json::Value::from(83));
 }
 
 // Version drift: plugin.json `version` must match the project manifest
@@ -1036,10 +1037,9 @@ fn verify_min_score_passes_when_threshold_met() {
         .current_dir(&root)
         .assert()
         .success();
-
-    // Freshly-init'd rust-cli pack emits a `discovery.plugin.author` warn (no
-    // author in the fixture's skillpack.toml) → baseline score 90, NOT 100.
-    // A threshold of 90 must pass — exit 0, no stderr gate message.
+    // Freshly-init'd rust-cli pack emits `discovery.plugin.author` +
+    // `invocation.version_drift` warns → baseline score 83, NOT 100.
+    // A threshold of 83 must pass — exit 0, no stderr gate message.
     let out = Command::cargo_bin("skillpack")
         .unwrap()
         .args([
@@ -1047,7 +1047,7 @@ fn verify_min_score_passes_when_threshold_met() {
             "--root",
             ".",
             "--min-score",
-            "90",
+            "83",
             "--format",
             "json",
         ])
@@ -1063,8 +1063,8 @@ fn verify_min_score_passes_when_threshold_met() {
     let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     assert_eq!(
         v["discoverability_score"].as_u64().unwrap(),
-        90,
-        "score must be exactly 90 on this fixture (author warn, no other drift), got:\n{}",
+        83,
+        "score must be exactly 83 on this fixture (author + version_drift warn), got:\n{}",
         String::from_utf8_lossy(&out.stdout)
     );
     assert!(
@@ -1078,8 +1078,8 @@ fn verify_min_score_passes_when_threshold_met() {
 // falls below the opt-in threshold (but no critical check failed), verify must
 // exit 2 (VERIFY_SCORE_BELOW_MIN — distinct from VERIFY_FAIL=1) and emit a
 // human-readable stderr line naming the threshold + actual score. The rust-cli
-// fixture's baseline score is 90 (author warn); no git seed or extra mutation
-// is needed — 90 < 100 gates.
+// fixture's baseline score is 83 (author + version_drift warn); no git seed or extra mutation
+// is needed — 83 < 100 gates.
 #[test]
 fn verify_min_score_fails_below_threshold() {
     let root = copy_fixture("rust-cli");
@@ -1102,8 +1102,9 @@ fn verify_min_score_fails_below_threshold() {
         .assert()
         .success();
 
-    // Baseline 90 (fixture emits `discovery.plugin.author` warn). Gate at 100
-    // → must exit 2 because 90 < 100, even though no critical check failed.
+    // Baseline 83 (fixture emits `discovery.plugin.author` +
+    // `invocation.version_drift` warns). Gate at 100 → must exit 2
+    // because 83 < 100, even though no critical check failed.
     let out = Command::cargo_bin("skillpack")
         .unwrap()
         .args([
@@ -1140,11 +1141,109 @@ fn verify_min_score_fails_below_threshold() {
     let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     let score = v["discoverability_score"].as_u64().unwrap();
     assert_eq!(
-        score, 90,
-        "fixture baseline score must be 90 (author warn); got {score}"
+        score, 83,
+        "fixture baseline score must be 83 (author + version_drift warn); got {score}"
     );
 }
 
+// `verify --watch` starts the file watcher, prints the banner + initial
+// report, and the process is killable via SIGTERM. We can't test the full
+// debounce loop in a unit test (it's an infinite blocking loop), but we
+// can assert the startup banner + initial report fire, then SIGTERM.
+#[test]
+fn verify_watch_starts_and_reports_initial_verify() {
+    use std::thread;
+    use std::time::Duration;
+
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_skillpack"))
+        .args(["verify", "--watch", "--root", "."])
+        .current_dir(&root)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn verify --watch");
+
+    // Give the watcher time to print the banner + initial report.
+    thread::sleep(Duration::from_secs(2));
+
+    // Kill the watcher process.
+    child.kill().expect("kill watch process");
+
+    let output = child.wait_with_output().expect("wait");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("watching"),
+        "stderr must print the watcher banner; got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("verify") || !String::from_utf8_lossy(&output.stdout).is_empty(),
+        "must produce at least one verify report"
+    );
+}
+
+// `verify --watch` with `--format json` must be rejected — watch is a
+// streaming human report, JSON output isn't meaningful for a watcher.
+#[test]
+fn verify_watch_rejects_json_format() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--watch", "--format", "json", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        out.status.code(),
+        Some(skillpack::exit::VERIFY_USAGE),
+        "--watch --format json must exit VERIFY_USAGE (4); got {:?}\nstderr: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--watch is only valid with --format human"),
+        "stderr must explain the constraint"
+    );
+}
 // `verify --fix` mechanically repairs the `discovery.plugin.version_drift`
 // warning by regenerating ONLY `.claude-plugin/plugin.json` (surgical: the
 // committed `SKILL.md` + `marketplace.json` stay intact). After the fix,
@@ -2950,6 +3049,10 @@ fn doctor_cargo_workspace_no_member_cli_reports_false() {
         s.contains("no workspace member yielded a runnable CLI"),
         "trace must explain the false, got:\n{s}"
     );
+    assert!(
+        s.contains("💡"),
+        "diag note with embedded 'run skillpack init' suggestion must be prefixed with 💡, got:\n{s}"
+    );
 }
 
 /// Scratch an npm workspace root + one member package with a `bin`.
@@ -3643,4 +3746,529 @@ fn agents_md_collision_guard_overwrites_with_force() {
         .current_dir(&root)
         .assert()
         .success();
+}
+
+// ─── update subcommand tests ────────────────────────────────────────────
+// Guard the three behaviors the spliced-vs-committed comparison fixes:
+// (1) idempotent — second run with no changes writes 0 files
+// (2) body preservation — hand-edit body, update skips (spliced == committed)
+// (3) version bump — only plugin.json changes, SKILL.md body survives
+
+#[test]
+fn update_idempotent_second_run_writes_zero_files() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    // Seed: init to create initial distribution files.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--non-interactive",
+            "--accept-warnings",
+            "--root",
+            ".",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // First update — no version/source change, all files identical.
+    let first = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["update", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(first.status.success(), "first update must succeed");
+    let stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        stdout.contains("updated 0 file(s)"),
+        "first update with no drift must write 0 files, got:\n{stdout}"
+    );
+
+    // Second update — still no change (idempotent).
+    let second = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["update", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(second.status.success());
+    let stdout2 = String::from_utf8_lossy(&second.stdout);
+    assert!(
+        stdout2.contains("updated 0 file(s)"),
+        "second update must also write 0 files, got:\n{stdout2}"
+    );
+}
+
+#[test]
+fn update_preserves_skill_md_body_and_skips_when_only_body_changed() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--non-interactive",
+            "--accept-warnings",
+            "--root",
+            ".",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Hand-edit the SKILL.md body (add a unique sentinel AFTER the frontmatter).
+    let skill_path = root.join("skills/sample-rust/SKILL.md");
+    let original = fs::read_to_string(&skill_path).unwrap();
+    let sentinel = "UPDATE_BODY_PRESERVATION_SENTINEL_42";
+    fs::write(
+        &skill_path,
+        format!("{original}\n## Custom\n\n{sentinel}\n"),
+    )
+    .unwrap();
+
+    // Update — frontmatter unchanged, only body differs. Spliced == committed,
+    // so update must SKIP SKILL.md (0 files updated).
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["update", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("updated 0 file(s)"),
+        "body-only edit must not trigger an update write, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("SKILL.md"),
+        "SKILL.md must not appear in updated list"
+    );
+
+    // The sentinel survived.
+    let after = fs::read_to_string(&skill_path).unwrap();
+    assert!(
+        after.contains(sentinel),
+        "body sentinel must survive update, got:\n{after}"
+    );
+}
+
+#[test]
+fn update_version_bump_changes_plugin_json_preserves_skill_md_body() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--non-interactive",
+            "--accept-warnings",
+            "--root",
+            ".",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Add body sentinel to SKILL.md.
+    let skill_path = root.join("skills/sample-rust/SKILL.md");
+    let original = fs::read_to_string(&skill_path).unwrap();
+    let sentinel = "VERSION_BUMP_SENTINEL_99";
+    fs::write(&skill_path, format!("{original}\n\n{sentinel}\n")).unwrap();
+    let plugin_path = root.join(".claude-plugin/plugin.json");
+    let plugin_before = fs::read_to_string(&plugin_path).unwrap();
+
+    // Bump version in Cargo.toml.
+    let cargo_toml_path = root.join("Cargo.toml");
+    let cargo_toml = fs::read_to_string(&cargo_toml_path).unwrap();
+    let bumped = cargo_toml.replace("0.1.0", "9.9.9");
+    fs::write(&cargo_toml_path, bumped).unwrap();
+
+    // Rebuild so introspection sees the new version.
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Update — plugin.json version must change, SKILL.md must NOT (no version
+    // in frontmatter, body preserved).
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["update", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("plugin.json"),
+        "plugin.json must be in updated list, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("SKILL.md"),
+        "SKILL.md must NOT be in updated list (version not in frontmatter), got:\n{stdout}"
+    );
+
+    // plugin.json content changed.
+    let plugin_after = fs::read_to_string(&plugin_path).unwrap();
+    assert_ne!(
+        plugin_before, plugin_after,
+        "plugin.json must change after version bump"
+    );
+    assert!(
+        plugin_after.contains("9.9.9"),
+        "plugin.json must carry new version, got:\n{plugin_after}"
+    );
+
+    // SKILL.md body sentinel survived.
+    let skill_after = fs::read_to_string(&skill_path).unwrap();
+    assert!(
+        skill_after.contains(sentinel),
+        "body sentinel must survive update after version bump"
+    );
+}
+
+// ─── diff subcommand tests ──────────────────────────────────────────────
+// Pin the agreement between `update` and `diff`: both use compute_candidates,
+// so they must agree on what counts as drift.
+
+#[test]
+fn diff_exits_zero_on_clean_repo() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--non-interactive",
+            "--accept-warnings",
+            "--root",
+            ".",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // diff on freshly-init'd repo — no drift.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["diff", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "diff must exit 0 on clean repo");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("up-to-date"),
+        "clean diff must say up-to-date, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn diff_exits_one_after_version_bump_reports_drifted_plugin_json() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--non-interactive",
+            "--accept-warnings",
+            "--root",
+            ".",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Bump version + rebuild so introspection sees the new version.
+    let cargo_toml = root.join("Cargo.toml");
+    let raw = fs::read_to_string(&cargo_toml).unwrap();
+    fs::write(&cargo_toml, raw.replace("0.1.0", "8.8.8")).unwrap();
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["diff", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "diff must exit non-zero after version bump"
+    );
+    assert_eq!(out.status.code(), Some(1), "diff drift must exit 1");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.contains("drifted") && combined.contains("plugin.json"),
+        "diff must report plugin.json drift, got:\n{combined}"
+    );
+    assert!(
+        !combined.contains("SKILL.md"),
+        "SKILL.md must not drift (version not in frontmatter), got:\n{combined}"
+    );
+}
+
+#[test]
+fn diff_exits_zero_after_body_only_edit() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--non-interactive",
+            "--accept-warnings",
+            "--root",
+            ".",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Body-only edit: add a sentinel to SKILL.md body (frontmatter untouched).
+    let skill_path = root.join("skills/sample-rust/SKILL.md");
+    let original = fs::read_to_string(&skill_path).unwrap();
+    fs::write(
+        &skill_path,
+        format!("{original}\n## Custom\n\nDIFF_BODY_SENTINEL\n"),
+    )
+    .unwrap();
+
+    // diff must exit 0 — spliced (fresh frontmatter + committed body) == committed.
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["diff", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "body-only edit must not trigger diff drift (spliced == committed), got:\n{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+}
+
+// ─── SARIF output tests ──────────────────────────────────────────────────
+
+#[test]
+fn verify_format_sarif_is_valid_sarif_2_1_0() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--non-interactive",
+            "--accept-warnings",
+            "--root",
+            ".",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Introduce version drift so there's at least a warning to report.
+    let cargo_toml = root.join("Cargo.toml");
+    let raw = fs::read_to_string(&cargo_toml).unwrap();
+    fs::write(&cargo_toml, raw.replace("0.1.0", "9.9.9")).unwrap();
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--format", "sarif", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    // Must be valid JSON.
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("SARIF must be valid JSON");
+
+    // Top-level SARIF 2.1.0 envelope.
+    assert_eq!(
+        v["$schema"],
+        "https://json.schemastore.org/sarif-2.1.0.json"
+    );
+    assert_eq!(v["version"], "2.1.0");
+
+    // Tool driver name.
+    assert_eq!(v["runs"][0]["tool"]["driver"]["name"], "skillpack");
+
+    // At least one result (version drift warning).
+    let results = v["runs"][0]["results"].as_array().unwrap();
+    assert!(
+        !results.is_empty(),
+        "SARIF must contain at least one result"
+    );
+
+    // Each result must have ruleId + level + message.text.
+    for r in results {
+        assert!(r["ruleId"].is_string(), "every result needs ruleId");
+        assert!(
+            r["level"] == "warning" || r["level"] == "error",
+            "level must be warning or error"
+        );
+        assert!(
+            r["message"]["text"].is_string(),
+            "every result needs message.text"
+        );
+    }
+
+    // No pass/skipped results (SARIF reports failures only).
+    for r in results {
+        assert_ne!(r["level"], "none", "SARIF must not emit pass/skip results");
+    }
+
+    // The version drift check must be present.
+    assert!(
+        results
+            .iter()
+            .any(|r| r["ruleId"] == "discovery.plugin.version_drift"),
+        "SARIF must include version_drift result"
+    );
+}
+
+// ─── --template-dir override tests ───────────────────────────────────────
+
+#[test]
+fn init_template_dir_overrides_skill_md_body() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    // Custom template dir with an override for SKILL.md.tera — embeds a
+    // sentinel that proves our template won over the embedded default.
+    let tmpl_dir = root.join(".custom-templates");
+    fs::create_dir_all(&tmpl_dir).unwrap();
+    fs::write(
+        tmpl_dir.join("SKILL.md.tera"),
+        "---\nname: {{ name }}\ndescription: \"{{ one_line_description }}\"\nwhen_to_use: \"{{ when_concat }}\"\n---\n\nCUSTOM_TEMPLATE_SENTINEL\n",
+    )
+    .unwrap();
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--non-interactive",
+            "--accept-warnings",
+            "--root",
+            ".",
+            "--template-dir",
+            ".custom-templates",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let skill = fs::read_to_string(root.join("skills/sample-rust/SKILL.md")).unwrap();
+    assert!(
+        skill.contains("CUSTOM_TEMPLATE_SENTINEL"),
+        "custom template must override embedded SKILL.md, got:\n{skill}"
+    );
+}
+
+#[test]
+fn init_template_dir_missing_files_fall_back_to_embedded() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    // Only override plugin.json.tera —SKILL.md.tera is absent → must use
+    // the embedded template, producing the same body.
+    let tmpl_dir = root.join(".custom-templates");
+    fs::create_dir_all(&tmpl_dir).unwrap();
+    fs::write(
+        tmpl_dir.join("plugin.json.tera"),
+        "{\n  \"name\": \"{{ name }}\",\n  \"version\": \"{{ version }}\",\n  \"license\": \"{{ license }}\"\n}\n",
+    )
+    .unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--non-interactive",
+            "--accept-warnings",
+            "--root",
+            ".",
+            "--template-dir",
+            ".custom-templates",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let plugin = fs::read_to_string(root.join(".claude-plugin/plugin.json")).unwrap();
+    assert!(
+        plugin.contains("\"name\": \"sample-rust\""),
+        "custom plugin.json must render, got: {plugin}"
+    );
+
+    // SKILL.md fell back to embedded — must contain the standard body, not be empty.
+    let skill = fs::read_to_string(root.join("skills/sample-rust/SKILL.md")).unwrap();
+    assert!(
+        !skill.is_empty(),
+        "embedded template fallback must produce non-empty SKILL.md"
+    );
 }

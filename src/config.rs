@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 
 use crate::types::Intent;
 
@@ -77,6 +77,8 @@ impl Config {
             .with_context(|| format!("failed to read {}", path.display()))?;
         let cfg: Config =
             toml::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))?;
+        cfg.validate()
+            .with_context(|| format!("invalid {}", path.display()))?;
         Ok(Some(cfg))
     }
 
@@ -99,6 +101,28 @@ impl Config {
         fs::write(&path, serialized)
             .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(path)
+    }
+
+    /// Validate structural invariants that `verify` cannot catch later.
+    /// Called by `load` right after parse. Only checks `skill.name` —
+    /// a non-kebab name corrupts every generated artifact at the source
+    /// and there is no verify-side warning for it. Description and trigger
+    /// phrases are left to `verify`'s soft-checks (load stays lossless;
+    /// empty triggers surface as a verify warning, not a load-time error).
+    /// An absent `[skill]` table is fine (fresh project before interview).
+    fn validate(&self) -> Result<()> {
+        let s = match &self.skill {
+            None => return Ok(()),
+            Some(s) => s,
+        };
+        if !crate::verify::discovery::is_valid_kebab(&s.name) {
+            bail!(
+                "skill.name must be non-empty kebab-case (a-z, 0-9, single \
+                 hyphens), got {:?}",
+                s.name
+            );
+        }
+        Ok(())
     }
 
     /// Build an [`Intent`] from this config, if a skill block is present.
@@ -133,5 +157,77 @@ impl Config {
                 license: intent.license.clone().or(Some("MIT".to_string())),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_rejects_non_kebab_name() {
+        let mut cfg = Config {
+            skill: Some(SkillConfig {
+                name: "".into(),
+                one_line_description: "desc".into(),
+                when_to_use_phrases: vec!["test".into()],
+                invocation_command: Some("cmd".into()),
+                import_pattern: None,
+                author: None,
+                license: None,
+            }),
+            defaults: Defaults::default(),
+        };
+        assert!(cfg.validate().is_err());
+
+        // Non-kebab name (uppercase + spaces)
+        cfg.skill.as_mut().unwrap().name = "My Tool".into();
+        assert!(cfg.validate().is_err());
+
+        // Double hyphen
+        cfg.skill.as_mut().unwrap().name = "foo--bar".into();
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_accepts_kebab_name() {
+        let cfg = Config {
+            skill: Some(SkillConfig {
+                name: "sample-rust".into(),
+                one_line_description: "desc".into(),
+                when_to_use_phrases: vec!["test".into()],
+                invocation_command: Some("cmd".into()),
+                import_pattern: None,
+                author: None,
+                license: None,
+            }),
+            defaults: Defaults::default(),
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_passes_when_skill_absent() {
+        let cfg = Config::default();
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_allows_empty_triggers_soft_check() {
+        // Empty when_to_use_phrases is a verify warning, not a load-time
+        // rejection — load stays lossless (the contract in config.rs:1-5).
+        let cfg = Config {
+            skill: Some(SkillConfig {
+                name: "sample-rust".into(),
+                one_line_description: "desc".into(),
+                when_to_use_phrases: vec![],
+                invocation_command: Some("cmd".into()),
+                import_pattern: None,
+                author: None,
+                license: None,
+            }),
+            defaults: Defaults::default(),
+        };
+        assert!(cfg.validate().is_ok());
     }
 }

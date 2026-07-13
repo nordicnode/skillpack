@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
 use skillpack::cli::{resolve_targets, Cli, Commands, Target};
 use skillpack::config::Config;
@@ -34,6 +34,7 @@ fn main() {
             license,
             target,
             force,
+            template_dir,
         } => run_init(
             &root,
             cli.verbose,
@@ -43,14 +44,52 @@ fn main() {
             license,
             target,
             force,
+            template_dir.as_deref(),
         ),
         Commands::Verify {
             root,
             format,
             fix,
             min_score,
-        } => run_verify(&root, cli.verbose, cli.debug, format, fix, min_score),
+            watch,
+            template_dir,
+        } => run_verify(
+            &root,
+            cli.verbose,
+            cli.debug,
+            format,
+            fix,
+            min_score,
+            watch,
+            template_dir.as_deref(),
+        ),
         Commands::Doctor { root, format } => run_doctor(&root, cli.verbose, cli.debug, format),
+        Commands::Update {
+            root,
+            target,
+            force,
+            template_dir,
+        } => run_update(
+            &root,
+            cli.verbose,
+            cli.debug,
+            target,
+            force,
+            template_dir.as_deref(),
+        ),
+        Commands::Diff {
+            root,
+            target,
+            force,
+            template_dir,
+        } => run_diff(
+            &root,
+            cli.verbose,
+            cli.debug,
+            target,
+            force,
+            template_dir.as_deref(),
+        ),
     }) {
         code
     } else {
@@ -70,6 +109,7 @@ fn run_init(
     license_override: Option<String>,
     raw_targets: Vec<String>,
     force: bool,
+    template_dir: Option<&Path>,
 ) -> i32 {
     match run_init_inner(
         root,
@@ -80,6 +120,7 @@ fn run_init(
         license_override,
         raw_targets,
         force,
+        template_dir,
     ) {
         Ok(c) => c,
         Err(e) => {
@@ -99,6 +140,7 @@ fn run_init_inner(
     license_override: Option<String>,
     raw_targets: Vec<String>,
     force: bool,
+    template_dir: Option<&Path>,
 ) -> Result<i32> {
     let profile = introspect::introspect(root).context("introspecting repo")?;
     if verbose {
@@ -111,6 +153,13 @@ fn run_init_inner(
     } else {
         resolve_targets(&raw_targets)?
     };
+    if verbose {
+        let names: Vec<String> = targets
+            .iter()
+            .map(|t| t.to_possible_value().unwrap().get_name().to_string())
+            .collect();
+        eprintln!("targets: {}", names.join(", "));
+    }
     if debug {
         eprintln!(
             "[debug] detected name={} language={} has_cli={}",
@@ -155,8 +204,8 @@ fn run_init_inner(
     }
 
     // Step 3 — render in memory.
-    let files =
-        render_targets(&profile, &intent, &targets).context("rendering distribution files")?;
+    let files = render_targets(&profile, &intent, &targets, template_dir)
+        .context("rendering distribution files")?;
 
     // Step 4 — pre-commit verify against the rendered output (design §5.3).
     let report = verify_rendered(&files, &profile, root, debug)?;
@@ -205,6 +254,9 @@ fn run_init_inner(
             }
         }
     }
+
+    // Step 4b — preview: which files are new, changed, or unchanged?
+    print_diff_preview(root, &files);
 
     // Step 5 — write files + save config.
     let (written, skipped) = write_files(root, &files, force)?;
@@ -304,6 +356,36 @@ fn write_files<'a>(
         written.push(f);
     }
     Ok((written, skipped))
+}
+
+/// Print a preview of which files are new, changed, or unchanged before
+/// writing. Only prints when at least one file differs from disk — a
+/// fully-clean re-init prints nothing (no noise).
+fn print_diff_preview(root: &Path, files: &[GeneratedFileOutput]) {
+    let mut new = Vec::new();
+    let mut changed = Vec::new();
+    let mut unchanged = 0u32;
+    for f in files {
+        let p = root.join(&f.rel_path);
+        match std::fs::read_to_string(&p) {
+            Ok(existing) if existing == f.contents => unchanged += 1,
+            Ok(_) => changed.push(&f.rel_path),
+            Err(_) => new.push(&f.rel_path),
+        }
+    }
+    if new.is_empty() && changed.is_empty() {
+        return;
+    }
+    eprintln!("\n📝 distribution file preview:");
+    for r in &new {
+        eprintln!("   + {r} (new)");
+    }
+    for r in &changed {
+        eprintln!("   ~ {r} (changed)");
+    }
+    if unchanged > 0 {
+        eprintln!("   = {unchanged} file(s) unchanged");
+    }
 }
 
 // --- pre-commit confirmation (Improvement E: testable) ---------------------
@@ -439,6 +521,7 @@ fn print_profile(profile: &types::ProjectProfile, to_stderr: bool) {
         }
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn run_verify(
     root: &Path,
     verbose: bool,
@@ -446,8 +529,17 @@ fn run_verify(
     format: verify::OutputFormat,
     fix: bool,
     min_score: Option<u8>,
+    watch: bool,
+    template_dir: Option<&Path>,
 ) -> i32 {
-    match run_verify_inner(root, verbose, debug, format, fix, min_score) {
+    if watch {
+        if format != verify::OutputFormat::Human {
+            eprintln!("error: --watch is only valid with --format human");
+            return exit::VERIFY_USAGE;
+        }
+        return run_verify_watch(root, verbose, debug, format, fix, min_score, template_dir);
+    }
+    match run_verify_inner(root, verbose, debug, format, fix, min_score, template_dir) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -463,6 +555,7 @@ fn run_verify_inner(
     format: verify::OutputFormat,
     fix: bool,
     min_score: Option<u8>,
+    template_dir: Option<&Path>,
 ) -> Result<i32> {
     // Defer to introspect only to recover has_cli + cli_command for the
     // *spawn* stage. CLI *presence* is now derived from the SKILL.md itself
@@ -473,11 +566,18 @@ fn run_verify_inner(
     // a warning (not a silent skip) so the gap is visible.
     let profile = introspect::introspect(root).context("introspecting repo for verify")?;
     if verbose {
-        print_profile(&profile, matches!(format, verify::OutputFormat::Json));
+        print_profile(
+            &profile,
+            matches!(
+                format,
+                verify::OutputFormat::Json | verify::OutputFormat::Sarif
+            ),
+        );
     }
     let render = |report: &verify::VerifyReport| match format {
         verify::OutputFormat::Human => verify::render(report),
         verify::OutputFormat::Json => format!("{}\n", verify::render_json(report)),
+        verify::OutputFormat::Sarif => format!("{}\n", verify::render_sarif(report)),
     };
     let run_verify = || -> Result<verify::VerifyReport> {
         let input = VerifyInput {
@@ -517,7 +617,7 @@ fn run_verify_inner(
         } else {
             let mut written: Vec<String> = Vec::new();
             for (action, loc) in actions {
-                let outcome = verify::fix::apply(action, root, loc.as_ref())
+                let outcome = verify::fix::apply(action, root, loc.as_ref(), template_dir)
                     .context("applying a `--fix` action")?;
                 written.extend(outcome.files_written);
             }
@@ -558,6 +658,124 @@ fn run_verify_inner(
     };
     Ok(code)
 }
+
+/// `verify --watch` — re-runs verify on every file change (debounced).
+///
+/// Uses `notify` to watch the project root. On each debounced event batch,
+/// clears the terminal, re-runs a single verify cycle, and prints the
+/// report. Ctrl-C terminates the process directly (standard SIGINT
+/// behavior — no clean-shutdown handler is installed).
+fn run_verify_watch(
+    root: &Path,
+    verbose: bool,
+    debug: bool,
+    format: verify::OutputFormat,
+    fix: bool,
+    min_score: Option<u8>,
+    template_dir: Option<&Path>,
+) -> i32 {
+    use notify::{EventKind, RecursiveMode, Watcher};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
+    let mut watcher = match notify::recommended_watcher(tx) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("fatal: cannot initialize file watcher: {e}");
+            return exit::INIT_FATAL;
+        }
+    };
+
+    // Watch the project root recursively. Ignore common noise dirs.
+    if let Err(e) = watcher.watch(root, RecursiveMode::Recursive) {
+        eprintln!("fatal: cannot watch {}: {e}", root.display());
+        return exit::INIT_FATAL;
+    }
+
+    eprintln!(
+        "🔍 watching {} for changes (Ctrl-C to stop)…\n",
+        root.display()
+    );
+
+    let _ = run_verify_single(root, verbose, debug, format, fix, min_score, template_dir);
+
+    let debounce = Duration::from_secs(1);
+    let mut last_event: Option<Instant> = None;
+
+    // Skip events from noisy paths (target/, .git/, node_modules/).
+    let is_noise = |path: &std::path::Path| -> bool {
+        path.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::Normal(s)
+                    if s == "target" || s == ".git" || s == "node_modules"
+            )
+        })
+    };
+
+    loop {
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(Ok(event)) => {
+                // Only react to content changes, not attribute-only.
+                if matches!(
+                    event.kind,
+                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                ) && !event.paths.iter().all(|p| is_noise(p))
+                {
+                    last_event = Some(Instant::now());
+                }
+            }
+            Ok(Err(_)) | Err(mpsc::RecvTimeoutError::Timeout) => {
+                // Debounce: fire when 1s has elapsed since the last event
+                // with no new events.
+                if let Some(t) = last_event {
+                    if t.elapsed() >= debounce {
+                        last_event = None;
+                        // Clear screen for a clean re-render.
+                        print!("\x1b[2J\x1b[H");
+                        let _ = run_verify_single(
+                            root,
+                            verbose,
+                            debug,
+                            format,
+                            fix,
+                            min_score,
+                            template_dir,
+                        );
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // Channel closed (watcher dropped) — exit.
+                break;
+            }
+        }
+    }
+
+    eprintln!("\nstopped.");
+    exit::VERIFY_OK
+}
+
+/// Run a single verify cycle and print the report. Extracted from
+/// `run_verify_watch` so it's testable independently of the watcher.
+fn run_verify_single(
+    root: &Path,
+    verbose: bool,
+    debug: bool,
+    format: verify::OutputFormat,
+    fix: bool,
+    min_score: Option<u8>,
+    template_dir: Option<&Path>,
+) -> i32 {
+    match run_verify_inner(root, verbose, debug, format, fix, min_score, template_dir) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e:#}");
+            exit::VERIFY_FAIL
+        }
+    }
+}
 /// `skillpack doctor` — diagnose why introspection chose what it did.
 /// Read-only: prints the detected profile + the decision trace (`diag`),
 /// never writes files. The trace is empty until candidate fns push notes
@@ -595,6 +813,9 @@ fn run_doctor_inner(
             );
         }
         crate::verify::OutputFormat::Human => render_doctor_human(&profile, verbose, debug),
+        crate::verify::OutputFormat::Sarif => {
+            bail!("doctor does not support SARIF output; use `verify --format sarif`")
+        }
     }
 
     // Doctor never writes; always exits 0.
@@ -641,9 +862,365 @@ fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool, debug: bo
     } else {
         println!("decision trace ({}):", profile.diag.0.len());
         for note in &profile.diag.0 {
-            println!("  [{}] {}", note.stage, note.note);
+            if note.note.contains("run `") {
+                println!("  💡 [{}] {}", note.stage, note.note);
+            } else {
+                println!("  [{}] {}", note.stage, note.note);
+            }
         }
     }
+
+    // Discoverability category preview: what `verify` would check, grouped
+    // by namespace. doctor is read-only and runs on pre-init repos (no pack
+    // generated yet), so we can't run the real verify — but we can show the
+    // check-id namespaces so the user knows what to expect after `init`.
+    println!();
+    println!("verify category preview (run `skillpack verify` after `init` for the real score):");
+    println!("  discovery.*     — structural validation of generated files per ecosystem");
+    println!("    (marketplace.json, plugin.json, SKILL.md frontmatter, .mdc, AGENTS.md");
+    println!("     presence, copilot-instructions.md)");
+    if profile.has_cli {
+        println!("  invocation.*    — runs the CLI: --help, flag drift, subcommand drift");
+        println!("    --version drift (advisory)");
+    } else {
+        println!("  invocation.*    — N/A (no CLI detected; checks will be skipped)");
+    }
+}
+
+/// `skillpack update` — incrementally regenerate distribution files from an
+/// existing `skillpack.toml`. No interview, no pre-commit verify gate. Reads
+/// the committed config, re-introspects, re-renders every target, and writes
+/// ONLY files whose content changed. For frontmatter-bearing files the body
+/// is preserved via the same splice `--fix` uses; frontmatter is regenerated
+/// wholesale. Returns exit 0 on success.
+fn run_update(
+    root: &Path,
+    _verbose: bool,
+    _debug: bool,
+    raw_targets: Vec<String>,
+    force: bool,
+    template_dir: Option<&Path>,
+) -> i32 {
+    match run_update_inner(root, raw_targets, force, template_dir) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("fatal: {e:#}");
+            exit::INIT_FATAL
+        }
+    }
+}
+
+/// Result of comparing one rendered file against its on-disk content.
+struct CandidateResult<'a> {
+    file: &'a GeneratedFileOutput,
+    /// What we would write (spliced frontmatter + preserved body for
+    /// frontmatter files; raw render for fully-generated files).
+    candidate: String,
+    /// On-disk content (BOM-stripped, CRLF-normalized).
+    committed: Option<String>,
+    /// None = file not on disk (new). Some = file exists.
+    status: CandidateStatus,
+    /// True if the AGENTS.md collision guard skipped this file.
+    held: bool,
+}
+
+#[derive(PartialEq, Eq)]
+enum CandidateStatus {
+    /// File not on disk — would be created.
+    Missing,
+    /// Committed == candidate — no drift.
+    Clean,
+    /// Committed != candidate — drift detected.
+    Drifted,
+}
+
+/// Compute candidates for each rendered file, comparing against on-disk
+/// content. Shared by `update` (writes drifted) and `diff` (reports only).
+/// The AGENTS.md collision guard mirrors `init`: skip if it exists and
+/// `--force` is not passed.
+fn compute_candidates<'f>(
+    root: &Path,
+    files: &'f [GeneratedFileOutput],
+    force: bool,
+) -> Result<Vec<CandidateResult<'f>>> {
+    let mut results = Vec::with_capacity(files.len());
+    for file in files {
+        let disk_path = root.join(&file.rel_path);
+
+        // AGENTS.md collision guard.
+        if file.rel_path == "AGENTS.md" && disk_path.exists() && !force {
+            results.push(CandidateResult {
+                file,
+                candidate: file.contents.clone(),
+                committed: None,
+                status: CandidateStatus::Clean,
+                held: true,
+            });
+            continue;
+        }
+
+        if !disk_path.exists() {
+            results.push(CandidateResult {
+                file,
+                candidate: file.contents.clone(),
+                committed: None,
+                status: CandidateStatus::Missing,
+                held: false,
+            });
+            continue;
+        }
+
+        let committed = std::fs::read_to_string(&disk_path)
+            .with_context(|| format!("reading {}", disk_path.display()))?
+            .replace("\r\n", "\n");
+        let committed = skillpack::verify::discovery::strip_bom(&committed).to_string();
+
+        let candidate = if is_frontmatter_target(&file.rel_path) {
+            let fresh_fm = skillpack::verify::fix::split_frontmatter(&file.contents)
+                .map(|(fm, _body)| fm)
+                .unwrap_or_else(|| file.contents.clone());
+            let preserved_body = skillpack::verify::fix::split_frontmatter(&committed)
+                .map(|(_fm, body)| body)
+                .unwrap_or_default();
+            format!("{fresh_fm}\n{preserved_body}")
+        } else {
+            file.contents.clone()
+        };
+
+        let status = if committed == candidate {
+            CandidateStatus::Clean
+        } else {
+            CandidateStatus::Drifted
+        };
+        results.push(CandidateResult {
+            file,
+            candidate,
+            committed: Some(committed),
+            status,
+            held: false,
+        });
+    }
+    Ok(results)
+}
+
+/// Shared preamble: introspect, load config, resolve targets, render.
+fn render_from_config(
+    root: &Path,
+    raw_targets: &[String],
+    template_dir: Option<&Path>,
+) -> Result<(
+    types::ProjectProfile,
+    types::Intent,
+    Vec<GeneratedFileOutput>,
+)> {
+    let profile = introspect::introspect(root).context("introspecting repo")?;
+    let existing_cfg = Config::load(root)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "no skillpack.toml at {} — a committed config is required.\n\
+             To fix: run `skillpack init` first to seed it.",
+            Config::path(root).display()
+        )
+    })?;
+    let intent = existing_cfg.to_intent().ok_or_else(|| {
+        anyhow::anyhow!(
+            "skillpack.toml at {} is missing its [skill] table.\n\
+         To fix: re-run `skillpack init` interactively to regenerate the config.",
+            Config::path(root).display()
+        )
+    })?;
+    let targets = if raw_targets.is_empty() {
+        vec![Target::Claude]
+    } else {
+        resolve_targets(raw_targets)?
+    };
+    let files = render_targets(&profile, &intent, &targets, template_dir)
+        .context("rendering distribution files")?;
+    Ok((profile, intent, files))
+}
+
+fn run_update_inner(
+    root: &Path,
+    raw_targets: Vec<String>,
+    force: bool,
+    template_dir: Option<&Path>,
+) -> Result<i32> {
+    let (profile, intent, files) = render_from_config(root, &raw_targets, template_dir)?;
+    let results = compute_candidates(root, &files, force)?;
+
+    let mut written: Vec<&GeneratedFileOutput> = Vec::new();
+    let mut unchanged = 0usize;
+    let mut skipped: Vec<&GeneratedFileOutput> = Vec::new();
+    let name = coerce_kebab(&profile.name);
+
+    for r in &results {
+        if r.held {
+            skipped.push(r.file);
+            continue;
+        }
+        match r.status {
+            CandidateStatus::Missing => {
+                let disk_path = root.join(&r.file.rel_path);
+                if let Some(parent) = disk_path.parent() {
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format!("creating parent dir for {}", disk_path.display())
+                    })?;
+                }
+                std::fs::write(&disk_path, &r.candidate)
+                    .with_context(|| format!("writing {}", disk_path.display()))?;
+                written.push(r.file);
+            }
+            CandidateStatus::Clean => {
+                unchanged += 1;
+            }
+            CandidateStatus::Drifted => {
+                let disk_path = root.join(&r.file.rel_path);
+                std::fs::write(&disk_path, &r.candidate)
+                    .with_context(|| format!("writing {}", disk_path.display()))?;
+                written.push(r.file);
+            }
+        }
+    }
+
+    // Update skillpack.toml with current introspection (version/name may have changed).
+    Config::from_intent(&name, &intent).save(root)?;
+
+    // Summary.
+    println!(
+        "✓ updated {} file(s), {} unchanged, under {}:",
+        written.len(),
+        unchanged,
+        root.display()
+    );
+    for f in &written {
+        println!("   - {}", f.rel_path);
+    }
+    if unchanged > 0 {
+        eprintln!("  ({unchanged} file(s) already up-to-date)");
+    }
+    if !skipped.is_empty() {
+        eprintln!(
+            "ℹ skipped {} target file(s) (existing file held; pass --force to overwrite):",
+            skipped.len()
+        );
+        for f in &skipped {
+            eprintln!("   - {}", f.rel_path);
+        }
+    }
+    Ok(exit::INIT_OK)
+}
+
+/// `skillpack diff` — check whether distribution files are stale. Report
+/// drifted/missing files and exit 1 if any. A CI gate for stale artifacts.
+fn run_diff(
+    root: &Path,
+    _verbose: bool,
+    _debug: bool,
+    raw_targets: Vec<String>,
+    force: bool,
+    template_dir: Option<&Path>,
+) -> i32 {
+    match run_diff_inner(root, &raw_targets, force, template_dir) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("fatal: {e:#}");
+            exit::INIT_FATAL
+        }
+    }
+}
+
+fn run_diff_inner(
+    root: &Path,
+    raw_targets: &[String],
+    force: bool,
+    template_dir: Option<&Path>,
+) -> Result<i32> {
+    let (_profile, _intent, files) = render_from_config(root, raw_targets, template_dir)?;
+    let results = compute_candidates(root, &files, force)?;
+
+    let mut drifted = 0usize;
+    let mut missing = 0usize;
+    let mut unchanged = 0usize;
+    let mut held = 0usize;
+
+    for r in &results {
+        if r.held {
+            held += 1;
+            eprintln!("  held: {} (pass --force to check)", r.file.rel_path);
+            continue;
+        }
+        match r.status {
+            CandidateStatus::Missing => {
+                missing += 1;
+                eprintln!("  missing: {}", r.file.rel_path);
+            }
+            CandidateStatus::Clean => {
+                unchanged += 1;
+            }
+            CandidateStatus::Drifted => {
+                drifted += 1;
+                let first_diff =
+                    first_differing_line(r.committed.as_deref().unwrap_or_default(), &r.candidate);
+                eprintln!("  drifted: {} (first diff: {first_diff})", r.file.rel_path);
+            }
+        }
+    }
+
+    if drifted == 0 && missing == 0 {
+        println!(
+            "✓ all {unchanged} file(s) up-to-date ({})",
+            if held > 0 {
+                format!("{held} held")
+            } else {
+                "none held".into()
+            },
+        );
+        Ok(exit::INIT_OK)
+    } else {
+        eprintln!(
+            "\n✗ {drifted} drifted, {missing} missing, {unchanged} up-to-date{} — \
+             run `skillpack update{}` to fix.",
+            if held > 0 {
+                format!(", {held} held")
+            } else {
+                String::new()
+            },
+            if force { " --force" } else { "" },
+        );
+        Ok(exit::DIFF_DRIFT)
+    }
+}
+
+/// Return the first line that differs between `committed` and `candidate`
+/// (with `-`/`+` prefix). For `diff`'s CI gate output — avoids pulling a
+/// diff crate for what a char scan suffices.
+fn first_differing_line(committed: &str, candidate: &str) -> String {
+    for (c, n) in committed.lines().zip(candidate.lines()) {
+        if c != n {
+            return format!("- {c}\n+ {n}");
+        }
+    }
+    let extra = if committed.lines().count() > candidate.lines().count() {
+        committed
+    } else {
+        candidate
+    };
+    extra
+        .lines()
+        .nth(committed.lines().count().min(candidate.lines().count()))
+        .map(|l| format!("± {l}"))
+        .unwrap_or_else(|| "(no lines differ)".into())
+}
+
+/// True if the given rel-path is a frontmatter-bearing file that needs body
+/// preservation during `update` (SKILL.md, cursor .mdc, opencode .md).
+/// AGENTS.md and copilot-instructions.md are plain markdown (no frontmatter)
+/// so they are NOT included — `split_frontmatter` would return None on them.
+fn is_frontmatter_target(rel_path: &str) -> bool {
+    rel_path.ends_with("SKILL.md")
+        || rel_path.ends_with(".mdc")
+        || (rel_path.ends_with(".md")
+            && !rel_path.ends_with("AGENTS.md")
+            && !rel_path.ends_with("copilot-instructions.md"))
 }
 
 #[cfg(test)]

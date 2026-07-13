@@ -128,6 +128,7 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
 pub enum OutputFormat {
     Human,
     Json,
+    Sarif,
 }
 
 /// Pretty-print a report as the human-facing output (design §5.2 step 4).
@@ -212,4 +213,69 @@ pub fn render_json(report: &VerifyReport) -> String {
         "results": results,
     });
     serde_json::to_string_pretty(&body).expect("verify report serializes to JSON")
+}
+
+/// Render the report as SARIF 2.1.0 for GitHub Code Scanning upload-sarif.
+/// Only `Warn` and `Error` results are emitted (SARIF reports failures, not
+/// passes). Each result maps `ruleId` → `check_id`, `level` → `"warning"` or
+/// `"error"`, `message` → CheckResult message, `locations` → file + line
+/// when available. Pass/Skipped results are omitted.
+pub fn render_sarif(report: &VerifyReport) -> String {
+    use self::result::Severity;
+
+    let results: Vec<_> = report
+        .results
+        .iter()
+        .filter(|r| matches!(r.severity, Severity::Warn | Severity::Error))
+        .map(|r| {
+            let level = match r.severity {
+                Severity::Warn => "warning",
+                Severity::Error => "error",
+                _ => "none",
+            };
+            let mut result = serde_json::json!({
+                "ruleId": r.check_id,
+                "level": level,
+                "message": { "text": r.message },
+            });
+
+            // suggestion → rule metadata, appended to the message.
+            if let Some(s) = &r.suggestion {
+                result["message"]["text"] =
+                    serde_json::Value::String(format!("{}\nSuggestion: {s}", r.message));
+            }
+
+            if let Some((file, line)) = &r.location {
+                let mut region = serde_json::Map::new();
+                if let Some(n) = line {
+                    region.insert("startLine".to_string(), serde_json::Value::from(*n));
+                }
+                let mut phys_loc = serde_json::json!({
+                    "artifactLocation": { "uri": file }
+                });
+                if !region.is_empty() {
+                    phys_loc["region"] = serde_json::Value::Object(region);
+                }
+                result["locations"] = serde_json::json!([phys_loc]);
+            }
+
+            result
+        })
+        .collect();
+
+    let body = serde_json::json!({
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "skillpack",
+                    "informationUri": "https://github.com/nordicnode/skillpack"
+                }
+            },
+            "results": results
+        }]
+    });
+
+    serde_json::to_string_pretty(&body).expect("verify report serializes to SARIF JSON")
 }

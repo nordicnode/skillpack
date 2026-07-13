@@ -56,7 +56,7 @@ pub(crate) fn rel_unix(root: &Path, path: &Path) -> String {
 /// SKILL.md / .mdc / agent file from a Windows user is exposed. Applied at each
 /// raw-text read boundary (callers below), NOT inside `parse_*_frontmatter`
 /// itself — non-BOM paths stay byte-identical (snapshot tests stay green).
-pub(crate) fn strip_bom(s: &str) -> &str {
+pub fn strip_bom(s: &str) -> &str {
     s.strip_prefix('\u{feff}').unwrap_or(s)
 }
 
@@ -676,12 +676,14 @@ fn check_one_skill_md(
         .as_deref()
         .map_or(true, |w| w.trim().is_empty())
     {
-        return Ok(CheckResult::warn(
+        let mut r = CheckResult::warn(
             &format!("{prefix}.when_to_use"),
             "SKILL.md has non-empty `when_to_use` trigger phrases",
             format!("{rel}: `when_to_use` is missing or empty"),
             "To fix: list 2-5 trigger verbs/scenarios, e.g. \"Use when: the user asks to ...\".",
-        ));
+        );
+        r.location = Some((rel.clone(), None));
+        return Ok(r);
     }
 
     // allowed_tools grammar (apply only when the field is present). The
@@ -698,7 +700,7 @@ fn check_one_skill_md(
             .filter(|t| !t.is_empty() && !is_valid_allowed_tool_token(t))
             .collect();
         if !bad.is_empty() {
-            return Ok(CheckResult::warn(
+            let mut r = CheckResult::warn(
                 &format!("{prefix}.allowed_tools"),
                 "SKILL.md `allowed-tools` tokens match the Anthropic grammar",
                 format!(
@@ -710,7 +712,9 @@ fn check_one_skill_md(
                 ),
                 "To fix: each comma-separated token must be a bare identifier \
                  (e.g. `Read`) or a namespaced call (e.g. `Bash(npm test:*)`).",
-            ));
+            );
+            r.location = Some((rel.clone(), None));
+            return Ok(r);
         }
     }
 

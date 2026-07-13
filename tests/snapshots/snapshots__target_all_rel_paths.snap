@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: "rel_paths.join(\"\\n\")"
+---
+.claude-plugin/marketplace.json
+.claude-plugin/plugin.json
+skills/chronicle/SKILL.md
+.cursor/rules/chronicle.mdc
+.codex/skills/chronicle/SKILL.md
+.opencode/agents/chronicle.md
+.github/copilot-instructions.md
+AGENTS.md

@@ -86,14 +86,16 @@ pub fn apply(
     action: FixAction,
     root: &Path,
     location: Option<&(String, Option<usize>)>,
+    template_dir: Option<&Path>,
 ) -> Result<FixOutcome> {
     match action {
-        FixAction::RegenPluginJson => apply_regen_plugin_json(root),
-        FixAction::RegenSkillMdFrontmatter => apply_regen_skill_md_frontmatter(root, location),
+        FixAction::RegenPluginJson => apply_regen_plugin_json(root, template_dir),
+        FixAction::RegenSkillMdFrontmatter => {
+            apply_regen_skill_md_frontmatter(root, location, template_dir)
+        }
     }
 }
-
-fn apply_regen_plugin_json(root: &Path) -> Result<FixOutcome> {
+fn apply_regen_plugin_json(root: &Path, template_dir: Option<&Path>) -> Result<FixOutcome> {
     // Recover profile + intent the same `init` does — introspection gives us
     // the manifest version + language; the committed skillpack.toml gives us
     // the interview answers. Without skillpack.toml there's no intent, so a
@@ -117,7 +119,7 @@ fn apply_regen_plugin_json(root: &Path) -> Result<FixOutcome> {
     // Render the claude target, then KEEP ONLY the plugin.json entry. Surgical
     // by design — re-emitting SKILL.md / marketplace.json here would clobber
     // a maintainer's post-init hand-tailoring (see module docs).
-    let files = render_targets(&profile, &intent, &[Target::Claude])
+    let files = render_targets(&profile, &intent, &[Target::Claude], template_dir)
         .context("rendering claude target for --fix")?;
     let plugin_json = files
         .iter()
@@ -137,6 +139,7 @@ fn apply_regen_plugin_json(root: &Path) -> Result<FixOutcome> {
 fn apply_regen_skill_md_frontmatter(
     root: &Path,
     location: Option<&(String, Option<usize>)>,
+    template_dir: Option<&Path>,
 ) -> Result<FixOutcome> {
     // The location's rel-path tells us WHICH skill file drifted AND which
     // ecosystem (Claude `skills/<name>/SKILL.md` vs Codex
@@ -178,8 +181,8 @@ fn apply_regen_skill_md_frontmatter(
     } else {
         Target::Claude
     };
-    let files =
-        render_targets(&profile, &intent, &[target]).context("rendering skill target for --fix")?;
+    let files = render_targets(&profile, &intent, &[target], template_dir)
+        .context("rendering skill target for --fix")?;
 
     // The rendered SKILL.md whose rel-path matches the drifted file. Render
     // produces a fresh full skill (frontmatter + body); we keep ONLY the
@@ -235,11 +238,16 @@ fn apply_regen_skill_md_frontmatter(
 /// closing `---` (typically a leading blank line + the prose). Returns `None`
 /// if the file has no `---`-delimited frontmatter (a hand-written skill with
 /// no frontmatter, or a corrupted file — caller falls back to whole-file).
-fn split_frontmatter(contents: &str) -> Option<(String, String)> {
+pub fn split_frontmatter(contents: &str) -> Option<(String, String)> {
     let after_open = contents.strip_prefix("---\n")?;
-    let close_idx = after_open.find("\n---\n")?;
-    let fm = format!("---\n{}---", &after_open[..close_idx]);
-    let body = after_open[close_idx + "\n---\n".len()..].to_string();
+    // Find `\n---\n` — the newline before `---` is part of the last
+    // frontmatter line's line-ending, so include it in the extracted block.
+    // Without it, a frontmatter line like `allowed-tools: Read, Bash` would
+    // splice as `...Bash---` (no newline), breaking the closing delimiter.
+    let close_marker = "\n---\n";
+    let close_idx = after_open.find(close_marker)?;
+    let fm = format!("---\n{}\n---", &after_open[..close_idx]);
+    let body = after_open[close_idx + close_marker.len()..].to_string();
     Some((fm, body))
 }
 
@@ -259,12 +267,16 @@ fn write_one(root: &Path, file: &GeneratedFileOutput) -> Result<()> {
 /// verify `--fix` dispatcher to filter the report to only-fixable drift.
 pub fn action_for(check_id: &str) -> Option<FixAction> {
     match check_id {
-        "discovery.plugin.version_drift" | "discovery.plugin.url_drift" => {
-            Some(FixAction::RegenPluginJson)
-        }
-        "discovery.skill.name_drift" | "discovery.codex.skill.name_drift" => {
-            Some(FixAction::RegenSkillMdFrontmatter)
-        }
+        "discovery.plugin.version_drift"
+        | "discovery.plugin.url_drift"
+        | "discovery.plugin.description"
+        | "discovery.plugin.author" => Some(FixAction::RegenPluginJson),
+        "discovery.skill.name_drift"
+        | "discovery.codex.skill.name_drift"
+        | "discovery.skill.when_to_use"
+        | "discovery.codex.skill.when_to_use"
+        | "discovery.skill.allowed_tools"
+        | "discovery.codex.skill.allowed_tools" => Some(FixAction::RegenSkillMdFrontmatter),
         // Extend here + add the match arm above — exhaustive match makes
         // forgetting an arm a compile failure, not a silent skip.
         _ => None,
@@ -312,6 +324,44 @@ mod tests {
     }
 
     #[test]
+    fn action_for_maps_plugin_description_and_author() {
+        // RegenPluginJson rebuilds the description + author fields from the
+        // current intent → skillpack.toml, so missing description / missing
+        // author are the same mechanical fix as version_drift.
+        assert_eq!(
+            action_for("discovery.plugin.description"),
+            Some(FixAction::RegenPluginJson)
+        );
+        assert_eq!(
+            action_for("discovery.plugin.author"),
+            Some(FixAction::RegenPluginJson)
+        );
+    }
+
+    #[test]
+    fn action_for_maps_when_to_use_and_allowed_tools_both_ecosystems() {
+        // RegenSkillMdFrontmatter regenerates frontmatter from the current
+        // intent, which carries when_to_use_phrases and allowed-tools hint.
+        // Both Claude and Codex skill ecosystems map to the same fix action.
+        assert_eq!(
+            action_for("discovery.skill.when_to_use"),
+            Some(FixAction::RegenSkillMdFrontmatter)
+        );
+        assert_eq!(
+            action_for("discovery.codex.skill.when_to_use"),
+            Some(FixAction::RegenSkillMdFrontmatter)
+        );
+        assert_eq!(
+            action_for("discovery.skill.allowed_tools"),
+            Some(FixAction::RegenSkillMdFrontmatter)
+        );
+        assert_eq!(
+            action_for("discovery.codex.skill.allowed_tools"),
+            Some(FixAction::RegenSkillMdFrontmatter)
+        );
+    }
+
+    #[test]
     fn apply_match_is_exhaustive_over_enum() {
         // `match action` over FixAction inside `apply` is exhaustive by
         // construction. This test exists to surface an obvious failure when
@@ -331,6 +381,33 @@ mod tests {
         assert_eq!(
             o.unique_sorted(),
             vec!["a.json".to_string(), "b.json".to_string()]
+        );
+    }
+
+    #[test]
+    fn split_frontmatter_includes_newline_before_closing_delim() {
+        // Regression: split_frontmatter used to drop the `\n` before the
+        // closing `---`\n, leaving the last frontmatter line glued to `---`
+        // (e.g. `allowed-tools: Read, Bash---`). parse_skill_frontmatter
+        // then can't find the delimiter and silently mangles the file.
+        // Assert the closing `---` is on its own line.
+        let input =
+            "---\nname: test\ndescription: \"x\"\nallowed-tools: Read, Bash\n---\n\n# body\n";
+        let (fm, body) = split_frontmatter(input).expect("split succeeds");
+        assert!(
+            fm.contains("Bash\n---"),
+            "frontmatter must have `\\n---` after the last value, got:\n{fm}"
+        );
+        assert!(
+            !fm.contains("Bash---"),
+            "frontmatter must NOT glue `Bash` to `---`, got:\n{fm}"
+        );
+        assert!(body.contains("# body"), "body must survive, got:\n{body}");
+        // Round-trip: splicing fm + \n + body must have `---\n---` delimiters intact
+        let spliced = format!("{fm}\n{body}");
+        assert!(
+            spliced.contains("Bash\n---\n\n# body"),
+            "spliced output must have proper delimiter separation, got:\n{spliced}"
         );
     }
 }
