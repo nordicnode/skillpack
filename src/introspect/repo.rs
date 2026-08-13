@@ -13,12 +13,42 @@ use std::time::Duration;
 
 use crate::spawn::SpawnOutcome;
 
+/// Normalize a git remote URL: convert git@... to https://..., strip trailing
+/// slashes, and strip trailing `.git`.
+pub(crate) fn normalize_git_url(raw: &str) -> String {
+    let mut s = raw.trim().to_string();
+    if let Some(rest) = s.strip_prefix("git@github.com:") {
+        s = format!("https://github.com/{rest}");
+    } else if let Some(rest) = s.strip_prefix("git@gitlab.com:") {
+        s = format!("https://gitlab.com/{rest}");
+    }
+    s = s.trim_end_matches('/').to_string();
+    if let Some(stripped) = s.strip_suffix(".git") {
+        s = stripped.to_string();
+    }
+    s
+}
+
+pub(crate) fn urls_equivalent(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    normalize_git_url(a) == normalize_git_url(b)
+}
+
 /// `git remote get-url origin`, best-effort. Never errors the caller.
 pub(crate) fn detect_repo_url(root: &Path) -> Option<String> {
     let mut cmd = Command::new("git");
     cmd.args(["remote", "get-url", "origin"]).current_dir(root);
     match crate::spawn::run(&mut cmd, Duration::from_secs(3)) {
-        SpawnOutcome::RanClean(out) => Some(out.trim().to_string()),
+        SpawnOutcome::RanClean(out) => {
+            let s = out.trim();
+            if s.is_empty() {
+                None
+            } else {
+                Some(normalize_git_url(s))
+            }
+        }
         _ => None,
     }
 }

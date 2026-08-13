@@ -184,6 +184,11 @@ repos:
 * **PHP**: Composer package binaries in `vendor/bin`.
 * **JVM**: Gradle `installDist` and Maven shaded JAR entrypoints.
 * **.NET / C#**: SDK-style executable `.csproj` targets.
+* **Zig**: `build.zig` / `build.zig.zon` and artifacts in `zig-out/bin/`.
+* **Swift**: `Package.swift` and `.build/{debug,release}/` artifacts or `swift run`.
+* **C / C++**: `CMakeLists.txt`, `meson.build`, `Makefile` and `build/` / `bin/` binaries.
+* **Elixir**: `mix.exs` and `_build/{dev,prod}/rel/` releases or `mix escript`.
+* **Deno**: `deno.json` / `deno.jsonc` and `deno run` script entrypoints.
 
 ---
 

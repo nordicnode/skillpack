@@ -94,6 +94,11 @@ pub(crate) fn primary_cli_candidate(
         Language::Php => php_cli_candidate(root, name),
         Language::Jvm => jvm_cli_candidate(root, name),
         Language::CSharp => csharp_cli_candidate(root, name),
+        Language::Zig => zig_cli_candidate(root, name),
+        Language::Swift => swift_cli_candidate(root, name),
+        Language::CCpp => c_cpp_cli_candidate(root, name),
+        Language::Elixir => elixir_cli_candidate(root, name),
+        Language::Deno => deno_cli_candidate(root, name),
         Language::Unknown => which_on_path(name).map(|_| CliCandidate {
             argv: vec![name.to_string()],
             spawn_cwd: root.to_path_buf(),
@@ -510,6 +515,119 @@ fn csharp_cli_candidate(root: &Path, _name: &str) -> Option<CliCandidate> {
     })
 }
 
+fn zig_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    for dir in &["zig-out/bin", "bin"] {
+        let bin = root.join(dir).join(format!("{name}{suffix}"));
+        if bin.is_file() {
+            let canon = canonicalize_for_argv(&bin);
+            return Some(CliCandidate {
+                argv: vec![canon],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    which_on_path(name).map(|p| CliCandidate {
+        argv: vec![p.to_string_lossy().to_string()],
+        spawn_cwd: root.to_path_buf(),
+    })
+}
+
+fn swift_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    for dir in &[".build/debug", ".build/release"] {
+        let bin = root.join(dir).join(format!("{name}{suffix}"));
+        if bin.is_file() {
+            let canon = canonicalize_for_argv(&bin);
+            return Some(CliCandidate {
+                argv: vec![canon],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    if which_on_path("swift").is_some() && root.join("Package.swift").is_file() {
+        return Some(CliCandidate {
+            argv: vec!["swift".to_string(), "run".to_string(), name.to_string()],
+            spawn_cwd: root.to_path_buf(),
+        });
+    }
+    which_on_path(name).map(|p| CliCandidate {
+        argv: vec![p.to_string_lossy().to_string()],
+        spawn_cwd: root.to_path_buf(),
+    })
+}
+
+fn c_cpp_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    for dir in &[
+        "build",
+        "bin",
+        "out",
+        "build/bin",
+        "build/debug",
+        "build/release",
+    ] {
+        let bin = root.join(dir).join(format!("{name}{suffix}"));
+        if bin.is_file() {
+            let canon = canonicalize_for_argv(&bin);
+            return Some(CliCandidate {
+                argv: vec![canon],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    which_on_path(name).map(|p| CliCandidate {
+        argv: vec![p.to_string_lossy().to_string()],
+        spawn_cwd: root.to_path_buf(),
+    })
+}
+
+fn elixir_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    for dir in &["_build/dev/rel", "_build/prod/rel"] {
+        let bin = root.join(dir).join(name).join("bin").join(name);
+        if bin.is_file() {
+            let canon = canonicalize_for_argv(&bin);
+            return Some(CliCandidate {
+                argv: vec![canon],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    which_on_path(name).map(|p| CliCandidate {
+        argv: vec![p.to_string_lossy().to_string()],
+        spawn_cwd: root.to_path_buf(),
+    })
+}
+
+fn deno_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    if which_on_path("deno").is_some() {
+        for script in &[
+            "main.ts",
+            "cli.ts",
+            "index.ts",
+            "mod.ts",
+            "src/main.ts",
+            "src/cli.ts",
+        ] {
+            if root.join(script).is_file() {
+                return Some(CliCandidate {
+                    argv: vec![
+                        "deno".to_string(),
+                        "run".to_string(),
+                        "-A".to_string(),
+                        script.to_string(),
+                    ],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+    }
+    which_on_path(name).map(|p| CliCandidate {
+        argv: vec![p.to_string_lossy().to_string()],
+        spawn_cwd: root.to_path_buf(),
+    })
+}
+
 /// Canonicalize a path and strip the `\\?\` verbatim-UNC prefix that
 /// `std::fs::canonicalize` emits on Windows. Node's module loader rejects
 /// `\\?\` paths (ESM resolve / fs.readFile error out), and a `\\?\C:\foo`
@@ -642,7 +760,8 @@ mod candidate_tests {
         }
         let root = scratch_root(&[("main.go", "package main\nfunc main(){}\n")]);
         let cand = primary_cli_candidate(&root, Language::Go, "sample-go").unwrap();
-        assert_eq!(cand.argv, vec!["go", "run", "."]);
+        assert!(cand.argv[0].ends_with("go") || cand.argv[0].ends_with("go.exe"));
+        assert_eq!(&cand.argv[1..], &["run", "."]);
         assert_eq!(cand.spawn_cwd, root);
         cleanup(&root);
     }
@@ -763,6 +882,74 @@ mod candidate_tests {
         assert_eq!(cand.argv[2], "--project");
         assert!(cand.argv[3].ends_with("sample.csproj"));
         assert_eq!(cand.argv[4], "--");
+        assert_eq!(cand.spawn_cwd, root);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn zig_candidate_finds_zig_out_bin() {
+        let root = scratch_root(&[("build.zig", "const std = @import(\"std\");\n")]);
+        let bin_dir = root.join("zig-out").join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let bin_name = if cfg!(windows) {
+            "my-zig.exe"
+        } else {
+            "my-zig"
+        };
+        std::fs::write(bin_dir.join(bin_name), "#!/bin/sh\necho zig\n").unwrap();
+        let cand = primary_cli_candidate(&root, Language::Zig, "my-zig").unwrap();
+        assert!(cand.argv[0].ends_with(bin_name));
+        assert_eq!(cand.spawn_cwd, root);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn swift_candidate_finds_build_debug_bin() {
+        let root = scratch_root(&[("Package.swift", "// swift\n")]);
+        let bin_dir = root.join(".build").join("debug");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let bin_name = if cfg!(windows) {
+            "swift-cli.exe"
+        } else {
+            "swift-cli"
+        };
+        std::fs::write(bin_dir.join(bin_name), "#!/bin/sh\necho swift\n").unwrap();
+        let cand = primary_cli_candidate(&root, Language::Swift, "swift-cli").unwrap();
+        assert!(cand.argv[0].ends_with(bin_name));
+        assert_eq!(cand.spawn_cwd, root);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn c_cpp_candidate_finds_build_bin() {
+        let root = scratch_root(&[("CMakeLists.txt", "project(MyCpp)\n")]);
+        let bin_dir = root.join("build");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let bin_name = if cfg!(windows) {
+            "my_cpp.exe"
+        } else {
+            "my_cpp"
+        };
+        std::fs::write(bin_dir.join(bin_name), "#!/bin/sh\necho cpp\n").unwrap();
+        let cand = primary_cli_candidate(&root, Language::CCpp, "my_cpp").unwrap();
+        assert!(cand.argv[0].ends_with(bin_name));
+        assert_eq!(cand.spawn_cwd, root);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn elixir_candidate_finds_release_bin() {
+        let root = scratch_root(&[("mix.exs", "defmodule App ...")]);
+        let bin_dir = root
+            .join("_build")
+            .join("dev")
+            .join("rel")
+            .join("my_app")
+            .join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::write(bin_dir.join("my_app"), "#!/bin/sh\necho elixir\n").unwrap();
+        let cand = primary_cli_candidate(&root, Language::Elixir, "my_app").unwrap();
+        assert!(cand.argv[0].ends_with("my_app"));
         assert_eq!(cand.spawn_cwd, root);
         cleanup(&root);
     }

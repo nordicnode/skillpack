@@ -105,6 +105,12 @@ pub enum Language {
     Php,
     CSharp,
     Jvm,
+    Zig,
+    Swift,
+    #[serde(rename = "c_cpp")]
+    CCpp,
+    Elixir,
+    Deno,
     Unknown,
 }
 
@@ -119,6 +125,11 @@ impl Language {
             Self::Php => "php",
             Self::CSharp => "csharp",
             Self::Jvm => "jvm",
+            Self::Zig => "zig",
+            Self::Swift => "swift",
+            Self::CCpp => "c_cpp",
+            Self::Elixir => "elixir",
+            Self::Deno => "deno",
             Self::Unknown => "unknown",
         }
     }

@@ -34,6 +34,7 @@ mod workspace;
 #[cfg(test)]
 pub(crate) use cli_candidates::which_on_path;
 pub(crate) use manifest::{project_manifest_version, select_csproj};
+pub(crate) use repo::urls_equivalent;
 #[cfg(test)]
 use std::path::PathBuf;
 pub(crate) use workspace::{
@@ -154,13 +155,26 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
         Language::CSharp
     } else if root.join("Gemfile").exists() || cli_probe::has_gemspec(root) {
         Language::Ruby
+    } else if root.join("build.zig").exists() || root.join("build.zig.zon").exists() {
+        Language::Zig
+    } else if root.join("Package.swift").exists() {
+        Language::Swift
+    } else if root.join("CMakeLists.txt").exists()
+        || root.join("meson.build").exists()
+        || root.join("Makefile").exists()
+    {
+        Language::CCpp
+    } else if root.join("mix.exs").exists() {
+        Language::Elixir
+    } else if root.join("deno.json").exists() || root.join("deno.jsonc").exists() {
+        Language::Deno
     } else {
         diag.push(
             "detect_language",
             "no known manifest found (none of: Cargo.toml, package.json, ".to_string()
                 + "pyproject.toml, setup.py, setup.cfg, go.mod, composer.json, "
                 + "pom.xml, build.gradle, build.gradle.kts, Gemfile, *.gemspec, "
-                + "*.csproj); "
+                + "*.csproj, build.zig, Package.swift, CMakeLists.txt, meson.build, Makefile, mix.exs, deno.json); "
                 + "language detected as Unknown",
         );
         Language::Unknown

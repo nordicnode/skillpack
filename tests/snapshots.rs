@@ -223,6 +223,26 @@ fn snapshot_csharp_cursor_globs() {
     insta::assert_snapshot!("cursor_csharp", mdc.contents);
 }
 
+#[test]
+fn test_new_languages_cursor_globs() {
+    for (lang, expected_glob) in [
+        (Language::Zig, "*.zig"),
+        (Language::Swift, "*.swift"),
+        (Language::CCpp, "*.cpp"),
+        (Language::Elixir, "*.ex"),
+        (Language::Deno, "*.ts"),
+    ] {
+        let mut p = cli_profile();
+        p.language = lang;
+        let files = render_targets(&p, &cli_intent(), &[Target::Cursor], None).unwrap();
+        let mdc = files.iter().find(|f| f.rel_path.ends_with(".mdc")).unwrap();
+        assert!(
+            mdc.contents.contains(expected_glob),
+            "Language {lang:?} missing expected glob {expected_glob}"
+        );
+    }
+}
+
 /// `--target all` must produce exactly these six distribution-file paths
 /// in canonical order. Catches a new target being added without wiring
 /// into the `all` expansion, or a target being silently dropped.

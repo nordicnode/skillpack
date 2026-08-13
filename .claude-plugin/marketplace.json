@@ -3,7 +3,7 @@
   "owner": {
     "name": "nordicnode",
     "type": "individual",
-    "url": "https://github.com/nordicnode/skillpack.git"
+    "url": "https://github.com/nordicnode/skillpack"
   },
   "plugins": [
     {
@@ -11,8 +11,8 @@
       "source": "./",
       "description": "Generate and verify the agent-distribution layer for any OSS project",
       "license": "MIT",
-      "repository": "https://github.com/nordicnode/skillpack.git",
-      "keywords": ["rust", "cli", "generate", "verify", "scaffold", "init", "doctor", "update", "diff", "manifest"],
+      "repository": "https://github.com/nordicnode/skillpack",
+      "keywords": ["rust", "cli", "generate", "verify", "scaffold", "init", "doctor", "update", "diff", "differently"],
       "category": "developer-tools"
     }
   ]

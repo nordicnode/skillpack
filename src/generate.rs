@@ -669,6 +669,11 @@ fn category_hint(lang: Language) -> &'static str {
         Language::Php => "the PHP tooling",
         Language::Jvm => "the JVM tooling",
         Language::CSharp => "the .NET/C# tooling",
+        Language::Zig => "the Zig tooling",
+        Language::Swift => "the Swift tooling",
+        Language::CCpp => "the C/C++ tooling",
+        Language::Elixir => "the Elixir tooling",
+        Language::Deno => "the Deno tooling",
         Language::Unknown => "the tooling",
     }
 }
@@ -713,6 +718,24 @@ fn cursor_globs_hint(lang: Language) -> Vec<String> {
             "build.gradle.kts".into(),
         ],
         Language::CSharp => vec!["*.cs".into(), "*.csproj".into(), "*.sln".into()],
+        Language::Zig => vec!["*.zig".into(), "build.zig".into(), "build.zig.zon".into()],
+        Language::Swift => vec!["*.swift".into(), "Package.swift".into()],
+        Language::CCpp => vec![
+            "*.c".into(),
+            "*.cpp".into(),
+            "*.cc".into(),
+            "*.h".into(),
+            "*.hpp".into(),
+            "CMakeLists.txt".into(),
+            "Makefile".into(),
+        ],
+        Language::Elixir => vec!["*.ex".into(), "*.exs".into(), "mix.exs".into()],
+        Language::Deno => vec![
+            "*.ts".into(),
+            "*.js".into(),
+            "deno.json".into(),
+            "deno.jsonc".into(),
+        ],
         Language::Unknown => vec![],
     }
 }

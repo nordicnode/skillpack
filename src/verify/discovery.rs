@@ -502,7 +502,7 @@ fn check_plugin_json(root: &Path, repo_url: &Option<String>) -> Result<CheckResu
             .iter()
             .filter(|field| {
                 let current = v.get(**field).and_then(|x| x.as_str()).unwrap_or("");
-                current != canonical
+                !crate::introspect::urls_equivalent(current, canonical)
             })
             .copied()
             .collect();

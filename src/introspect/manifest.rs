@@ -186,6 +186,55 @@ pub(crate) fn project_manifest_name(root: &Path, language: Language) -> Option<S
             }
             None
         }
+        Language::Zig => {
+            if let Ok(raw) = fs::read_to_string(root.join("build.zig.zon")) {
+                if let Some(n) = extract_zig_zon_field(&raw, "name") {
+                    return Some(n);
+                }
+            }
+            None
+        }
+        Language::Swift => {
+            if let Ok(raw) = fs::read_to_string(root.join("Package.swift")) {
+                if let Some(n) = extract_swift_package_name(&raw) {
+                    return Some(n);
+                }
+            }
+            None
+        }
+        Language::CCpp => {
+            if let Ok(raw) = fs::read_to_string(root.join("CMakeLists.txt")) {
+                if let Some(n) = extract_cmake_project_name(&raw) {
+                    return Some(n);
+                }
+            }
+            if let Ok(raw) = fs::read_to_string(root.join("meson.build")) {
+                if let Some(n) = extract_meson_project_name(&raw) {
+                    return Some(n);
+                }
+            }
+            None
+        }
+        Language::Elixir => {
+            if let Ok(raw) = fs::read_to_string(root.join("mix.exs")) {
+                if let Some(n) = extract_elixir_app_name(&raw) {
+                    return Some(n);
+                }
+            }
+            None
+        }
+        Language::Deno => {
+            for f in &["deno.json", "deno.jsonc"] {
+                if let Ok(raw) = fs::read_to_string(root.join(f)) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        if let Some(n) = v.get("name").and_then(|n| n.as_str()) {
+                            return Some(n.to_string());
+                        }
+                    }
+                }
+            }
+            None
+        }
         Language::Unknown => None,
     }
 }
@@ -295,7 +344,48 @@ pub(crate) fn project_manifest_version(root: &Path, language: Language) -> Optio
         Language::CSharp => select_csproj(root)
             .and_then(|p| fs::read_to_string(&p).ok())
             .and_then(|raw| extract_xml_tag(&raw, "Version")),
-        Language::Go | Language::Unknown => None,
+        Language::Zig => {
+            if let Ok(raw) = fs::read_to_string(root.join("build.zig.zon")) {
+                if let Some(v) = extract_zig_zon_field(&raw, "version") {
+                    return Some(v);
+                }
+            }
+            None
+        }
+        Language::Elixir => {
+            if let Ok(raw) = fs::read_to_string(root.join("mix.exs")) {
+                if let Some(v) = extract_elixir_version(&raw) {
+                    return Some(v);
+                }
+            }
+            None
+        }
+        Language::CCpp => {
+            if let Ok(raw) = fs::read_to_string(root.join("CMakeLists.txt")) {
+                if let Some(v) = extract_cmake_project_version(&raw) {
+                    return Some(v);
+                }
+            }
+            if let Ok(raw) = fs::read_to_string(root.join("meson.build")) {
+                if let Some(v) = extract_meson_project_version(&raw) {
+                    return Some(v);
+                }
+            }
+            None
+        }
+        Language::Deno => {
+            for f in &["deno.json", "deno.jsonc"] {
+                if let Ok(raw) = fs::read_to_string(root.join(f)) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        if let Some(ver) = v.get("version").and_then(|n| n.as_str()) {
+                            return Some(ver.to_string());
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Language::Swift | Language::Go | Language::Unknown => None,
     }
 }
 
@@ -412,7 +502,7 @@ fn project_manifest_authors_raw(root: &Path, language: Language) -> Option<Strin
             .and_then(|p| fs::read_to_string(&p).ok())
             .and_then(|raw| extract_xml_tag(&raw, "Authors"))
             .and_then(|a| a.split(',').next().map(|s| s.trim().to_string())),
-        Language::Go | Language::Unknown => None,
+        _ => None,
     }
 }
 
@@ -495,6 +585,26 @@ pub(crate) fn manifest_license(root: &Path, language: Language) -> Option<String
         Language::CSharp => select_csproj(root)
             .and_then(|p| fs::read_to_string(&p).ok())
             .and_then(|raw| extract_xml_tag(&raw, "PackageLicenseExpression")),
+        Language::Deno => {
+            for f in &["deno.json", "deno.jsonc"] {
+                if let Ok(raw) = fs::read_to_string(root.join(f)) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        if let Some(lic) = v.get("license").and_then(|n| n.as_str()) {
+                            return Some(lic.to_string());
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Language::Zig => {
+            if let Ok(raw) = fs::read_to_string(root.join("build.zig.zon")) {
+                if let Some(lic) = extract_zig_zon_field(&raw, "license") {
+                    return Some(lic);
+                }
+            }
+            None
+        }
         _ => None,
     }
 }
@@ -539,6 +649,140 @@ fn extract_ruby_string_value(line: &str) -> Option<String> {
     let s = after.trim_start_matches(['"', '\'']);
     let s = s.split(['"', '\'']).next()?.trim();
     Some(s.to_string())
+}
+
+fn extract_cmake_project_name(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(i) = trimmed.to_ascii_lowercase().find("project(") {
+            let inside = &trimmed[i + 8..];
+            if let Some(end) = inside.find(')') {
+                let inner = inside[..end].trim();
+                let first_tok = inner.split_whitespace().next()?;
+                let clean = first_tok.trim_matches(|c| c == '"' || c == '\'');
+                if !clean.is_empty() {
+                    return Some(clean.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_cmake_project_version(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(i) = trimmed.to_ascii_lowercase().find("project(") {
+            let inside = &trimmed[i + 8..];
+            let upper = inside.to_uppercase();
+            if let Some(v_idx) = upper.find("VERSION") {
+                let after = &inside[v_idx + 7..].trim_start();
+                let tok = after
+                    .split(|c: char| c.is_whitespace() || c == ')' || c == '"' || c == '\'')
+                    .next()?;
+                if !tok.is_empty() && tok.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                    return Some(tok.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_meson_project_name(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(inside) = trimmed.strip_prefix("project(") {
+            if let Some(comma_or_end) = inside.find([',', ')']) {
+                let first = &inside[..comma_or_end].trim();
+                let clean = first.trim_matches(|c| c == '"' || c == '\'');
+                if !clean.is_empty() {
+                    return Some(clean.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_meson_project_version(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(i) = trimmed.find("version:") {
+            let after = trimmed[i + 8..].trim();
+            let clean = after
+                .trim_matches(|c: char| c == ',' || c == '"' || c == '\'' || c.is_whitespace());
+            if !clean.is_empty() {
+                return Some(clean.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn extract_zig_zon_field(raw: &str, field: &str) -> Option<String> {
+    let dot_field = format!(".{field}");
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with(&dot_field) || trimmed.starts_with(field) {
+            if let Some(eq) = trimmed.find('=') {
+                let val = trimmed[eq + 1..].trim();
+                let clean = val.trim_matches(|c: char| {
+                    c == ',' || c == '"' || c == '\'' || c == '.' || c.is_whitespace()
+                });
+                if !clean.is_empty() {
+                    return Some(clean.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_swift_package_name(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(i) = trimmed.find("name:") {
+            let after = trimmed[i + 5..].trim();
+            let clean = after
+                .trim_matches(|c: char| c == ',' || c == '"' || c == '\'' || c.is_whitespace());
+            if !clean.is_empty() {
+                return Some(clean.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn extract_elixir_app_name(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(i) = trimmed.find("app:") {
+            let after = trimmed[i + 4..].trim();
+            let clean = after.trim_matches(|c: char| {
+                c == ':' || c == ',' || c == '"' || c == '\'' || c.is_whitespace()
+            });
+            if !clean.is_empty() {
+                return Some(clean.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn extract_elixir_version(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(i) = trimmed.find("version:") {
+            let after = trimmed[i + 8..].trim();
+            let clean = after
+                .trim_matches(|c: char| c == ',' || c == '"' || c == '\'' || c.is_whitespace());
+            if !clean.is_empty() {
+                return Some(clean.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -630,6 +874,91 @@ mod tests {
         assert_eq!(
             project_manifest_name(&root, Language::Go).as_deref(),
             Some("widget")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn zig_manifest_parses_name_and_version() {
+        let root = scratch(&[(
+            "build.zig.zon",
+            ".{\n    .name = \"zig-frob\",\n    .version = \"0.4.2\",\n    .paths = .{\"\"},\n}\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Zig).as_deref(),
+            Some("zig-frob")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Zig).as_deref(),
+            Some("0.4.2")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn swift_manifest_parses_package_name() {
+        let root = scratch(&[(
+            "Package.swift",
+            "// swift-tools-version: 5.9\nimport PackageDescription\nlet package = Package(\n    name: \"SwiftCLI\",\n    products: []\n)\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Swift).as_deref(),
+            Some("SwiftCLI")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn cmake_manifest_parses_name_and_version() {
+        let root = scratch(&[(
+            "CMakeLists.txt",
+            "cmake_minimum_required(VERSION 3.20)\nproject(SuperEngine VERSION 2.1.0 LANGUAGES CXX)\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::CCpp).as_deref(),
+            Some("SuperEngine")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::CCpp).as_deref(),
+            Some("2.1.0")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn elixir_manifest_parses_name_and_version() {
+        let root = scratch(&[(
+            "mix.exs",
+            "defmodule MyTool.MixProject do\n  use Mix.Project\n  def project do\n    [\n      app: :my_tool,\n      version: \"1.3.0\",\n      elixir: \"~> 1.14\"\n    ]\n  end\nend\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Elixir).as_deref(),
+            Some("my_tool")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Elixir).as_deref(),
+            Some("1.3.0")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn deno_manifest_parses_name_version_and_license() {
+        let root = scratch(&[(
+            "deno.json",
+            "{\n  \"name\": \"@scope/deno-tool\",\n  \"version\": \"0.9.1\",\n  \"license\": \"MIT\"\n}\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Deno).as_deref(),
+            Some("@scope/deno-tool")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Deno).as_deref(),
+            Some("0.9.1")
+        );
+        assert_eq!(
+            manifest_license(&root, Language::Deno).as_deref(),
+            Some("MIT")
         );
         cleanup(&root);
     }
