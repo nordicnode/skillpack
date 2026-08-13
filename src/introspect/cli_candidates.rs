@@ -760,7 +760,19 @@ mod candidate_tests {
         }
         let root = scratch_root(&[("main.go", "package main\nfunc main(){}\n")]);
         let cand = primary_cli_candidate(&root, Language::Go, "sample-go").unwrap();
-        assert!(cand.argv[0].ends_with("go") || cand.argv[0].ends_with("go.exe"));
+        // `which_on_path` returns `go.exe` on Windows, but PATHEXT casing
+        // (`go.EXE`) is not guaranteed and a string suffix check is
+        // case-sensitive — compare the file stem case-insensitively instead
+        // (same pattern as the node candidate test above).
+        let go_stem = Path::new(&cand.argv[0])
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        assert!(
+            go_stem.eq_ignore_ascii_case("go"),
+            "expected go executable, got {:?}",
+            cand.argv
+        );
         assert_eq!(&cand.argv[1..], &["run", "."]);
         assert_eq!(cand.spawn_cwd, root);
         cleanup(&root);
