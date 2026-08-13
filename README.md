@@ -1,148 +1,58 @@
 <div align="center"><img src="docs/logo.png" width="512" alt="skillpack logo"></div>
 
-# skillpack — the distribution-layer generator + verifier for AI agents, not a skill library.
+# skillpack — make your tool easy for AI coding agents to find and use
 
 [![CI](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml/badge.svg)](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/skillpack.svg)](https://crates.io/crates/skillpack)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
-Coding agents (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, and any AGENTS.md reader — Codex, Windsurf, Aider, Zed, Warp, JetBrains Junie, etc.) now discover and invoke
-tools by reading marketplace manifests, skill files, and CLIs — not by `npm install`-ing
-on instinct. An OSS project's code quality no longer matters if the agent can't find,
-understand, and autonomously invoke the tool. That wiring around a library or CLI is the
-**distribution layer**, and `skillpack` generates it for you — then verifies that a coding
-agent coming in cold could actually use what you shipped.
+## What is this?
 
-`skillpack` takes any OSS project and generates the agent distribution files for
-one or more coding-agent ecosystems (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, AGENTS.md),
-then runs a verification suite that simulates an agent's first read and actually invokes
-the documented CLI to catch drift before it reaches a user.
+AI coding agents (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, and any tool that reads `AGENTS.md`) don't use your project the way a person does. A person reads the README and runs the install command. An agent looks for a `SKILL.md`, a plugin manifest, or `--help` output — and if those aren't there, it often can't find your tool at all, or it guesses the wrong command and gets stuck.
 
-## What it generates
+skillpack closes that gap with one command. It:
 
-From your repo, `skillpack init` writes (purely additive — nothing existing is touched).
-By default it targets Claude Code; pass `--target cursor` / `--target codex` /
-`--target opencode` / `--target copilot` / `--target agentsmd` to emit for additional
-agents (repeatable), or `--target all` to emit for every supported ecosystem:
+1. **Learns** your project — what it's called, what language it's in, whether it ships a CLI, and what that CLI can actually do.
+2. **Generates** the small set of files agents read to discover, understand, and run your tool.
+3. **Verifies** those files by simulating an agent's first visit — including running your real CLI and checking that every documented flag actually exists.
 
-**Claude Code** (`--target claude`, default):
-
-- `.claude-plugin/marketplace.json` — a single-plugin marketplace entry pointing at your project root
-- `.claude-plugin/plugin.json` — the plugin manifest (name, version, author, repo URL)
-- `skills/<tool-name>/SKILL.md` — the operational knowledge file an agent reads (frontmatter + body, including a `### Subcommands` block for CLIs with subcommands)
-
-**Cursor** (`--target cursor`):
-
-- `.cursor/rules/<tool-name>.mdc` — a Cursor project rule with `description` / `alwaysApply` frontmatter and the same invocation body
-
-**Codex CLI** (`--target codex`):
-
-- `.codex/skills/<tool-name>/SKILL.md` — same `SKILL.md` frontmatter and body as Claude (cross-agent compatible), installed under Codex's `.codex/skills/` convention
-
-**OpenCode** (`--target opencode`):
-
-- `.opencode/agents/<tool-name>.md` — an OpenCode subagent definition with `description` / `mode` frontmatter and the same invocation body
-
-**GitHub Copilot** (`--target copilot`):
-
-- `.github/copilot-instructions.md` — a Copilot instructions file (plain markdown, no frontmatter) with the same invocation body
-
-**AGENTS.md** (`--target agentsmd`):
-
-- `AGENTS.md` — a root-level instructions file (plain markdown, no frontmatter) with the same invocation body, read natively by 20+ agent clients (Codex, Cursor, Windsurf, Copilot, Aider, Zed, Warp, JetBrains Junie, etc.) per the [agents.md](https://agents.md/) spec (Linux Foundation stewarded)
-
-A `skillpack.toml` at your project root captures your answers so re-runs are deterministic
-and CI-friendly.
-
-## Supported ecosystems
-
-| Language | CLI detection                             |
-|----------|-------------------------------------------|
-| Rust     | built binary under `target/`, or on PATH  |
-| Node     | `node <script>` from a `package.json` bin |
-| Python   | `python -m <pkg>` from `[project.scripts]` |
-| Go       | `go run .` for a `package main` project   |
-| Ruby     | a `ruby exe/<name>` (or `bin/<name>`) binstub |
-| PHP      | `php <script>` from a `composer.json` `bin` entry |
-| JVM      | pre-built Gradle `installDist` script, or `java -jar` a Maven shaded / Gradle shadow jar (pure filesystem reads — no build invoked) |
-| C#       | `dotnet run --project <csproj>` (SDK-style, `OutputType=Exe`; `WinExe` GUI projects skipped) |
-
-Projects without a CLI take the pure-library path: `SKILL.md` documents the install +
-import pattern instead, and the invocation test is a no-op. The `has_cli` flag is the
-single branching point.
-
-> **Platform:** Cross-platform — CI runs on Ubuntu, macOS, and Windows. CLI
-> detection probes `PATH` with `PATHEXT` enumeration on Windows (so a bare
-> `node` lookup resolves `node.exe`), and `cargo build` artifacts carry the
-> `.exe` suffix. Paths are normalized to forward slashes in the verify
-> report. PATHEXT enum (0.6.0), `.exe` artifact probe (0.6.3), and `\\?\`
-> UNC-prefix strip (0.6.4) brought Windows to parity.
-
-## Install
-
-```sh
-cargo install skillpack    # from crates.io
-```
-
-Or build from source: `cargo install --path .` (or `cargo build --release` for a
-local binary under `target/release/`).
-
-Requires Rust 1.85+. Published on [crates.io](https://crates.io/crates/skillpack).
+The whole loop is safe: `init` verifies its own output **before** writing a single file, so a broken pack can never silently ship.
 
 ## Quick start
 
 ```sh
-# In your OSS project root:
-skillpack init            # introspect → interview → generate → pre-commit verify
+# 1. Install
+cargo install skillpack
 
-# Generate for all six agent ecosystems at once:
+# 2. From your project root — a few quick questions, then everything is generated
+skillpack init
+
+# 3. Want every agent ecosystem, not just Claude Code?
 skillpack init --target all
-# Re-run anywhere / in CI (deterministic, non-interactive):
-skillpack init --non-interactive --accept-warnings
 
-# Check a generated (or hand-written) skill pack:
+# 4. Re-check the generated files anytime (and in CI)
 skillpack verify
-
-# Diagnose language/CLI detection (read-only, exit 0):
-skillpack doctor
 ```
 
-`init` runs the full `verify` suite against its own output **before** writing files, so
-the worst case — a broken skill pack that looks fine until an agent tries to use it — is
-caught up front.
+Your answers are saved to a `skillpack.toml` (commit it), so re-runs are instant and CI-friendly: `skillpack init --non-interactive` needs no prompts.
 
+## What you get
 
-## CI gate (drop-in)
+`init` writes a handful of small files and touches nothing you already have:
 
-`verify` exits non-zero on any critical failure, so it drops straight into CI as
-a PR gate. A reusable workflow ships in this repo — one line in your workflow:
+- **Claude Code** (the default) — a marketplace + plugin manifest (`.claude-plugin/`) and a `SKILL.md` that explains what your tool does and demonstrates a real invocation.
+- **Cursor** — a project rule (`.cursor/rules/…mdc`) that auto-attaches when relevant files are open.
+- **Codex** — the same skill, under Codex's `.codex/skills/` convention.
+- **OpenCode** — an agent definition (`.opencode/agents/…md`).
+- **GitHub Copilot** — repo instructions (`.github/copilot-instructions.md`).
+- **AGENTS.md** — a plain instructions file that 20+ agents read natively.
 
-```yaml
-jobs:
-  skillpack:
-    uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.11.2
-```
+CLI projects get a skill that documents the real command and its flags; pure libraries get install + import instructions instead. When your CLI's surface changes, `skillpack update` refreshes the generated files without re-answering the questions.
 
-Pin to a released tag (e.g. `@v0.11.2`); bump the pin when you want new
-features. The job installs `skillpack` from crates.io and runs
-`skillpack verify --format json` against the consumer repo, mirroring
-skillpack's own CI matrix (ubuntu / macOS / Windows, same runtime setup-*
-actions per supported language). Override the installed crate version:
+## Does it actually help? (measured)
 
-```yaml
-with:
-  skillpack-version: '0.11.2'  # any crates.io-published version
-```
-
-Prefer wiring your own workflow? `cargo install skillpack --locked` and run
-`skillpack verify` directly; the subcommand is the same as in Quick start.
-
-## Does it actually help agents? (measured)
-
-Four fd search tasks, run with [OpenCode](https://opencode.ai) on a plain
-clone of `sharkdp/fd` versus the same clone + `skillpack init --target opencode --target claude --target cursor`.
-Same model, same questions, same capture format:
+Four `fd` search tasks, run with [OpenCode](https://opencode.ai) on a plain clone of `sharkdp/fd` versus the same clone + `skillpack init --target opencode --target claude --target cursor`. Same model, same questions:
 
 | Metric | plain clone | clone + skillpack | delta |
 |---|---|---|---|
@@ -150,133 +60,49 @@ Same model, same questions, same capture format:
 | Token total | 38,134 | 22,248 | **-42%** |
 | Wall clock | 130 s | 27 s | **-79%** |
 
-Both conditions got all four answers right; the delta is **efficiency and fewer
-detours**, not capability the agent couldn't otherwise reach. The biggest win was
-Q4: the plain-clone agent hit fd's `--max-results`/`-x` incompatibility error and
-retried four times; the generated OpenCode agent (invoked via `--agent fd-find`) had the verified `-x`/`--exec` mapping in `.opencode/agents/fd-find.md` and answered in one step.
+Both conditions got all four answers right — the win is *efficiency*, not capability. The biggest one: the plain-clone agent hit fd's `--max-results`/`-x` incompatibility and retried four times; the generated agent had the verified flag mapping and answered in one step. Full methodology and honest limitations (including one spot where the skillpack agent was *less* accurate) are in [`docs/agent-demo.md`](docs/agent-demo.md).
 
-Full methodology, per-question analysis, and honest limitations (including one
-spot where the skillpack agent was *less* accurate than the baseline) are in
-[`docs/agent-demo.md`](docs/agent-demo.md).
+## Use it in CI
 
-## What `verify` checks
+`verify` exits non-zero when something's broken, so it drops straight into CI as a pull-request gate. A reusable workflow ships in this repo — one line in your workflow:
 
-**Discovery** — structural validation per ecosystem. Claude Code (the
-`.claude-plugin/` + `skills/` set) is checked against the documented plugin
-schema:
+```yaml
+jobs:
+  skillpack:
+    uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.11.2
+```
 
-- plugin / marketplace names are kebab-case and not reserved
-- `description` is present and the combined description + `when_to_use` stays under the
-  1,536-character listing cap
-- `when_to_use` carries trigger phrases an agent can match on
-- marketplace `source` paths use the `./` prefix and forward slashes only
-- `version` is present in `plugin.json` (warns on missing/empty)
-- `author` is present in `plugin.json` (warns on missing or `"Unspecified"`)
-- `version` in `plugin.json` matches the project manifest version (warns on drift; a stale 0.6.4 vs 0.8.1 self-dogfood caught by this check)
-- `homepage` / `repository` in `plugin.json` match the git origin URL (warns on drift; skipped when no git origin is configured)
-- `allowed-tools` in `SKILL.md` frontmatter matches the Anthropic grammar (comma-separated; each token a bare identifier like `Read` or a namespaced call like `Bash(npm test:*)`) — warns on malformed tokens (unbalanced parens, non-alpha identifiers). Applied to Codex `SKILL.md` too.
-- the SKILL.md frontmatter block is closed by a `---` delimiter (an unterminated block would swallow the body — fails)
-- a `skills/<name>/SKILL.md` (or `.codex/skills/<name>/SKILL.md`) directory name matches its frontmatter `name:` (warns on mismatch — agents load skills by directory)
+Pin to a released tag (e.g. `@v0.11.2`) and bump it when you want new features. It installs `skillpack` from crates.io and runs `skillpack verify --format json` on your repo, on the same OS matrix skillpack itself is tested on (Ubuntu, macOS, Windows). Prefer your own workflow? `cargo install skillpack --locked && skillpack verify` is all you need.
 
-**Drift repair (`--fix`)** — `verify --fix` mechanically regenerates *only the file the drift lives in* (never wholesale regen — that's `skillpack init`). Repairs:
+## What it checks
 
-- `plugin.json` drift — `version`, `homepage`/`repository` URL, missing `description` or `author` — by rewriting `.claude-plugin/plugin.json` from the current manifest + intent, leaving your `SKILL.md`/`marketplace.json` intact.
-- `SKILL.md` frontmatter drift — `name`, `when_to_use`, `allowed-tools`, and the `name_drift` checks (Claude + Codex) — by regenerating ONLY the `---` frontmatter block from the current intent and splicing it onto your committed body, so hand-tailored body prose survives byte-for-byte.
+In plain terms, `skillpack verify` asks three questions:
 
-No-op when there's no fixable drift.
+- **Is everything where it should be?** Are the files valid and well-formed — correct kebab-case names, real descriptions, parseable JSON, no Anthropic-reserved names, no malformed frontmatter?
+- **Does the CLI match what's documented?** It runs your actual CLI: `--help` exits cleanly, every flag the skill mentions really exists, and the advertised version is real.
+- **How discoverable is the pack?** Every run produces a 0–100 score; pass `--min-score <N>` to make CI enforce a floor (useful for catching drift over time).
 
-**Cursor** (`.cursor/rules/<name>.mdc`) — frontmatter is parsed and
-validated against cursor.com/docs/rules: `description` present, non-empty,
-under the 1,536-char listing cap; `alwaysApply` present and boolean
-(missing or non-boolean warns). **Codex** (`.codex/skills/<name>/SKILL.md`)
-reuses the same `SKILL.md` frontmatter schema as Claude (fields, length
-caps, name validation), namespaced under `discovery.codex.skill.*`.
-**OpenCode** (`.opencode/agents/<name>.md`) validates the `---` frontmatter
-block: `description` present, non-empty, under the listing cap (hard fail);
-`mode` (if present) one of `primary|subagent|all` (warn). **GitHub Copilot**
-(`.github/copilot-instructions.md`) validates plain markdown: non-empty,
-first non-blank line starts with a `#` heading. A single-ecosystem pack
-(e.g. `--target copilot` alone) passes `verify` without false-positive
-failures from the other ecosystems.
+The complete check list, every command-line flag, and the platform details live in [docs/reference.md](docs/reference.md).
 
-**Invocation** — actually runs the documented CLI:
+## Supported languages
 
-- `--help` executes cleanly under a hard timeout
-- every flag documented in `SKILL.md` exists in the real `--help` output (catches drift)
-- flags the CLI advertises in `--help` that `SKILL.md` doesn't document (a discoverability
-  warning, so an agent doesn't miss options)
-- for CLIs with subcommands (clap-style `Commands:` sections), `init` captures each
-  subcommand's `--help` and documents them in a `### Subcommands` block; `verify`
-  spawns `<cli> <sub> --help` per documented subcommand and drift-checks its flags
-- `<cli> --version` output contains the `plugin.json` version (advisory — warns on
-  mismatch, skips silently if `--version` exits non-zero or prints nothing)
+| Language | How the CLI is detected |
+|----------|-------------------------|
+| Rust     | built binary under `target/`, or on PATH |
+| Node     | `node <script>` from a `package.json` bin |
+| Python   | `python -m <pkg>` from `[project.scripts]` |
+| Go       | `go run .` for a `package main` project |
+| Ruby     | a `ruby exe/<name>` (or `bin/<name>`) binstub |
+| PHP      | `php <script>` from a `composer.json` bin entry |
+| JVM      | pre-built Gradle `installDist` script, or `java -jar` a Maven shaded / Gradle shadow jar (pure file reads — no build invoked) |
+| C#       | `dotnet run --project <csproj>` (SDK-style, `OutputType=Exe`; GUI projects skipped) |
 
-`verify` works on hand-written skill packs too, not just `init` output: it derives whether a
-CLI is documented from the `SKILL.md` itself (a `## Invocation` section, or a fenced block
-with `--flags`). If the skill documents a CLI but no runnable binary is found on your machine,
-the invocation check is reported as a **warning** (not silently skipped), so the gap is visible.
-The invocation check runs against the **first** documented CLI; discovery checks above run
-against every `SKILL.md` (a plugin may ship several).
+Works on macOS, Linux, and Windows.
 
-**Discoverability score** — every `verify` run computes a 0-100 score: each
-check contributes Pass = 1.0, Warn = 0.5, Error = 0.0, divided over non-skipped
-checks. The JSON report carries it as `discoverability_score` (integer); the
-human report prints it in the summary line. Track it over time as a single
-agent-discoverability health number — it does not gate the exit code (only
-critical failures do).
+## Requirements
 
-Exits non-zero on any critical failure, so it drops straight into CI as a PR
-gate. Pass `--format json` for a machine-readable report (per-check ids,
-counts, `ok` flag, `discoverability_score`) for scripting.
-
-## Flags
-
-| Flag                    | Purpose                                                                          |
-|-------------------------|----------------------------------------------------------------------------------|
-| `init --non-interactive` | skip prompts; requires a `skillpack.toml` (for CI)                             |
-| `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
-| `init --license <SPDX>` | override the license for this run                              |
-| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, or `all` (all six). Repeatable. |
-| `init --force` | overwrite an existing `AGENTS.md` at repo root (skip+warn otherwise). Has no effect on other targets, which write to skillpack-owned paths. |
-| `init --template-dir <DIR>` | overlay custom `.tera` templates from a dir; missing files fall back to embedded defaults |
-| `update` | incrementally refresh distribution files from an existing `skillpack.toml` — no interview, no verify gate. Writes only changed files; preserves body prose by splicing fresh frontmatter. |
-| `update --target <ecosystem>` | same target syntax as `init --target` (default: `claude`). Pass `all` to refresh all six. |
-| `update --force` | overwrite an existing `AGENTS.md` (same collision guard as `init --force`). |
-| `update --template-dir <DIR>` | same template override semantics as `init --template-dir` |
-| `diff` | check whether distribution files are stale; exit 1 if any differs, 0 if all clean (CI gate). Same body-preservation semantics as `update`. |
-| `diff --target <ecosystem>` | same target syntax as `update --target` (default: `claude`). Pass `all` to check all six. |
-| `diff --force` | check `AGENTS.md` too (same collision guard as `update --force`). |
-| `diff --template-dir <DIR>` | same override semantics — use when checking a pack generated with custom templates (avoids spurious drift) |
-| `verify --format human\|json\|sarif` | human report (default), machine-readable JSON for CI, or SARIF 2.1.0 for GitHub Code Scanning upload-sarif |
-| `verify --fix` | mechanically repair detected drift (rewrites only the file the drift lives in; surgical). No-op when nothing is fixable. |
-| `verify --min-score <N>` | minimum discoverability score (0–100) the run must reach to exit zero; gate runs against the post-fix report. Omitted by default. Pairs with `--format json` for CI. |
-| `verify --watch` | re-run verify on every file change (debounced); iterative feedback during SKILL.md / skillpack.toml edits. Only valid with `--format human` (Ctrl-C stops). |
-| `verify --template-dir <DIR>` | use custom templates when `--fix` re-renders drifted files; pass the same dir used at `init` to avoid a drift loop |
-| `doctor` | read-only diagnosis: print detected language, CLI, diag trace, and verify-category preview (exit 0) |
-| `doctor --format human\|json` | read-only diagnosis as serialized `ProjectProfile` for CI (default: human) — JSON form does not include category preview |
-| `--root <DIR>`           | project root to operate on (default: current dir); available on `init`, `verify`, `doctor`, `update`, `diff`      |
-| `--verbose`             | print what `skillpack` detected in the repo (introspection)      |
-| `--debug`             | print every subprocess call                                       |
-
-Note: `update` preserves the body prose, so it can't add new `### Subcommands` entries or refresh CLI-surface flags — use `init --target all` when the CLI surface changed.
+Rust 1.85+. Install from [crates.io](https://crates.io/crates/skillpack) with `cargo install skillpack`, or build from source with `cargo install --path .`.
 
 ## Status
 
-`init` + `update` + `diff` + `verify` + `doctor` across the eight language ecosystems above. Generates and
-verifies distribution files for **Claude Code** (default), **Cursor**
-(`.cursor/rules/*.mdc`), **Codex CLI** (`.codex/skills/`), **OpenCode**
-(`.opencode/agents/`), **GitHub Copilot** (`.github/copilot-instructions.md`), and
-**AGENTS.md** (`AGENTS.md`).
-MIT-licensed. `verify` runs the discovery suite against every ecosystem `init` targets —
-a broken `.mdc`, Codex `SKILL.md`, OpenCode agent, Copilot instructions file, or
-`AGENTS.md` fails CI alongside a Claude-side defect. A bundled skill-pack marketplace is a later phase.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). Template edits (`templates/*.tera`) need
-no Rust knowledge — the snapshot tests catch any silent change to generated
-output.
-
-## License
-
-MIT. See [LICENSE](LICENSE). See [CHANGELOG.md](CHANGELOG.md) for release history.
+Actively developed, MIT-licensed. See [CHANGELOG.md](CHANGELOG.md) for the release history, and [CONTRIBUTING.md](CONTRIBUTING.md) if you'd like to help — editing the templates needs no Rust knowledge.

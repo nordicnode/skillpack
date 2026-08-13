@@ -1,0 +1,153 @@
+# Reference
+
+Everything you'd want to look up without cluttering the README.
+
+## `verify` checks in full
+
+`skillpack verify` simulates an agent's first read of your project and reports
+one result per check (`pass` / `warn` / `fail` / `skip`). Any `fail` makes
+`verify` exit non-zero (and blocks `init` from writing); warnings are advisory.
+
+### Discovery — structural validation per ecosystem
+
+Claude Code (the `.claude-plugin/` + `skills/` set) is checked against the
+documented plugin schema:
+
+- plugin / marketplace names are kebab-case and not reserved
+- `description` is present and the combined description + `when_to_use` stays
+  under the 1,536-character listing cap
+- `when_to_use` carries trigger phrases an agent can match on
+- marketplace `source` paths use the `./` prefix and forward slashes only
+- `version` is present in `plugin.json` (warns on missing/empty)
+- `author` is present in `plugin.json` (warns on missing or `"Unspecified"`)
+- `version` in `plugin.json` matches the project manifest version (warns on
+  drift)
+- `homepage` / `repository` in `plugin.json` match the git origin URL (warns on
+  drift; both fields are reported, and the check is skipped when no git origin
+  is configured)
+- `allowed-tools` in `SKILL.md` frontmatter matches the Anthropic grammar
+  (comma-separated; each token a bare identifier like `Read` or a namespaced
+  call like `Bash(npm test:*)`) — warns on malformed tokens. Applied to Codex
+  `SKILL.md` too.
+- the SKILL.md frontmatter block is closed by a `---` delimiter (an
+  unterminated block would swallow the body — fails). Applied to cursor `.mdc`
+  and OpenCode agent files too.
+- a `skills/<name>/SKILL.md` (or `.codex/skills/<name>/SKILL.md`) directory
+  name matches its frontmatter `name:` (warns on mismatch — agents load skills
+  by directory)
+
+Other ecosystems:
+
+- **Cursor** (`.cursor/rules/<name>.mdc`) — frontmatter parsed and validated
+  against cursor.com/docs/rules: `description` present, non-empty, under the
+  listing cap; `alwaysApply` present and boolean (missing or non-boolean
+  warns).
+- **Codex** (`.codex/skills/<name>/SKILL.md`) — reuses the same `SKILL.md`
+  frontmatter schema as Claude (fields, length caps, name validation),
+  namespaced under `discovery.codex.skill.*`.
+- **OpenCode** (`.opencode/agents/<name>.md`) — `---` frontmatter block:
+  `description` present, non-empty, under the listing cap (hard fail); `mode`
+  (if present) one of `primary|subagent|all` (warn).
+- **GitHub Copilot** (`.github/copilot-instructions.md`) — plain markdown:
+  non-empty, first non-blank line starts with a `#` heading.
+- **AGENTS.md** — plain markdown at the repo root: non-empty, `#` heading.
+
+A single-ecosystem pack (e.g. `--target copilot` alone) passes `verify`
+without false-positive failures from the other ecosystems.
+
+### Invocation — actually runs the documented CLI
+
+- `--help` executes cleanly under a hard timeout
+- every flag documented in `SKILL.md` exists in the real `--help` output
+  (catches drift)
+- flags the CLI advertises in `--help` that `SKILL.md` doesn't document (a
+  discoverability warning)
+- for CLIs with subcommands (clap-style `Commands:` sections), `init` captures
+  each subcommand's `--help` and documents them in a `### Subcommands` block;
+  `verify` spawns `<cli> <sub> --help` per documented subcommand and
+  drift-checks its flags
+- `<cli> --version` output contains the `plugin.json` version (advisory —
+  warns on mismatch, skips silently if `--version` exits non-zero or prints
+  nothing)
+
+`verify` works on hand-written skill packs too, not just `init` output: it
+derives whether a CLI is documented from the `SKILL.md` itself (a
+`## Invocation` section, or a fenced block with `--flags`). If the skill
+documents a CLI but no runnable binary is found on your machine, the
+invocation check is reported as a **warning** (not silently skipped). The
+invocation check runs against the **first** documented CLI; discovery checks
+run against every `SKILL.md` (a plugin may ship several).
+
+### Discoverability score
+
+Every `verify` run computes a 0–100 score: each check contributes
+Pass = 1.0, Warn = 0.5, Error = 0.0, divided over non-skipped checks. The JSON
+report carries it as `discoverability_score` (integer); the human report
+prints it in the summary line. Track it over time as a single health number —
+it does not gate the exit code unless you pass `--min-score`.
+
+### Drift repair (`--fix`)
+
+`verify --fix` mechanically regenerates *only the file the drift lives in*
+(never wholesale regen — that's `skillpack init`). Repairs:
+
+- `plugin.json` drift — `version`, `homepage`/`repository` URL, missing
+  `description` or `author` — by rewriting `.claude-plugin/plugin.json` from
+  the current manifest + intent, leaving your `SKILL.md`/`marketplace.json`
+  intact.
+- `SKILL.md` frontmatter drift — `name`, `when_to_use`, `allowed-tools`, and
+  the `name_drift` checks (Claude + Codex) — by regenerating ONLY the `---`
+  frontmatter block from the current intent and splicing it onto your
+  committed body, so hand-tailored body prose survives byte-for-byte.
+
+No-op when there's no fixable drift.
+
+## Flags (full reference)
+
+| Flag                    | Purpose                                                                          |
+|-------------------------|----------------------------------------------------------------------------------|
+| `init --non-interactive` | skip prompts; requires a `skillpack.toml` (for CI)                             |
+| `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
+| `init --license <SPDX>` | override the license for this run                              |
+| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, or `all` (all six). Repeatable. |
+| `init --force` | overwrite an existing `AGENTS.md` at repo root (skip+warn otherwise). Has no effect on other targets, which write to skillpack-owned paths. |
+| `init --template-dir <DIR>` | overlay custom `.tera` templates from a dir; missing files fall back to embedded defaults |
+| `update` | incrementally refresh distribution files from an existing `skillpack.toml` — no interview, no verify gate. Writes only changed files; preserves body prose by splicing fresh frontmatter. |
+| `update --target <ecosystem>` | same target syntax as `init --target` (default: `claude`). Pass `all` to refresh all six. |
+| `update --force` | overwrite an existing `AGENTS.md` (same collision guard as `init --force`). |
+| `update --template-dir <DIR>` | same template override semantics as `init --template-dir` |
+| `diff` | check whether distribution files are stale; exit 1 if any differs, 0 if all clean (CI gate). Same body-preservation semantics as `update`. |
+| `diff --target <ecosystem>` | same target syntax as `update --target` (default: `claude`). Pass `all` to check all six. |
+| `diff --force` | check `AGENTS.md` too (same collision guard as `update --force`). |
+| `diff --template-dir <DIR>` | same override semantics — use when checking a pack generated with custom templates (avoids spurious drift) |
+| `verify --format human\|json\|sarif` | human report (default), machine-readable JSON for CI, or SARIF 2.1.0 for GitHub Code Scanning upload-sarif |
+| `verify --fix` | mechanically repair detected drift (rewrites only the file the drift lives in; surgical). No-op when nothing is fixable. |
+| `verify --min-score <N>` | minimum discoverability score (0–100) the run must reach to exit zero; gate runs against the post-fix report. Omitted by default. Pairs with `--format json` for CI. |
+| `verify --watch` | re-run verify on every file change (debounced); iterative feedback during SKILL.md / skillpack.toml edits. Only valid with `--format human` (Ctrl-C stops). |
+| `verify --template-dir <DIR>` | use custom templates when `--fix` re-renders drifted files; pass the same dir used at `init` to avoid a drift loop |
+| `doctor` | read-only diagnosis: print detected language, CLI, diag trace, and verify-category preview (exit 0) |
+| `doctor --format human\|json` | read-only diagnosis as serialized `ProjectProfile` for CI (default: human) — JSON form does not include category preview |
+| `--root <DIR>`           | project root to operate on (default: current dir); available on `init`, `verify`, `doctor`, `update`, `diff`      |
+| `--verbose`             | print what `skillpack` detected in the repo (introspection)      |
+| `--debug`             | print every subprocess call                                       |
+
+Notes:
+
+- `update` preserves body prose, so it can't add new `### Subcommands` entries
+  or refresh CLI-surface flags — use `init --target all` when the CLI surface
+  changed.
+- `--fix` requires a committed `skillpack.toml` (it recovers the intent from
+  it); a hand-written pack with no config should run `skillpack init` instead.
+
+## Platform notes
+
+- Cross-platform: CI runs on Ubuntu, macOS, and Windows.
+- CLI detection probes `PATH` with `PATHEXT` enumeration on Windows (so a bare
+  `node` lookup resolves `node.exe`), and `cargo build` artifacts carry the
+  `.exe` suffix.
+- Paths are normalized to forward slashes in the verify report; UTF-8 BOMs and
+  CRLF line endings are handled at every read boundary (a Windows-edited
+  SKILL.md won't false-fail).
+- Workspace roots: a Cargo `[workspace]`-only or npm `workspaces` root is
+  walked to find the member that ships the CLI; `skillpack doctor` explains
+  the decision when detection comes up empty.
