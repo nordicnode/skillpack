@@ -217,102 +217,218 @@ pub fn render_targets(
         if !seen.insert(target) {
             continue;
         }
-        match target {
-            Target::Claude => {
-                // Inline the three-file Claude render so we reuse the `tera`
-                // built above — `render()` would rebuild it (and re-derive
-                // the context) for no reason. Output order matches `render()`:
-                // marketplace, plugin, SKILL.md.
-                let mut c = ctx.clone();
-                c.insert("noun", "skill");
-                let marketplace = tera
-                    .render("marketplace.json", &c)
-                    .context("rendering marketplace.json")?;
-                let plugin = tera
-                    .render("plugin.json", &c)
-                    .context("rendering plugin.json")?;
-                let skill = tera.render("SKILL.md", &c).context("rendering SKILL.md")?;
-                out.push(GeneratedFileOutput {
-                    rel_path: ".claude-plugin/marketplace.json".to_string(),
-                    contents: marketplace,
-                });
-                out.push(GeneratedFileOutput {
-                    rel_path: ".claude-plugin/plugin.json".to_string(),
-                    contents: plugin,
-                });
-                out.push(GeneratedFileOutput {
-                    rel_path: format!("skills/{name}/SKILL.md"),
-                    contents: skill,
-                });
-            }
-            Target::Cursor => {
-                let mut c = ctx.clone();
-                c.insert("noun", "rule");
-                let mdc = tera
-                    .render("cursor-rule.mdc", &c)
-                    .context("rendering cursor-rule.mdc")?;
-                out.push(GeneratedFileOutput {
-                    rel_path: format!(".cursor/rules/{name}.mdc"),
-                    contents: mdc,
-                });
-            }
-            Target::Codex => {
-                // Codex reads SKILL.md with the same frontmatter as Claude —
-                // reuse the same template, different output path.
-                let mut c = ctx.clone();
-                c.insert("noun", "skill");
-                let skill = tera
-                    .render("SKILL.md", &c)
-                    .context("rendering codex SKILL.md")?;
-                out.push(GeneratedFileOutput {
-                    rel_path: format!(".codex/skills/{name}/SKILL.md"),
-                    contents: skill,
-                });
-            }
-            Target::OpenCode => {
-                // OpenCode: .opencode/agents/<name>.md with `description`
-                // (required) + `mode` frontmatter. Per opencode.ai/docs/agents.
-                let mut c = ctx.clone();
-                c.insert("noun", "agent");
-                let agent = tera
-                    .render("opencode-agent.md", &c)
-                    .context("rendering opencode-agent.md")?;
-                out.push(GeneratedFileOutput {
-                    rel_path: format!(".opencode/agents/{name}.md"),
-                    contents: agent,
-                });
-            }
-            Target::Copilot => {
-                // GitHub Copilot: .github/copilot-instructions.md — plain
-                // markdown, no frontmatter. Per docs.github.com/copilot.
-                let mut c = ctx.clone();
-                c.insert("noun", "tool");
-                let instr = tera
-                    .render("copilot-instructions.md", &c)
-                    .context("rendering copilot-instructions.md")?;
-                out.push(GeneratedFileOutput {
-                    rel_path: ".github/copilot-instructions.md".to_string(),
-                    contents: instr,
-                });
-            }
-            Target::AgentsMd => {
-                // AGENTS.md: root-level instructions file, plain markdown, no
-                // frontmatter. Per agents.md (Linux Foundation stewarded) —
-                // read natively by 20+ coding agents.
-                let mut c = ctx.clone();
-                c.insert("noun", "tool");
-                let agents = tera
-                    .render("AGENTS.md", &c)
-                    .context("rendering AGENTS.md")?;
-                out.push(GeneratedFileOutput {
-                    rel_path: schema::AGENTS_MD_PATH.to_string(),
-                    contents: agents,
-                });
+        out.extend(render_one_target(&tera, &ctx, target, &name)?);
+    }
+    Ok(out)
+}
+
+/// Render every distribution file for a multi-skill pack. The FIRST skill is
+/// the primary: it feeds the pack-level files (marketplace.json, plugin.json,
+/// copilot-instructions.md, AGENTS.md) and its own skill file. Every
+/// additional skill renders only its per-skill file — `skills/<name>/SKILL.md`
+/// (Claude + Codex), `.cursor/rules/<name>.mdc`, `.opencode/agents/<name>.md`
+/// — under its own directory name. Copilot/AGENTS.md have no per-skill form
+/// (single instructions file per repo).
+///
+/// A single-skill pack renders exactly what [`render_targets`] produces
+/// (the primary's name/dir drive every path), so `update`/`diff` behave
+/// identically for existing configs.
+pub fn render_all(
+    profile: &ProjectProfile,
+    skills: &[(String, Intent)],
+    targets: &[Target],
+    template_dir: Option<&Path>,
+) -> Result<Vec<GeneratedFileOutput>> {
+    let tera = build_tera(template_dir)?;
+    let mut out = Vec::new();
+    let (primary_name, primary_intent) = &skills[0];
+    let primary_ctx = build_context(profile, primary_intent);
+    let primary_dir = coerce_kebab(primary_name);
+
+    let mut seen = std::collections::HashSet::new();
+    for &target in targets {
+        if !seen.insert(target) {
+            continue;
+        }
+        // Pack-level files + the primary skill's file, from the primary intent.
+        out.extend(render_one_target(
+            &tera,
+            &primary_ctx,
+            target,
+            &primary_dir,
+        )?);
+        // Each additional skill contributes only its per-skill file. The
+        // context's `name` must be overridden to the SKILL's name — the
+        // build_context default is the pack name, which would put the primary
+        // skill's `name:` in every additional skill's frontmatter (and trip
+        // verify's dir_name_mismatch check).
+        for (skill_name, intent) in &skills[1..] {
+            let mut ctx = build_context(profile, intent);
+            let dir = coerce_kebab(skill_name);
+            ctx.insert("name", &dir);
+            if let Some(f) = render_skill_file_only(&tera, &ctx, target, &dir)? {
+                out.push(f);
             }
         }
     }
-
     Ok(out)
+}
+
+/// Render the full file set for one target from one skill context. The
+/// Claude arm emits the pack-level pair + the skill file; other targets emit
+/// their single file. `name` is the skill directory name for the per-skill
+/// rel-path.
+fn render_one_target(
+    tera: &tera::Tera,
+    ctx: &tera::Context,
+    target: Target,
+    name: &str,
+) -> Result<Vec<GeneratedFileOutput>> {
+    let mut out = Vec::new();
+    match target {
+        Target::Claude => {
+            // Inline the three-file Claude render so we reuse the `tera`
+            // built above — `render()` would rebuild it (and re-derive
+            // the context) for no reason. Output order matches `render()`:
+            // marketplace, plugin, SKILL.md.
+            let mut c = ctx.clone();
+            c.insert("noun", "skill");
+            let marketplace = tera
+                .render("marketplace.json", &c)
+                .context("rendering marketplace.json")?;
+            let plugin = tera
+                .render("plugin.json", &c)
+                .context("rendering plugin.json")?;
+            let skill = tera.render("SKILL.md", &c).context("rendering SKILL.md")?;
+            out.push(GeneratedFileOutput {
+                rel_path: ".claude-plugin/marketplace.json".to_string(),
+                contents: marketplace,
+            });
+            out.push(GeneratedFileOutput {
+                rel_path: ".claude-plugin/plugin.json".to_string(),
+                contents: plugin,
+            });
+            out.push(GeneratedFileOutput {
+                rel_path: format!("skills/{name}/SKILL.md"),
+                contents: skill,
+            });
+        }
+        Target::Cursor => {
+            let mut c = ctx.clone();
+            c.insert("noun", "rule");
+            let mdc = tera
+                .render("cursor-rule.mdc", &c)
+                .context("rendering cursor-rule.mdc")?;
+            out.push(GeneratedFileOutput {
+                rel_path: format!(".cursor/rules/{name}.mdc"),
+                contents: mdc,
+            });
+        }
+        Target::Codex => {
+            // Codex reads SKILL.md with the same frontmatter as Claude —
+            // reuse the same template, different output path.
+            let mut c = ctx.clone();
+            c.insert("noun", "skill");
+            let skill = tera
+                .render("SKILL.md", &c)
+                .context("rendering codex SKILL.md")?;
+            out.push(GeneratedFileOutput {
+                rel_path: format!(".codex/skills/{name}/SKILL.md"),
+                contents: skill,
+            });
+        }
+        Target::OpenCode => {
+            // OpenCode: .opencode/agents/<name>.md with `description`
+            // (required) + `mode` frontmatter. Per opencode.ai/docs/agents.
+            let mut c = ctx.clone();
+            c.insert("noun", "agent");
+            let agent = tera
+                .render("opencode-agent.md", &c)
+                .context("rendering opencode-agent.md")?;
+            out.push(GeneratedFileOutput {
+                rel_path: format!(".opencode/agents/{name}.md"),
+                contents: agent,
+            });
+        }
+        Target::Copilot => {
+            // GitHub Copilot: .github/copilot-instructions.md — plain
+            // markdown, no frontmatter. Per docs.github.com/copilot.
+            let mut c = ctx.clone();
+            c.insert("noun", "tool");
+            let instr = tera
+                .render("copilot-instructions.md", &c)
+                .context("rendering copilot-instructions.md")?;
+            out.push(GeneratedFileOutput {
+                rel_path: ".github/copilot-instructions.md".to_string(),
+                contents: instr,
+            });
+        }
+        Target::AgentsMd => {
+            // AGENTS.md: root-level instructions file, plain markdown, no
+            // frontmatter. Per agents.md (Linux Foundation stewarded) —
+            // read natively by 20+ coding agents.
+            let mut c = ctx.clone();
+            c.insert("noun", "tool");
+            let agents = tera
+                .render("AGENTS.md", &c)
+                .context("rendering AGENTS.md")?;
+            out.push(GeneratedFileOutput {
+                rel_path: schema::AGENTS_MD_PATH.to_string(),
+                contents: agents,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Render the per-skill file for one target from one skill context — the file
+/// a multi-skill pack emits for every additional skill. Returns `None` for
+/// targets without a per-skill form (Copilot and AGENTS.md are single
+/// instructions files per repo, not per skill).
+fn render_skill_file_only(
+    tera: &tera::Tera,
+    ctx: &tera::Context,
+    target: Target,
+    name: &str,
+) -> Result<Option<GeneratedFileOutput>> {
+    match target {
+        Target::Claude | Target::Codex => {
+            let mut c = ctx.clone();
+            c.insert("noun", "skill");
+            let skill = tera.render("SKILL.md", &c).context("rendering SKILL.md")?;
+            let rel_path = match target {
+                Target::Claude => format!("skills/{name}/SKILL.md"),
+                _ => format!(".codex/skills/{name}/SKILL.md"),
+            };
+            Ok(Some(GeneratedFileOutput {
+                rel_path,
+                contents: skill,
+            }))
+        }
+        Target::Cursor => {
+            let mut c = ctx.clone();
+            c.insert("noun", "rule");
+            let mdc = tera
+                .render("cursor-rule.mdc", &c)
+                .context("rendering cursor-rule.mdc")?;
+            Ok(Some(GeneratedFileOutput {
+                rel_path: format!(".cursor/rules/{name}.mdc"),
+                contents: mdc,
+            }))
+        }
+        Target::OpenCode => {
+            let mut c = ctx.clone();
+            c.insert("noun", "agent");
+            let agent = tera
+                .render("opencode-agent.md", &c)
+                .context("rendering opencode-agent.md")?;
+            Ok(Some(GeneratedFileOutput {
+                rel_path: format!(".opencode/agents/{name}.md"),
+                contents: agent,
+            }))
+        }
+        Target::Copilot | Target::AgentsMd => Ok(None),
+    }
 }
 
 /// Map `.tera` filenames → embedded Tera template names.
@@ -745,5 +861,81 @@ mod tests {
             skill.contains("```\nchronicle\n```"),
             "invocation block must fall back to cli_binary `chronicle`, got:\n{skill}"
         );
+    }
+
+    // Multi-skill: render_all emits the pack-level files once (from the
+    // primary) and a per-skill file for EVERY skill under its own directory
+    // name — with the skill's OWN name/description in the frontmatter, not
+    // the pack's.
+    #[test]
+    fn render_all_emits_every_skill_under_its_own_name() {
+        let p = cli_profile();
+        let side_intent = Intent {
+            one_line_description: "Handle auxiliary chores".into(),
+            when_to_use_phrases: vec!["aux task".into()],
+            invocation_command: Some("chronicle aux".into()),
+            import_pattern: None,
+            author: None,
+            license: None,
+            ..Default::default()
+        };
+        let skills = vec![
+            ("chronicle".to_string(), cli_intent()),
+            ("sidekick".to_string(), side_intent),
+        ];
+        let targets = vec![
+            Target::Claude,
+            Target::Cursor,
+            Target::Codex,
+            Target::OpenCode,
+            Target::Copilot,
+            Target::AgentsMd,
+        ];
+        let files = render_all(&p, &skills, &targets, None).unwrap();
+
+        // Pack-level files appear exactly once.
+        let mp_count = files
+            .iter()
+            .filter(|f| f.rel_path == ".claude-plugin/marketplace.json")
+            .count();
+        let ag_count = files.iter().filter(|f| f.rel_path == "AGENTS.md").count();
+        assert_eq!(mp_count, 1, "marketplace.json is pack-level, emitted once");
+        assert_eq!(ag_count, 1, "AGENTS.md is pack-level, emitted once");
+
+        // Every skill has its own per-skill file.
+        for rel in [
+            "skills/chronicle/SKILL.md",
+            "skills/sidekick/SKILL.md",
+            ".codex/skills/sidekick/SKILL.md",
+            ".cursor/rules/sidekick.mdc",
+            ".opencode/agents/sidekick.md",
+        ] {
+            assert!(
+                files.iter().any(|f| f.rel_path == rel),
+                "missing expected rel_path {rel}"
+            );
+        }
+
+        // The secondary skill's frontmatter carries ITS name + description.
+        let side = files
+            .iter()
+            .find(|f| f.rel_path == "skills/sidekick/SKILL.md")
+            .unwrap();
+        assert!(
+            side.contents.contains("name: sidekick"),
+            "secondary skill must use its own name, got:\n{}",
+            side.contents
+        );
+        assert!(
+            side.contents.contains("Handle auxiliary chores"),
+            "secondary skill must use its own description, got:\n{}",
+            side.contents
+        );
+        // The primary's skill keeps the pack name.
+        let prim = files
+            .iter()
+            .find(|f| f.rel_path == "skills/chronicle/SKILL.md")
+            .unwrap();
+        assert!(prim.contents.contains("name: chronicle"));
     }
 }

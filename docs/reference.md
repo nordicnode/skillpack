@@ -144,6 +144,42 @@ Notes:
 - `--fix` requires a committed `skillpack.toml` (it recovers the intent from
   it); a hand-written pack with no config should run `skillpack init` instead.
 
+## Multi-skill packs
+
+A marketplace repo can bundle several skills — Claude Code loads every
+`skills/<name>/SKILL.md`, not just one. To grow a pack beyond the single skill
+`init` scaffolds:
+
+1. Add a `[[skills]]` entry to `skillpack.toml` (the existing `[skill]` table
+   stays the **primary** skill — pack-level files like `plugin.json` render
+   from it; `[[skills]]` entries append after it):
+
+   ```toml
+   [[skills]]
+   name = "sidekick"
+   one_line_description = "Handle auxiliary chores"
+   when_to_use_phrases = ["aux task", "side errand"]
+   invocation_command = "mytool side"   # or import_pattern = "..." for a library
+   ```
+
+2. Run `skillpack update --target all` — every skill renders its own
+   per-skill file (`skills/<name>/SKILL.md`, `.codex/skills/<name>/SKILL.md`,
+   `.cursor/rules/<name>.mdc`, `.opencode/agents/<name>.md`) under its own
+   directory name, with its own frontmatter. The config normalizes to a
+   `[[skills]]` array on first update.
+
+3. `verify` checks every skill independently — the `name_drift` check accepts
+   any configured skill name (not just the canonical project name), and
+   `verify --fix` splices the right skill's frontmatter without touching the
+   other skills' bodies.
+
+There's no interactive multi-skill interview; author the array by hand and
+let `update` render. `init` always writes a single-skill `[skill]` pack.
+
+Limitation: the invocation drift checks (`invocation.*`, which spawn the CLI
+`--help` and diff flags) run against the FIRST skill file only — give each
+skill its own CLI but know that the flag-drift gate checks one of them.
+
 ## Platform notes
 
 - Cross-platform: CI runs on Ubuntu, macOS, and Windows.

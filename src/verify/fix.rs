@@ -150,7 +150,9 @@ fn apply_regen_skill_md_frontmatter(
         .map(|(p, _)| p.as_str())
         .ok_or_else(|| anyhow::anyhow!("name_drift fix dispatched without a location path"))?;
 
-    // Recover profile + intent (same precedent as apply_regen_plugin_json).
+    // Recover profile + every skill's intent (same precedent as
+    // apply_regen_plugin_json; multi-skill packs need the full list so the
+    // rendered file at `loc` carries THAT skill's frontmatter).
     let profile = introspect::introspect(root).context("introspecting repo for --fix")?;
     let Some(cfg) = Config::load(root)? else {
         bail!(
@@ -159,9 +161,10 @@ fn apply_regen_skill_md_frontmatter(
             root.display()
         );
     };
-    let Some(intent): Option<Intent> = cfg.to_intent() else {
+    let skills = cfg.to_intents();
+    if skills.is_empty() {
         bail!(
-            "skillpack.toml at {} has no `[skill]` block — cannot recover intent for --fix",
+            "skillpack.toml at {} has no skill block — cannot recover intent for --fix",
             root.display()
         );
     };
@@ -181,7 +184,7 @@ fn apply_regen_skill_md_frontmatter(
     } else {
         Target::Claude
     };
-    let files = render_targets(&profile, &intent, &[target], template_dir)
+    let files = crate::generate::render_all(&profile, &skills, &[target], template_dir)
         .context("rendering skill target for --fix")?;
 
     // The rendered SKILL.md whose rel-path matches the drifted file. Render

@@ -74,6 +74,21 @@ pub fn run(
 ) -> Result<Vec<CheckResult>> {
     let mut out = Vec::new();
 
+    // Multi-skill packs: any `[[skills]]` entry name is a legitimate
+    // frontmatter `name:` — only the primary skill matches the canonical
+    // project name. Build the allowed set from skillpack.toml so the
+    // name_drift warn fires only for genuinely unknown names. The canonical
+    // name is added by the caller (profile_name), so we only need the extras.
+    let allowed_skill_names: std::collections::HashSet<String> =
+        match crate::config::Config::load(root) {
+            Ok(Some(cfg)) => cfg
+                .to_intents()
+                .into_iter()
+                .map(|(n, _)| crate::generate::coerce_kebab(&n))
+                .collect(),
+            _ => std::collections::HashSet::new(),
+        };
+
     // Claude Code: marketplace.json + plugin.json + skills/<name>/SKILL.md.
     // The marketplace/plugin checks only run when the Claude distribution is
     // present — a `--target cursor`-only pack legitimately has no
@@ -96,6 +111,7 @@ pub fn run(
                     &skill_path,
                     "discovery.skill",
                     profile_name,
+                    &allowed_skill_names,
                 )?);
             }
         }
@@ -118,6 +134,7 @@ pub fn run(
                 &skill_path,
                 "discovery.codex.skill",
                 profile_name,
+                &allowed_skill_names,
             )?);
         }
     }
@@ -592,6 +609,7 @@ fn check_one_skill_md(
     path: &Path,
     prefix: &str,
     profile_name: &Option<String>,
+    allowed_skill_names: &std::collections::HashSet<String>,
 ) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let raw = strip_bom(&raw);
@@ -694,9 +712,11 @@ fn check_one_skill_md(
     // description_empty, description_length, name_length) so a structurally
     // broken skill surfaces its fail first — drift is a warn and must not
     // shadow a fail. Skipped when either side is absent (no frontmatter name,
-    // or introspection couldn't derive a canonical name).
+    // or introspection couldn't derive a canonical name). A name matching a
+    // configured `[[skills]]` entry is legitimate (multi-skill packs) and not
+    // drift.
     if let (Some(fm_name), Some(canonical)) = (fm.name.as_deref(), profile_name.as_deref()) {
-        if fm_name != canonical {
+        if fm_name != canonical && !allowed_skill_names.contains(fm_name) {
             let mut r = CheckResult::warn(
                 &format!("{prefix}.name_drift"),
                 "SKILL.md `name` matches the canonical project name",
@@ -939,6 +959,7 @@ mod tests {
 
     use super::*;
     use crate::verify::result::Severity;
+    use std::collections::HashSet;
 
     fn scratch() -> std::path::PathBuf {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -1045,7 +1066,8 @@ mod tests {
             "skills/foo/SKILL.md",
             "---\nname: foo\ndescription: \"looks valid\"\n", // no closing `---`
         );
-        let r = check_one_skill_md(&root, &path, "discovery.skill", &None).unwrap();
+        let r =
+            check_one_skill_md(&root, &path, "discovery.skill", &None, &HashSet::new()).unwrap();
         assert_eq!(r.severity, Severity::Error);
         assert_eq!(r.check_id, "discovery.skill.frontmatter_unclosed");
         assert!(r.message.contains("not closed"), "got: {}", r.message);
@@ -1061,7 +1083,8 @@ mod tests {
             "skills/bar/SKILL.md",
             "---\nname: foo\ndescription: \"hello\"\nwhen_to_use: \"x\"\n---\n\nbody\n",
         );
-        let r = check_one_skill_md(&root, &path, "discovery.skill", &None).unwrap();
+        let r =
+            check_one_skill_md(&root, &path, "discovery.skill", &None, &HashSet::new()).unwrap();
         assert_eq!(r.severity, Severity::Warn);
         assert_eq!(r.check_id, "discovery.skill.dir_name_mismatch");
         assert!(
@@ -1080,7 +1103,8 @@ mod tests {
             "skills/foo/SKILL.md",
             "---\nname: foo\ndescription: \"hello\"\nwhen_to_use: \"x\"\n---\n\nbody\n",
         );
-        let r = check_one_skill_md(&root, &path, "discovery.skill", &None).unwrap();
+        let r =
+            check_one_skill_md(&root, &path, "discovery.skill", &None, &HashSet::new()).unwrap();
         assert_eq!(r.severity, Severity::Pass);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1093,7 +1117,14 @@ mod tests {
             ".codex/skills/bar/SKILL.md",
             "---\nname: foo\ndescription: \"hello\"\nwhen_to_use: \"x\"\n---\n\nbody\n",
         );
-        let r = check_one_skill_md(&root, &path, "discovery.codex.skill", &None).unwrap();
+        let r = check_one_skill_md(
+            &root,
+            &path,
+            "discovery.codex.skill",
+            &None,
+            &HashSet::new(),
+        )
+        .unwrap();
         assert_eq!(r.severity, Severity::Warn);
         assert_eq!(r.check_id, "discovery.codex.skill.dir_name_mismatch");
         let _ = std::fs::remove_dir_all(&root);

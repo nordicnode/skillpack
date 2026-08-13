@@ -17,7 +17,7 @@ use clap::{Parser, ValueEnum};
 use skillpack::cli::{resolve_targets, Cli, Commands, Target};
 use skillpack::config::Config;
 use skillpack::exit;
-use skillpack::generate::{coerce_kebab, render_targets, GeneratedFileOutput};
+use skillpack::generate::{coerce_kebab, render_all, render_targets, GeneratedFileOutput};
 use skillpack::interview;
 use skillpack::introspect;
 use skillpack::types;
@@ -1124,13 +1124,18 @@ fn compute_candidates<'f>(
 }
 
 /// Shared preamble: introspect, load config, resolve targets, render.
+/// Returns the profile, the full skill list (one entry for single-skill
+/// packs, one per `[[skills]]` entry for multi-skill packs), and every
+/// rendered file — pack-level files from the primary skill, per-skill files
+/// for every skill.
+#[allow(clippy::type_complexity)]
 fn render_from_config(
     root: &Path,
     raw_targets: &[String],
     template_dir: Option<&Path>,
 ) -> Result<(
     types::ProjectProfile,
-    types::Intent,
+    Vec<(String, types::Intent)>,
     Vec<GeneratedFileOutput>,
 )> {
     let profile = introspect::introspect(root).context("introspecting repo")?;
@@ -1141,21 +1146,22 @@ fn render_from_config(
             Config::path(root).display()
         )
     })?;
-    let intent = existing_cfg.to_intent().ok_or_else(|| {
-        anyhow::anyhow!(
+    let skills = existing_cfg.to_intents();
+    if skills.is_empty() {
+        bail!(
             "skillpack.toml at {} is missing its [skill] table.\n\
          To fix: re-run `skillpack init` interactively to regenerate the config.",
             Config::path(root).display()
-        )
-    })?;
+        );
+    }
     let targets = if raw_targets.is_empty() {
         vec![Target::Claude]
     } else {
         resolve_targets(raw_targets)?
     };
-    let files = render_targets(&profile, &intent, &targets, template_dir)
+    let files = render_all(&profile, &skills, &targets, template_dir)
         .context("rendering distribution files")?;
-    Ok((profile, intent, files))
+    Ok((profile, skills, files))
 }
 
 fn run_update_inner(
@@ -1166,7 +1172,7 @@ fn run_update_inner(
     force: bool,
     template_dir: Option<&Path>,
 ) -> Result<i32> {
-    let (profile, intent, files) = render_from_config(root, &raw_targets, template_dir)?;
+    let (profile, skills, files) = render_from_config(root, &raw_targets, template_dir)?;
     if verbose {
         print_profile(&profile, false);
     }
@@ -1183,7 +1189,6 @@ fn run_update_inner(
     let mut written: Vec<&GeneratedFileOutput> = Vec::new();
     let mut unchanged = 0usize;
     let mut skipped: Vec<&GeneratedFileOutput> = Vec::new();
-    let name = coerce_kebab(&profile.name);
 
     for r in &results {
         if r.held {
@@ -1218,7 +1223,7 @@ fn run_update_inner(
     // changed) — but only when the serialized form actually differs, so a
     // no-op `update` doesn't churn the config's mtime or rewrite a
     // hand-formatted file.
-    Config::from_intent(&name, &intent).save_if_changed(root)?;
+    Config::from_intents(&skills).save_if_changed(root)?;
 
     // Summary.
     println!(
@@ -1272,7 +1277,7 @@ fn run_diff_inner(
     force: bool,
     template_dir: Option<&Path>,
 ) -> Result<i32> {
-    let (profile, _intent, files) = render_from_config(root, raw_targets, template_dir)?;
+    let (profile, _skills, files) = render_from_config(root, raw_targets, template_dir)?;
     if verbose {
         print_profile(&profile, false);
     }

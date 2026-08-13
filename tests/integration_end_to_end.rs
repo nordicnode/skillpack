@@ -4072,6 +4072,130 @@ fn update_version_bump_changes_plugin_json_preserves_skill_md_body() {
 // Pin the agreement between `update` and `diff`: both use compute_candidates,
 // so they must agree on what counts as drift.
 
+// Multi-skill packs: hand-adding a `[[skills]]` entry to skillpack.toml must
+// render the second skill's files, verify clean, and `--fix` the right skill's
+// frontmatter without touching the other skill's body.
+#[test]
+fn multi_skill_pack_renders_verifies_and_fixes_secondary_skill() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Bootstrap a single-skill pack.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+            "--description",
+            "Main skill",
+            "--trigger",
+            "main task",
+            "--author",
+            "Me",
+            "--invocation",
+            "sample-rust --new \"entry\"",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Hand-add a second skill.
+    fs::write(
+        root.join("skillpack.toml"),
+        format!(
+            "{}
+[[skills]]
+name = \"sidekick\"
+one_line_description = \"Side skill for aux tasks\"
+when_to_use_phrases = [\"aux task\", \"side errand\"]
+invocation_command = \"sample-rust side\"
+license = \"MIT\"
+",
+            fs::read_to_string(root.join("skillpack.toml")).unwrap()
+        ),
+    )
+    .unwrap();
+
+    // update renders both skills; the config normalizes to [[skills]] x2.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["update", "--root", ".", "--target", "all", "--force"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    assert!(root.join("skills/sidekick/SKILL.md").exists());
+    assert!(root.join(".codex/skills/sidekick/SKILL.md").exists());
+    assert!(root.join(".cursor/rules/sidekick.mdc").exists());
+    assert!(root.join(".opencode/agents/sidekick.md").exists());
+    let toml = fs::read_to_string(root.join("skillpack.toml")).unwrap();
+    assert!(
+        toml.matches("[[skills]]").count() == 2,
+        "config must normalize to two [[skills]] entries, got:\n{toml}"
+    );
+    // The secondary skill's frontmatter uses ITS name, not the pack's.
+    let side = fs::read_to_string(root.join("skills/sidekick/SKILL.md")).unwrap();
+    assert!(side.contains("name: sidekick"));
+    assert!(side.contains("Side skill for aux tasks"));
+
+    // verify is clean (both skills pass; no name_drift warn for sidekick).
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0 failed"));
+
+    // Remove when_to_use from the secondary skill; --fix restores it from
+    // sidekick's OWN config entry and preserves the hand-added body line.
+    let side_path = root.join("skills/sidekick/SKILL.md");
+    let content = fs::read_to_string(&side_path).unwrap();
+    let stripped: String = content
+        .lines()
+        .filter(|l| !l.starts_with("when_to_use:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n# hand body\n";
+    fs::write(&side_path, stripped).unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--fix"])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(
+        s.contains("skills/sidekick/SKILL.md"),
+        "--fix must rewrite the SECONDARY skill, got:\n{s}"
+    );
+    let fixed = fs::read_to_string(&side_path).unwrap();
+    assert!(
+        fixed.contains("when_to_use: \"aux task, side errand\""),
+        "sidekick's own triggers must be restored, got:\n{fixed}"
+    );
+    assert!(
+        fixed.contains("# hand body"),
+        "hand body must survive --fix"
+    );
+    // The PRIMARY skill's body is untouched by the fix.
+    assert!(
+        !fs::read_to_string(root.join("skills/sample-rust/SKILL.md"))
+            .unwrap()
+            .contains("# hand body")
+    );
+}
+
 #[test]
 fn diff_exits_zero_on_clean_repo() {
     let root = copy_fixture("rust-cli");

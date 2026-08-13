@@ -20,6 +20,16 @@ pub struct Config {
     /// interactive prompts entirely (design §5.1 step 2).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill: Option<SkillConfig>,
+    /// Multi-skill packs: one `[[skills]]` entry per skill, each with its own
+    /// `name` (skill directory + frontmatter) and description/triggers/
+    /// invocation. Mutually exclusive with `[skill]` in practice — a config
+    /// uses either the single-skill form (written by `init`; backward
+    /// compatible) or the array form (author multi-skill packs by hand-editing
+    /// this array, then run `update` to render all skills). When both are
+    /// present, `to_intents()` treats `[skill]` as the primary and appends the
+    /// array entries after it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<SkillConfig>,
     /// Persistent user prefs, independent of any single skill. Filled in
     /// once and reused across re-runs.
     #[serde(default)]
@@ -51,6 +61,36 @@ pub struct SkillConfig {
     /// stdin closes; `None` (default) uses `/dev/null`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verify_stdin: Option<String>,
+}
+
+impl SkillConfig {
+    /// Build an [`Intent`] from this skill's persisted fields, filling
+    /// author/license from the shared defaults when the skill omits them.
+    pub fn to_intent(&self, defaults: &Defaults) -> Intent {
+        Intent {
+            one_line_description: self.one_line_description.clone(),
+            when_to_use_phrases: self.when_to_use_phrases.clone(),
+            invocation_command: self.invocation_command.clone(),
+            import_pattern: self.import_pattern.clone(),
+            author: self.author.clone().or_else(|| defaults.author.clone()),
+            license: self.license.clone().or_else(|| defaults.license.clone()),
+            verify_stdin: self.verify_stdin.clone(),
+        }
+    }
+
+    /// Construct a skill entry from a name + intent.
+    pub fn from_intent(name: &str, intent: &Intent) -> Self {
+        Self {
+            name: name.to_string(),
+            one_line_description: intent.one_line_description.clone(),
+            when_to_use_phrases: intent.when_to_use_phrases.clone(),
+            invocation_command: intent.invocation_command.clone(),
+            import_pattern: intent.import_pattern.clone(),
+            author: intent.author.clone(),
+            license: intent.license.clone(),
+            verify_stdin: intent.verify_stdin.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -125,61 +165,85 @@ impl Config {
     }
 
     /// Validate structural invariants that `verify` cannot catch later.
-    /// Called by `load` right after parse. Only checks `skill.name` —
+    /// Called by `load` right after parse. An absent skill block is fine
+    /// (fresh project before interview). Each skill's name is validated —
     /// a non-kebab name corrupts every generated artifact at the source
     /// and there is no verify-side warning for it. Description and trigger
     /// phrases are left to `verify`'s soft-checks (load stays lossless;
     /// empty triggers surface as a verify warning, not a load-time error).
-    /// An absent `[skill]` table is fine (fresh project before interview).
     fn validate(&self) -> Result<()> {
-        let s = match &self.skill {
-            None => return Ok(()),
-            Some(s) => s,
-        };
-        if !crate::verify::discovery::is_valid_kebab(&s.name) {
-            bail!(
-                "skill.name must be non-empty kebab-case (a-z, 0-9, single \
-                 hyphens), got {:?}",
-                s.name
-            );
+        for s in self.skill.iter().chain(self.skills.iter()) {
+            if !crate::verify::discovery::is_valid_kebab(&s.name) {
+                bail!(
+                    "skill name must be non-empty kebab-case (a-z, 0-9, single \
+                     hyphens), got {:?}",
+                    s.name
+                );
+            }
         }
         Ok(())
     }
 
-    /// Build an [`Intent`] from this config, if a skill block is present.
-    /// Used by `init` to skip the interactive interview on re-runs.
+    /// Build an [`Intent`] from this config's single `[skill]` block, if
+    /// present. Used by `init` to skip the interactive interview on re-runs
+    /// and by the interactive path. Prefers the `[[skills]]` array's first
+    /// entry when no `[skill]` table exists.
     pub fn to_intent(&self) -> Option<Intent> {
-        let s = self.skill.as_ref()?;
-        Some(Intent {
-            one_line_description: s.one_line_description.clone(),
-            when_to_use_phrases: s.when_to_use_phrases.clone(),
-            invocation_command: s.invocation_command.clone(),
-            import_pattern: s.import_pattern.clone(),
-            author: s.author.clone().or_else(|| self.defaults.author.clone()),
-            license: s.license.clone().or_else(|| self.defaults.license.clone()),
-            verify_stdin: s.verify_stdin.clone(),
-        })
+        if let Some(s) = &self.skill {
+            return Some(s.to_intent(&self.defaults));
+        }
+        self.skills.first().map(|s| s.to_intent(&self.defaults))
     }
 
-    /// Construct a config from an [`Intent`] + name, for the first-run save.
-    pub fn from_intent(name: &str, intent: &Intent) -> Self {
-        let skill = SkillConfig {
-            name: name.to_string(),
-            one_line_description: intent.one_line_description.clone(),
-            when_to_use_phrases: intent.when_to_use_phrases.clone(),
-            invocation_command: intent.invocation_command.clone(),
-            import_pattern: intent.import_pattern.clone(),
-            author: intent.author.clone(),
-            license: intent.license.clone(),
-            verify_stdin: intent.verify_stdin.clone(),
-        };
-        Self {
-            skill: Some(skill),
-            defaults: Defaults {
-                author: intent.author.clone(),
-                license: intent.license.clone().or(Some("MIT".to_string())),
-            },
+    /// All skills as `(name, Intent)` pairs. A `[skill]` table is the PRIMARY
+    /// skill (pack-level files render from it); `[[skills]]` entries append
+    /// after it — so hand-editing "add a `[[skills]]` entry" keeps the
+    /// existing skill primary. Empty when the config has no skill block.
+    pub fn to_intents(&self) -> Vec<(String, Intent)> {
+        let mut out = Vec::new();
+        if let Some(s) = &self.skill {
+            out.push((s.name.clone(), s.to_intent(&self.defaults)));
         }
+        for s in &self.skills {
+            out.push((s.name.clone(), s.to_intent(&self.defaults)));
+        }
+        out
+    }
+
+    /// Construct a config from one or more `(name, Intent)` pairs. A single
+    /// skill serializes as the `[skill]` form (byte-compatible with what
+    /// `init` has always written); multiple skills serialize as `[[skills]]`.
+    pub fn from_intents(intents: &[(String, Intent)]) -> Self {
+        let skills: Vec<SkillConfig> = intents
+            .iter()
+            .map(|(name, i)| SkillConfig::from_intent(name, i))
+            .collect();
+        let defaults = Defaults {
+            author: intents.first().and_then(|(_, i)| i.author.clone()),
+            license: intents
+                .first()
+                .and_then(|(_, i)| i.license.clone())
+                .or(Some("MIT".to_string())),
+        };
+        if skills.len() == 1 {
+            Self {
+                skill: Some(skills.into_iter().next().unwrap()),
+                skills: Vec::new(),
+                defaults,
+            }
+        } else {
+            Self {
+                skill: None,
+                skills,
+                defaults,
+            }
+        }
+    }
+
+    /// Construct a config from a single [`Intent`] + name, for `init`'s
+    /// first-run save. Delegates to [`Config::from_intents`].
+    pub fn from_intent(name: &str, intent: &Intent) -> Self {
+        Self::from_intents(&[(name.to_string(), intent.clone())])
     }
 }
 
@@ -200,6 +264,7 @@ mod tests {
                 license: None,
                 verify_stdin: None,
             }),
+            skills: Vec::new(),
             defaults: Defaults::default(),
         };
         assert!(cfg.validate().is_err());
@@ -226,6 +291,7 @@ mod tests {
                 license: None,
                 verify_stdin: None,
             }),
+            skills: Vec::new(),
             defaults: Defaults::default(),
         };
         assert!(cfg.validate().is_ok());
@@ -252,9 +318,125 @@ mod tests {
                 license: None,
                 verify_stdin: None,
             }),
+            skills: Vec::new(),
             defaults: Defaults::default(),
         };
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_non_kebab_name_in_skills_array() {
+        let cfg = Config {
+            skill: None,
+            skills: vec![SkillConfig {
+                name: "My Tool".into(),
+                one_line_description: "desc".into(),
+                when_to_use_phrases: vec!["test".into()],
+                invocation_command: Some("cmd".into()),
+                import_pattern: None,
+                author: None,
+                license: None,
+                verify_stdin: None,
+            }],
+            defaults: Defaults::default(),
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn to_intents_keeps_skill_table_as_primary_then_appends_array() {
+        let cfg = Config {
+            skill: Some(SkillConfig {
+                name: "primary".into(),
+                one_line_description: "p".into(),
+                when_to_use_phrases: vec!["x".into()],
+                invocation_command: None,
+                import_pattern: Some("import p".into()),
+                author: None,
+                license: None,
+                verify_stdin: None,
+            }),
+            skills: vec![
+                SkillConfig {
+                    name: "alpha".into(),
+                    one_line_description: "a".into(),
+                    when_to_use_phrases: vec!["a-trigger".into()],
+                    invocation_command: None,
+                    import_pattern: Some("import a".into()),
+                    author: None,
+                    license: None,
+                    verify_stdin: None,
+                },
+                SkillConfig {
+                    name: "beta".into(),
+                    one_line_description: "b".into(),
+                    when_to_use_phrases: vec!["b-trigger".into()],
+                    invocation_command: Some("beta run".into()),
+                    import_pattern: None,
+                    author: None,
+                    license: None,
+                    verify_stdin: None,
+                },
+            ],
+            defaults: Defaults::default(),
+        };
+        let intents = cfg.to_intents();
+        assert_eq!(intents.len(), 3);
+        assert_eq!(intents[0].0, "primary");
+        assert_eq!(intents[1].0, "alpha");
+        assert_eq!(intents[2].0, "beta");
+        assert_eq!(intents[0].1.import_pattern.as_deref(), Some("import p"));
+        assert_eq!(
+            intents[1].1.when_to_use_phrases,
+            vec!["a-trigger".to_string()]
+        );
+        assert_eq!(intents[2].1.invocation_command.as_deref(), Some("beta run"));
+    }
+
+    #[test]
+    fn from_intents_round_trips_multi_skill_config() {
+        let intents = vec![
+            (
+                "alpha".to_string(),
+                Intent {
+                    one_line_description: "a".into(),
+                    when_to_use_phrases: vec!["a-trigger".into()],
+                    invocation_command: None,
+                    import_pattern: Some("import a".into()),
+                    author: Some("Jane".into()),
+                    license: Some("MIT".into()),
+                    verify_stdin: None,
+                },
+            ),
+            (
+                "beta".to_string(),
+                Intent {
+                    one_line_description: "b".into(),
+                    when_to_use_phrases: vec!["b-trigger".into()],
+                    invocation_command: Some("beta run".into()),
+                    import_pattern: None,
+                    author: None,
+                    license: None,
+                    verify_stdin: None,
+                },
+            ),
+        ];
+        let cfg = Config::from_intents(&intents);
+        assert!(
+            cfg.skill.is_none(),
+            "multi-skill must not serialize as [skill]"
+        );
+        assert_eq!(cfg.skills.len(), 2);
+        let back = cfg.to_intents();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].0, "alpha");
+        // beta omits author/license; the pack defaults (from the primary) cascade.
+        assert_eq!(back[1].1.author.as_deref(), Some("Jane"));
+        assert_eq!(back[1].1.license.as_deref(), Some("MIT"));
+        // Single-skill still serializes as the legacy [skill] form.
+        let single = Config::from_intents(&intents[..1]);
+        assert!(single.skill.is_some());
+        assert!(single.skills.is_empty());
     }
 
     #[test]
@@ -270,6 +452,7 @@ mod tests {
                 license: None,
                 verify_stdin: Some("\n".into()),
             }),
+            skills: Vec::new(),
             defaults: Defaults::default(),
         };
         let intent = cfg.to_intent().expect("intent from config");

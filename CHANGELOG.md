@@ -10,6 +10,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Multi-skill packs (the documented future direction, now shipped): a
+  `[[skills]]` array in `skillpack.toml` renders one per-skill file per
+  ecosystem (`skills/<name>/SKILL.md`, `.codex/skills/<name>/SKILL.md`,
+  `.cursor/rules/<name>.mdc`, `.opencode/agents/<name>.md`), each under its
+  own directory name and with its own frontmatter. The `[skill]` table stays
+  the PRIMARY skill — pack-level files (`plugin.json`, `marketplace.json`,
+  AGENTS.md, copilot-instructions.md) render from it, and hand-adding a
+  `[[skills]]` entry keeps it primary. `update`/`diff`/`verify --fix` are all
+  multi-skill aware: `verify` accepts any configured skill name in the
+  `name_drift` check, and `--fix` splices the RIGHT skill's frontmatter while
+  preserving every body. The config normalizes to a `[[skills]]` array on
+  first `update`. Author the array by hand; `init` still writes single-skill
+  packs. Docs: `docs/reference.md` "Multi-skill packs" section.
+
+### Added
+
 - `init --non-interactive` can now bootstrap the FIRST pack from flags
   (`--description`, `--trigger`, `--author`, `--invocation` or `--import`)
   when no `skillpack.toml` exists — previously a chicken-and-egg: CI needed a
