@@ -46,7 +46,7 @@ pub(crate) fn detect_repo_url(root: &Path) -> Option<String> {
             if s.is_empty() {
                 None
             } else {
-                Some(normalize_git_url(s))
+                Some(s.to_string())
             }
         }
         _ => None,
