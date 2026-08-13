@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-08-13
+
 ### Changed
 
 - README rewritten to be user-facing: plain-language quick start, "what you
