@@ -332,6 +332,10 @@ fn check_flag_drift(help_output: &str, skill_md: &str, report: &mut VerifyReport
         .collect::<Vec<_>>();
 
     if doc_flags.is_empty() {
+        let subcommands = extract_subcommands(help_output);
+        if !subcommands.is_empty() {
+            return;
+        }
         report.push(CheckResult::warn(
             "invocation.flag_drift",
             "SKILL.md documents flags that match `--help`",

@@ -203,6 +203,13 @@ pub(crate) fn project_manifest_version(root: &Path, language: Language) -> Optio
                 .and_then(|p| p.get("version"))
                 .and_then(|n| n.as_str())
                 .map(|s| s.to_string())
+                .or_else(|| {
+                    v.get("workspace")
+                        .and_then(|w| w.get("package"))
+                        .and_then(|p| p.get("version"))
+                        .and_then(|n| n.as_str())
+                        .map(|s| s.to_string())
+                })
         }
         Language::Node => {
             let raw = fs::read_to_string(root.join("package.json")).ok()?;

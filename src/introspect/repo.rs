@@ -113,7 +113,7 @@ pub(crate) fn read_readme_hint(root: &Path) -> Option<String> {
             //   markdown headings + image lines, and badge/markup-only rows
             //   (shields.io links, CI status) so the surfaced hint is prose
             //   a maintainer would actually want in a description.
-            let paragraph = head
+            let raw_lines: Vec<&str> = head
                 .lines()
                 .skip_while(|l| {
                     let t = l.trim();
@@ -124,6 +124,17 @@ pub(crate) fn read_readme_hint(root: &Path) -> Option<String> {
                         || is_markup_only(t)
                 })
                 .take_while(|l| !l.trim().is_empty())
+                .collect();
+            let paragraph = raw_lines
+                .iter()
+                .map(|l| {
+                    let mut t = l.trim();
+                    while let Some(stripped) = t.strip_prefix('>') {
+                        t = stripped.trim();
+                    }
+                    t
+                })
+                .filter(|l| !l.is_empty())
                 .collect::<Vec<_>>()
                 .join(" ");
             let trimmed = paragraph.trim();
@@ -214,7 +225,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(
             hint, "fd is a simple, fast and user-friendly alternative to find.",
-            "desc_hint must skip badge rows and land on the tagline, got: {hint:?}"
+            "desc_hint must skip badge rows and land on prose, got: {hint:?}"
         );
+    }
+
+    #[test]
+    fn read_readme_hint_strips_blockquotes() {
+        let dir = std::env::temp_dir().join(format!(
+            "skillpack-readme-quote-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("README.md"),
+            "# Ashen Ledger\n\n\
+             > Rule a starving post-collapse city through its public ledger, while every\n\
+             > citizen, faction, rumor, shipment, law, and betrayal leaves a trace in a\n\
+             > living historical record.\n",
+        )
+        .unwrap();
+        let hint = read_readme_hint(&dir).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            hint.starts_with("Rule a starving"),
+            "desc_hint must strip leading blockquote marker, got: {hint:?}"
+        );
+        assert!(!hint.contains('>'));
     }
 }

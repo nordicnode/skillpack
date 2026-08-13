@@ -151,15 +151,26 @@ fn rust_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
         .map(|c| format!("{c}{suffix}"))
         .collect();
 
-    for dir in &["target/release", "target/debug"] {
-        for probe in &probe_names {
-            let candidate = root.join(dir).join(probe);
-            if candidate.is_file() {
-                let canon = canonicalize_for_argv(&candidate);
-                return Some(CliCandidate {
-                    argv: vec![canon],
-                    spawn_cwd: root.to_path_buf(),
-                });
+    // Check target/ under root, and also under ancestor directories (for Cargo workspace members)
+    let mut search_roots = vec![root.to_path_buf()];
+    if let Some(parent) = root.parent() {
+        search_roots.push(parent.to_path_buf());
+        if let Some(grandparent) = parent.parent() {
+            search_roots.push(grandparent.to_path_buf());
+        }
+    }
+
+    for s_root in &search_roots {
+        for dir in &["target/release", "target/debug"] {
+            for probe in &probe_names {
+                let candidate = s_root.join(dir).join(probe);
+                if candidate.is_file() {
+                    let canon = canonicalize_for_argv(&candidate);
+                    return Some(CliCandidate {
+                        argv: vec![canon],
+                        spawn_cwd: root.to_path_buf(),
+                    });
+                }
             }
         }
     }
