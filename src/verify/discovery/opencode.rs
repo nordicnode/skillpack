@@ -25,16 +25,35 @@ pub struct OpenCodeFrontmatter {
 impl OpenCodeFrontmatter {
     fn parse(block: &str) -> Self {
         let mut fm = Self::default();
+        let mut current_key: Option<String> = None;
+        let mut current_val = String::new();
         for line in block.lines() {
             let trimmed = line.trim_end();
             if let Some(idx) = find_kv_colon(trimmed) {
-                let key = trimmed[..idx].trim();
-                let val = trimmed[idx + 1..].trim().trim_matches('"').to_string();
-                match key {
-                    "description" => fm.description = Some(val),
-                    "mode" => fm.mode = Some(val),
-                    _ => {}
+                if let Some(k) = current_key.take() {
+                    let clean = current_val.trim().trim_matches('"').trim().to_string();
+                    match k.as_str() {
+                        "description" => fm.description = Some(clean),
+                        "mode" => fm.mode = Some(clean),
+                        _ => {}
+                    }
+                    current_val.clear();
                 }
+                let key = trimmed[..idx].trim().to_string();
+                let val = trimmed[idx + 1..].trim().to_string();
+                current_key = Some(key);
+                current_val = val;
+            } else if !trimmed.is_empty() && current_key.is_some() {
+                current_val.push('\n');
+                current_val.push_str(trimmed);
+            }
+        }
+        if let Some(k) = current_key.take() {
+            let clean = current_val.trim().trim_matches('"').trim().to_string();
+            match k.as_str() {
+                "description" => fm.description = Some(clean),
+                "mode" => fm.mode = Some(clean),
+                _ => {}
             }
         }
         fm

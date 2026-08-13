@@ -1,0 +1,7 @@
+- id: skillpack-verify
+  name: skillpack verify
+  description: Verify that agent distribution files (AGENTS.md, Claude Code, Cursor, Codex) are up-to-date and valid.
+  entry: skillpack verify --min-score 100
+  language: rust
+  files: ^(\.claude-plugin/|skills/|\.cursor/|\.codex/|\.opencode/|AGENTS\.md|CLAUDE\.md|GEMINI\.md|CONVENTIONS\.md|skillpack\.toml)
+  pass_filenames: false

@@ -1,0 +1,24 @@
+name: Verify Agent Guidance Layer
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  skillpack-verify:
+    name: Verify Skillpack Guidance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install skillpack
+        run: cargo install skillpack --locked || cargo install --path .
+
+      - name: Run skillpack verify
+        run: skillpack verify --min-score 100

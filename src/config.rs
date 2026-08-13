@@ -61,6 +61,9 @@ pub struct SkillConfig {
     /// stdin closes; `None` (default) uses `/dev/null`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verify_stdin: Option<String>,
+    /// Optional project-specific footguns or gotchas to document for agents.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub footguns: Vec<String>,
 }
 
 impl SkillConfig {
@@ -75,6 +78,7 @@ impl SkillConfig {
             author: self.author.clone().or_else(|| defaults.author.clone()),
             license: self.license.clone().or_else(|| defaults.license.clone()),
             verify_stdin: self.verify_stdin.clone(),
+            footguns: self.footguns.clone(),
         }
     }
 
@@ -89,6 +93,7 @@ impl SkillConfig {
             author: intent.author.clone(),
             license: intent.license.clone(),
             verify_stdin: intent.verify_stdin.clone(),
+            footguns: intent.footguns.clone(),
         }
     }
 }
@@ -263,6 +268,7 @@ mod tests {
                 author: None,
                 license: None,
                 verify_stdin: None,
+                footguns: Vec::new(),
             }),
             skills: Vec::new(),
             defaults: Defaults::default(),
@@ -290,6 +296,7 @@ mod tests {
                 author: None,
                 license: None,
                 verify_stdin: None,
+                footguns: Vec::new(),
             }),
             skills: Vec::new(),
             defaults: Defaults::default(),
@@ -317,6 +324,7 @@ mod tests {
                 author: None,
                 license: None,
                 verify_stdin: None,
+                footguns: Vec::new(),
             }),
             skills: Vec::new(),
             defaults: Defaults::default(),
@@ -337,6 +345,7 @@ mod tests {
                 author: None,
                 license: None,
                 verify_stdin: None,
+                footguns: Vec::new(),
             }],
             defaults: Defaults::default(),
         };
@@ -355,6 +364,7 @@ mod tests {
                 author: None,
                 license: None,
                 verify_stdin: None,
+                footguns: Vec::new(),
             }),
             skills: vec![
                 SkillConfig {
@@ -366,6 +376,7 @@ mod tests {
                     author: None,
                     license: None,
                     verify_stdin: None,
+                    footguns: Vec::new(),
                 },
                 SkillConfig {
                     name: "beta".into(),
@@ -376,6 +387,7 @@ mod tests {
                     author: None,
                     license: None,
                     verify_stdin: None,
+                    footguns: Vec::new(),
                 },
             ],
             defaults: Defaults::default(),
@@ -406,6 +418,7 @@ mod tests {
                     author: Some("Jane".into()),
                     license: Some("MIT".into()),
                     verify_stdin: None,
+                    footguns: Vec::new(),
                 },
             ),
             (
@@ -418,6 +431,7 @@ mod tests {
                     author: None,
                     license: None,
                     verify_stdin: None,
+                    footguns: Vec::new(),
                 },
             ),
         ];
@@ -451,6 +465,7 @@ mod tests {
                 author: None,
                 license: None,
                 verify_stdin: Some("\n".into()),
+                footguns: Vec::new(),
             }),
             skills: Vec::new(),
             defaults: Defaults::default(),

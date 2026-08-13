@@ -243,15 +243,25 @@ fn apply_regen_skill_md_frontmatter(
 /// no frontmatter, or a corrupted file — caller falls back to whole-file).
 pub fn split_frontmatter(contents: &str) -> Option<(String, String)> {
     let after_open = contents.strip_prefix("---\n")?;
-    // Find `\n---\n` — the newline before `---` is part of the last
-    // frontmatter line's line-ending, so include it in the extracted block.
-    // Without it, a frontmatter line like `allowed-tools: Read, Bash` would
-    // splice as `...Bash---` (no newline), breaking the closing delimiter.
+    // Find `\n---\n` or `\n---` at end of string. The newline before `---` is
+    // part of the last frontmatter line's line-ending, so include it in the
+    // extracted block.
     let close_marker = "\n---\n";
-    let close_idx = after_open.find(close_marker)?;
-    let fm = format!("---\n{}\n---", &after_open[..close_idx]);
-    let body = after_open[close_idx + close_marker.len()..].to_string();
-    Some((fm, body))
+    if let Some(close_idx) = after_open.find(close_marker) {
+        let fm = format!("---\n{}\n---", &after_open[..close_idx]);
+        let body = after_open[close_idx + close_marker.len()..].to_string();
+        Some((fm, body))
+    } else if let Some(close_idx) = after_open.rfind("\n---") {
+        if close_idx + "\n---".len() == after_open.len() {
+            let fm = format!("---\n{}\n---", &after_open[..close_idx]);
+            let body = String::new();
+            Some((fm, body))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
 }
 
 fn write_one(root: &Path, file: &GeneratedFileOutput) -> Result<()> {
@@ -412,5 +422,13 @@ mod tests {
             spliced.contains("Bash\n---\n\n# body"),
             "spliced output must have proper delimiter separation, got:\n{spliced}"
         );
+    }
+
+    #[test]
+    fn split_frontmatter_handles_eof_closing_delimiter() {
+        let input = "---\nname: test\ndescription: \"x\"\n---";
+        let (fm, body) = split_frontmatter(input).expect("split succeeds at EOF");
+        assert_eq!(fm, "---\nname: test\ndescription: \"x\"\n---");
+        assert_eq!(body, "");
     }
 }

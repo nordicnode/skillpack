@@ -20,14 +20,16 @@ use crate::spawn::{self, SpawnOutcome, HELP_TIMEOUT};
 use crate::types::{DiagTrace, Language};
 
 use super::cli_candidates::{primary_cli_candidate, CliCandidate, DetectCli};
-use super::workspace::{is_cargo_workspace_only, is_npm_workspace_only, pyproject_has_tool};
+use super::workspace::{
+    expand_workspace_members, is_cargo_workspace_only, is_npm_workspace_only, pyproject_has_tool,
+};
 
 /// Walk a Cargo workspace's members looking for a crate with a CLI binary.
-/// Parses `Cargo.toml` `[workspace].members` (literal paths only — globs
-/// not expanded, keeping V1 simple), then for each `members/<m>` probes
-/// `primary_cli_candidate` against the member's `[package].name`. Pushes a
-/// diag note per member tried so doctor explains the walk; returns `Some`
-/// on the first member that yields a runnable CLI, `None` if none do.
+/// Parses `Cargo.toml` `[workspace].members` (including glob patterns like
+/// `crates/*`), then for each member probes `primary_cli_candidate` against
+/// the member's `[package].name`. Pushes a diag note per member tried so
+/// doctor explains the walk; returns `Some` on the first member that yields
+/// a runnable CLI, `None` if none do.
 pub(crate) fn walk_cargo_workspace(
     root: &Path,
     _name: &str,
@@ -36,18 +38,20 @@ pub(crate) fn walk_cargo_workspace(
     let raw = fs::read_to_string(root.join("Cargo.toml")).ok()?;
     let v = toml::from_str::<toml::Value>(&raw).ok()?;
     let members = v.get("workspace")?.get("members")?.as_array()?;
+    let raw_list: Vec<String> = members
+        .iter()
+        .filter_map(|m| m.as_str().map(String::from))
+        .collect();
+    let expanded = expand_workspace_members(root, &raw_list);
     diag.push(
         "detect_cli.rust.workspace",
         format!(
             "Cargo workspace root — {} member(s) to probe",
-            members.len()
+            expanded.len()
         ),
     );
-    for m in members {
-        let Some(member_rel) = m.as_str() else {
-            continue;
-        };
-        let member_root = root.join(member_rel);
+    for member_rel in expanded {
+        let member_root = root.join(&member_rel);
         if !member_root.join("Cargo.toml").is_file() {
             diag.push(
                 "detect_cli.rust.workspace",
@@ -102,7 +106,7 @@ pub(crate) fn walk_cargo_workspace(
     None
 }
 
-/// Walk an npm workspace's members (literal `workspaces` paths, no globs)
+/// Walk an npm workspace's members (including `packages/*` patterns)
 /// looking for a package with a `bin`. Parses `package.json` `workspaces`
 /// (string or array of strings). Returns `Some` on the first member that
 /// yields a runnable CLI; `None` otherwise. Pushes a diag note per member.
@@ -122,11 +126,12 @@ pub(crate) fn walk_npm_workspace(
             .collect(),
         _ => return None,
     };
+    let expanded = expand_workspace_members(root, &paths);
     diag.push(
         "detect_cli.node.workspace",
-        format!("npm workspace root — {} member(s) to probe", paths.len()),
+        format!("npm workspace root — {} member(s) to probe", expanded.len()),
     );
-    for member_rel in paths {
+    for member_rel in expanded {
         let member_root = root.join(&member_rel);
         let pkg_json = member_root.join("package.json");
         if !pkg_json.is_file() {

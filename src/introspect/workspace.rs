@@ -51,6 +51,34 @@ pub(crate) fn pyproject_has_tool(root: &Path, name: &str) -> bool {
     v.get("tool").and_then(|t| t.get(name)).is_some()
 }
 
+/// Expand workspace member patterns (e.g. `crates/*`, `packages/*`, or literal paths)
+/// into concrete member directory paths relative to `root`.
+pub(crate) fn expand_workspace_members(root: &Path, raw_members: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for m in raw_members {
+        if let Some(prefix) = m.strip_suffix("/*").or_else(|| m.strip_suffix("/**")) {
+            let parent = root.join(prefix);
+            if parent.is_dir() {
+                if let Ok(entries) = fs::read_dir(&parent) {
+                    let mut subdirs: Vec<_> = entries
+                        .flatten()
+                        .filter(|e| e.path().is_dir())
+                        .collect();
+                    subdirs.sort_by_key(|e| e.file_name());
+                    for sub in subdirs {
+                        if let Some(sub_name) = sub.file_name().to_str() {
+                            out.push(format!("{prefix}/{sub_name}"));
+                        }
+                    }
+                }
+            }
+        } else {
+            out.push(m.clone());
+        }
+    }
+    out
+}
+
 /// First `[package].name` from a Cargo workspace member dir. Mirrors the
 /// parse in `walk_cargo_workspace` (parent) but stops at name resolution (no
 /// candidate/spawn probe) — used by `introspect` so `detect_cli` gets a name
@@ -59,9 +87,13 @@ pub(crate) fn first_cargo_member_name(root: &Path, diag: &mut DiagTrace) -> Opti
     let raw = fs::read_to_string(root.join("Cargo.toml")).ok()?;
     let v = toml::from_str::<toml::Value>(&raw).ok()?;
     let members = v.get("workspace")?.get("members")?.as_array()?;
-    for m in members {
-        let Some(rel) = m.as_str() else { continue };
-        let member_root = root.join(rel);
+    let raw_list: Vec<String> = members
+        .iter()
+        .filter_map(|m| m.as_str().map(String::from))
+        .collect();
+    let expanded = expand_workspace_members(root, &raw_list);
+    for rel in expanded {
+        let member_root = root.join(&rel);
         let name = fs::read_to_string(member_root.join("Cargo.toml"))
             .ok()
             .and_then(|r| toml::from_str::<toml::Value>(&r).ok())
@@ -101,7 +133,8 @@ pub(crate) fn first_npm_member_name(root: &Path, diag: &mut DiagTrace) -> Option
             .collect(),
         _ => return None,
     };
-    for rel in paths {
+    let expanded = expand_workspace_members(root, &paths);
+    for rel in expanded {
         let pkg = root.join(&rel).join("package.json");
         let name = fs::read_to_string(&pkg)
             .ok()
@@ -120,4 +153,30 @@ pub(crate) fn first_npm_member_name(root: &Path, diag: &mut DiagTrace) -> Option
         "no workspace member has a package.json `name` — name fell back to dir tail".to_string(),
     );
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn expand_workspace_members_resolves_globs_and_literals() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("crates/cli")).unwrap();
+        fs::create_dir_all(root.join("crates/core")).unwrap();
+        fs::create_dir_all(root.join("other/pkg")).unwrap();
+
+        let raw = vec!["crates/*".to_string(), "other/pkg".to_string()];
+        let expanded = expand_workspace_members(root, &raw);
+        assert_eq!(
+            expanded,
+            vec![
+                "crates/cli".to_string(),
+                "crates/core".to_string(),
+                "other/pkg".to_string()
+            ]
+        );
+    }
 }

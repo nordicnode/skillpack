@@ -13,7 +13,11 @@ categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
 exclude = [
     "/.claude",
+    "/.github",
     "/docs/logo.png",
+    "/scripts",
+    "/memory:",
+    "2026-07-09-skillpack-design.md",
 ]
 
 [lib]

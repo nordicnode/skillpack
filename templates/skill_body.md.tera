@@ -51,6 +51,7 @@ There is no CLI to invoke. Use the import pattern above and call the relevant AP
 {% endif %}
 ## Footguns / gotchas
 
-- Verify the tool is installed before relying on it; do not assume availability.
+{% for fg in footguns %}- {{ fg }}
+{% endfor %}- Verify the tool is installed before relying on it; do not assume availability.
 {% if has_cli %}- Prefer the documented `{{ cli_binary }}` flags; undocumented flags may change without notice.
 {% endif %}- This file is authoritative for agent invocation; if it drifts from the CLI's real `--help`, run `skillpack verify` to catch it.

@@ -150,6 +150,9 @@ pub struct Intent {
     /// all existing behavior).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verify_stdin: Option<String>,
+    /// Optional project-specific footguns or gotchas to document for agents.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub footguns: Vec<String>,
 }
 
 impl Intent {

@@ -1,0 +1,39 @@
+{
+  "name": "ripgrep",
+  "description": "Line-oriented search tool combining grep speed with user-friendly defaults (Rust CLI)",
+  "repo": "https://github.com/BurntSushi/ripgrep.git",
+  "branch": "master",
+  "target_bin": "rg",
+  "questions": [
+    "Q1. Search for whole-word case-insensitive occurrences of 'config' in Rust files only. Show the exact rg command, run it, and paste the first 5 lines.",
+    "Q2. Count the number of non-matching lines in README.md (inverted match) that do not contain 'ripgrep'. Show and run the command.",
+    "Q3. Perform a multiline regex search matching 'fn\\s+[a-z_]+\\([^)]*\\)\\s*->' across the codebase. Run it and paste 3 matching signatures.",
+    "Q4. Search for 'TODO' including hidden and gitignored files. What flag combination did you use and why?"
+  ],
+  "checks": [
+    {
+      "id": "Q1",
+      "name": "Word boundary + Case-insensitive + Type filter",
+      "command_regex": "rg.*(-w|--word-regexp).*(-i|--ignore-case).*(-t rust|--type rust|\\.rs)",
+      "output_regex": "(src/|crates/).*\\.rs"
+    },
+    {
+      "id": "Q2",
+      "name": "Invert match + Count",
+      "command_regex": "rg.*(-v|--invert-match).*(-c|--count)",
+      "output_regex": "\\d+"
+    },
+    {
+      "id": "Q3",
+      "name": "Multiline regex",
+      "command_regex": "rg.*(-U|--multiline)",
+      "output_regex": "fn\\s+[a-z_]+"
+    },
+    {
+      "id": "Q4",
+      "name": "Unrestricted search (hidden + ignored)",
+      "command_regex": "rg.*(-u|-uu|--unrestricted|--hidden|--no-ignore)",
+      "output_regex": "(TODO|todo)"
+    }
+  ]
+}

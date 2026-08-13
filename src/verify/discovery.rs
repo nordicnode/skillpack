@@ -607,11 +607,12 @@ impl SkillFrontmatter {
             if let Some(idx) = find_kv_colon(trimmed) {
                 // Flush previous.
                 if let Some(k) = current_key.take() {
-                    store(&mut fm, &k, current_val.trim());
+                    let clean = current_val.trim().trim_matches('"').trim();
+                    store(&mut fm, &k, clean);
                     current_val.clear();
                 }
                 let key = trimmed[..idx].trim().to_string();
-                let val = trimmed[idx + 1..].trim().trim_matches('"').to_string();
+                let val = trimmed[idx + 1..].trim().to_string();
                 current_key = Some(key);
                 current_val = val;
             } else if !trimmed.is_empty() && current_key.is_some() {
@@ -621,7 +622,8 @@ impl SkillFrontmatter {
             }
         }
         if let Some(k) = current_key.take() {
-            store(&mut fm, &k, current_val.trim());
+            let clean = current_val.trim().trim_matches('"').trim();
+            store(&mut fm, &k, clean);
         }
         fm
     }
@@ -638,11 +640,17 @@ fn store(fm: &mut SkillFrontmatter, key: &str, val: &str) {
 }
 
 pub(crate) fn find_kv_colon(line: &str) -> Option<usize> {
-    // First `:` not inside quotes.
+    // First `:` not inside quotes. Handles escaped quotes (\", \').
     let mut in_s = false;
     let mut in_d = false;
+    let mut escaped = false;
     for (i, c) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
         match c {
+            '\\' => escaped = true,
             '\'' if !in_d => in_s = !in_s,
             '"' if !in_s => in_d = !in_d,
             ':' if !in_s && !in_d => return Some(i),
@@ -920,17 +928,16 @@ pub(crate) fn find_skill_file(root: &Path) -> Option<std::path::PathBuf> {
 }
 
 /// Validate an `allowed-tools` token against the Anthropic grammar:
-/// a bare identifier (`Read`, `Grep`) or a namespaced call
-/// (`Bash(npm test:*)`, `Edit(*)`). Returns false for empty, malformed,
-/// or unbalanced-paren tokens. Ponytail: regex-free char scan — the
-/// grammar is small enough to validate inline without pulling `regex`.
+/// a bare identifier (`Read`, `Grep`, `mcp__github__create_issue`) or a
+/// namespaced call (`Bash(npm test:*)`, `Edit(*)`). Returns false for empty,
+/// malformed, or unbalanced-paren tokens.
 pub(crate) fn is_valid_allowed_tool_token(token: &str) -> bool {
     let t = token.trim();
     if t.is_empty() {
         return false;
     }
-    // Bare identifier: all alphabetic.
-    if t.chars().all(char::is_alphabetic) {
+    // Bare identifier: alphanumeric, underscore, or hyphen (e.g. Read, mcp__server__tool).
+    if is_valid_tool_ident(t) {
         return true;
     }
     // Namespaced call: `Name(args)`. Split on the first `(`.
@@ -938,7 +945,7 @@ pub(crate) fn is_valid_allowed_tool_token(token: &str) -> bool {
         return false;
     };
     let (name, rest) = t.split_at(open);
-    if !name.chars().all(char::is_alphabetic) || name.is_empty() {
+    if !is_valid_tool_ident(name) {
         return false;
     }
     let rest = rest.strip_prefix('(').unwrap_or(rest);
@@ -951,6 +958,15 @@ pub(crate) fn is_valid_allowed_tool_token(token: &str) -> bool {
         return false;
     }
     true
+}
+
+fn is_valid_tool_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// Every `.codex/skills/<name>/SKILL.md`, sorted. Same frontmatter shape
@@ -1213,5 +1229,38 @@ mod tests {
         assert_eq!(r.severity, Severity::Error);
         assert_eq!(r.check_id, "discovery.opencode.agent.frontmatter_unclosed");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn find_kv_colon_handles_escaped_quotes_and_colons() {
+        assert_eq!(find_kv_colon("name: foo"), Some(4));
+        assert_eq!(find_kv_colon("description: \"test: here\""), Some(11));
+        assert_eq!(
+            find_kv_colon(r#"description: "test \"with: escaped\" quotes""#),
+            Some(11)
+        );
+        assert_eq!(find_kv_colon("no colon here"), None);
+    }
+
+    #[test]
+    fn skill_frontmatter_parse_multiline_strips_quotes_cleanly() {
+        let block = "name: my-tool\ndescription: \"first line\nsecond line\"\nwhen_to_use: \"test\"";
+        let fm = SkillFrontmatter::parse(block);
+        assert_eq!(fm.name.as_deref(), Some("my-tool"));
+        assert_eq!(
+            fm.description.as_deref(),
+            Some("first line\nsecond line"),
+            "multiline description must not have trailing quote"
+        );
+    }
+
+    #[test]
+    fn allowed_tools_token_supports_mcp_and_standard_names() {
+        assert!(is_valid_allowed_tool_token("Read"));
+        assert!(is_valid_allowed_tool_token("Bash(npm test:*)"));
+        assert!(is_valid_allowed_tool_token("mcp__github__create_issue"));
+        assert!(is_valid_allowed_tool_token("mcp__server-name__tool_1"));
+        assert!(!is_valid_allowed_tool_token(""));
+        assert!(!is_valid_allowed_tool_token("Bash(unclosed"));
     }
 }

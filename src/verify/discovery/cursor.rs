@@ -35,11 +35,12 @@ impl CursorFrontmatter {
             let trimmed = line.trim_end();
             if let Some(idx) = find_kv_colon(trimmed) {
                 if let Some(k) = current_key.take() {
-                    store_cursor(&mut fm, &k, current_val.trim());
+                    let clean = current_val.trim().trim_matches('"').trim();
+                    store_cursor(&mut fm, &k, clean);
                     current_val.clear();
                 }
                 let key = trimmed[..idx].trim().to_string();
-                let val = trimmed[idx + 1..].trim().trim_matches('"').to_string();
+                let val = trimmed[idx + 1..].trim().to_string();
                 current_key = Some(key);
                 current_val = val;
             } else if !trimmed.is_empty() && current_key.is_some() {
@@ -48,7 +49,8 @@ impl CursorFrontmatter {
             }
         }
         if let Some(k) = current_key.take() {
-            store_cursor(&mut fm, &k, current_val.trim());
+            let clean = current_val.trim().trim_matches('"').trim();
+            store_cursor(&mut fm, &k, clean);
         }
         fm
     }

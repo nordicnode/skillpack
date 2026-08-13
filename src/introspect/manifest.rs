@@ -76,12 +76,29 @@ pub(crate) fn project_manifest_name(root: &Path, language: Language) -> Option<S
                 .map(std::string::ToString::to_string)
         }
         Language::Python => {
-            // pyproject.toml [project] name = "..."
+            // pyproject.toml [project] name = "...", fallback [tool.poetry] name = "..."
             if let Ok(raw) = fs::read_to_string(root.join("pyproject.toml")) {
                 if let Ok(v) = toml::from_str::<toml::Value>(&raw) {
                     if let Some(name) = v
                         .get("project")
                         .and_then(|p| p.get("name"))
+                        .and_then(|n| n.as_str())
+                    {
+                        return Some(name.to_string());
+                    }
+                    if let Some(name) = v
+                        .get("tool")
+                        .and_then(|t| t.get("poetry"))
+                        .and_then(|p| p.get("name"))
+                        .and_then(|n| n.as_str())
+                    {
+                        return Some(name.to_string());
+                    }
+                    if let Some(name) = v
+                        .get("tool")
+                        .and_then(|t| t.get("flit"))
+                        .and_then(|f| f.get("metadata"))
+                        .and_then(|m| m.get("module"))
                         .and_then(|n| n.as_str())
                     {
                         return Some(name.to_string());
@@ -204,6 +221,23 @@ pub(crate) fn project_manifest_version(root: &Path, language: Language) -> Optio
                     {
                         return Some(ver.to_string());
                     }
+                    if let Some(ver) = v
+                        .get("tool")
+                        .and_then(|t| t.get("poetry"))
+                        .and_then(|p| p.get("version"))
+                        .and_then(|n| n.as_str())
+                    {
+                        return Some(ver.to_string());
+                    }
+                    if let Some(ver) = v
+                        .get("tool")
+                        .and_then(|t| t.get("flit"))
+                        .and_then(|f| f.get("metadata"))
+                        .and_then(|m| m.get("version"))
+                        .and_then(|n| n.as_str())
+                    {
+                        return Some(ver.to_string());
+                    }
                 }
             }
             None
@@ -306,6 +340,17 @@ fn project_manifest_authors_raw(root: &Path, language: Language) -> Option<Strin
                             }
                         }
                     }
+                    // Poetry: [tool.poetry.authors] = ["Name <email>"]
+                    if let Some(arr) = v
+                        .get("tool")
+                        .and_then(|t| t.get("poetry"))
+                        .and_then(|p| p.get("authors"))
+                        .and_then(|a| a.as_array())
+                    {
+                        if let Some(first) = arr.first().and_then(|s| s.as_str()) {
+                            return Some(first.to_string());
+                        }
+                    }
                 }
             }
             None
@@ -394,6 +439,55 @@ pub(crate) fn manifest_license(root: &Path, language: Language) -> Option<String
                 .and_then(|n| n.as_str())
                 .map(|s| s.to_string())
         }
+        Language::Python => {
+            let raw = fs::read_to_string(root.join("pyproject.toml")).ok()?;
+            let v: toml::Value = toml::from_str(&raw).ok()?;
+            // PEP 621: [project] license = "MIT" or license = { text = "MIT" }
+            if let Some(lic) = v.get("project").and_then(|p| p.get("license")) {
+                if let Some(s) = lic.as_str() {
+                    return Some(s.to_string());
+                }
+                if let Some(text) = lic.get("text").and_then(|t| t.as_str()) {
+                    return Some(text.to_string());
+                }
+            }
+            // Poetry: [tool.poetry] license = "MIT"
+            v.get("tool")
+                .and_then(|t| t.get("poetry"))
+                .and_then(|p| p.get("license"))
+                .and_then(|l| l.as_str())
+                .map(|s| s.to_string())
+        }
+        Language::Php => {
+            let raw = fs::read_to_string(root.join("composer.json")).ok()?;
+            let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+            v.get("license")?
+                .as_str()
+                .map(std::string::ToString::to_string)
+        }
+        Language::Ruby => {
+            if let Ok(entries) = fs::read_dir(root) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("gemspec") {
+                        if let Ok(raw) = fs::read_to_string(&p) {
+                            if let Some(line) = raw
+                                .lines()
+                                .find(|l| l.contains("spec.license") || l.contains(".license ="))
+                            {
+                                if let Some(lic) = extract_ruby_string_value(line) {
+                                    return Some(lic.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Language::CSharp => select_csproj(root)
+            .and_then(|p| fs::read_to_string(&p).ok())
+            .and_then(|raw| extract_xml_tag(&raw, "PackageLicenseExpression")),
         _ => None,
     }
 }

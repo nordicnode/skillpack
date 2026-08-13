@@ -105,20 +105,35 @@ pub(crate) fn primary_cli_candidate(
 /// declaration order; empty when no `[[bin]]` tables (implicit single-bin
 /// crate where the artifact matches the package name).
 fn cargo_bin_names(root: &Path) -> Vec<String> {
-    let Ok(raw) = fs::read_to_string(root.join("Cargo.toml")) else {
-        return Vec::new();
-    };
-    let Ok(v) = toml::from_str::<toml::Value>(&raw) else {
-        return Vec::new();
-    };
-    v.get("bin")
-        .and_then(|b| b.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(String::from))
-                .collect()
-        })
-        .unwrap_or_default()
+    let mut names = Vec::new();
+    if let Ok(raw) = fs::read_to_string(root.join("Cargo.toml")) {
+        if let Ok(v) = toml::from_str::<toml::Value>(&raw) {
+            if let Some(arr) = v.get("bin").and_then(|b| b.as_array()) {
+                for t in arr {
+                    if let Some(n) = t.get("name").and_then(|n| n.as_str()) {
+                        names.push(n.to_string());
+                    }
+                }
+            }
+        }
+    }
+    // Probe src/bin/*.rs for implicit Cargo binary targets
+    let bin_dir = root.join("src").join("bin");
+    if bin_dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(bin_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().is_some_and(|e| e == "rs") {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        if !names.contains(&stem.to_string()) {
+                            names.push(stem.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    names
 }
 
 /// Rust: a built artifact under `target/{release,debug}/<name>`, canonicalized
@@ -126,11 +141,6 @@ fn cargo_bin_names(root: &Path) -> Vec<String> {
 /// verify spawns from a temp dir). Falls back to a PATH probe for an installed
 /// bin, then to the dir-derived name.
 fn rust_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
-    // Build the list of artifact filenames to probe. `cargo build` writes
-    // `<bin_name>.exe` on Windows, bare `<bin_name>` on Unix. A crate may
-    // rename its binary via `[[bin]] name = "..."` (e.g. `fd-find` → `fd`),
-    // so probe `[[bin]].name` entries first, then the package-name fallback
-    // for implicit single-bin crates where artifact == package name.
     let suffix = if cfg!(windows) { ".exe" } else { "" };
     let mut candidates: Vec<String> = cargo_bin_names(root);
     if !candidates.iter().any(|c| c == name) {
@@ -138,115 +148,159 @@ fn rust_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
     }
     let probe_names: Vec<String> = candidates
         .into_iter()
-        .map(|n| format!("{n}{suffix}"))
+        .map(|c| format!("{c}{suffix}"))
         .collect();
-    for bin in &probe_names {
-        for profile in &["release", "debug"] {
-            let p = root.join("target").join(profile).join(bin);
-            if p.exists() {
-                // Canonicalize so the stored argv survives a later cwd change
-                // (the pre-commit verify spawns from a temp dir). Falls back to
-                // the joined path if canonicalize fails on some platforms.
-                let abs = canonicalize_for_argv(&p);
+
+    for dir in &["target/release", "target/debug"] {
+        for probe in &probe_names {
+            let candidate = root.join(dir).join(probe);
+            if candidate.is_file() {
+                let canon = canonicalize_for_argv(&candidate);
                 return Some(CliCandidate {
-                    argv: vec![abs],
+                    argv: vec![canon],
                     spawn_cwd: root.to_path_buf(),
                 });
             }
         }
     }
-    // PATH fallback: probe `[[bin]].name` candidates first (a renamed binary
-    // like `fd` may be installed even though the crate is `fd-find`), then
-    // the package name. which_on_path appends PATHEXT on Windows.
-    for cand_name in cargo_bin_names(root) {
-        if cand_name == name {
-            continue;
-        }
-        if let Some(p) = which_on_path(&cand_name) {
+
+    // Installed bin on PATH.
+    if let Some(bin) = which_on_path(name) {
+        return Some(CliCandidate {
+            argv: vec![bin.to_string_lossy().to_string()],
+            spawn_cwd: root.to_path_buf(),
+        });
+    }
+
+    None
+}
+
+/// Node: prefer `node <file>` from package.json `bin` entry (string or object)
+/// or from conventional `./bin/<name>.js`. Returns an absolute cwd so the
+/// relative script path resolves when spawned.
+fn node_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let node = which_on_path("node")
+        .or_else(|| which_on_path("nodejs"))
+        .map(|p| p.to_string_lossy().to_string())?;
+
+    // 1. package.json `bin` entry: `"bin": "./bin/run.js"` OR `"bin": { "cli": "./bin/run.js" }`
+    if let Some(script_rel) = package_json_bin_script(root, name) {
+        let script = root.join(&script_rel);
+        if script.is_file() {
             return Some(CliCandidate {
-                argv: vec![p.to_string_lossy().to_string()],
+                argv: vec![node, script.to_string_lossy().to_string()],
                 spawn_cwd: root.to_path_buf(),
             });
         }
     }
-    which_on_path(name).map(|p| CliCandidate {
-        argv: vec![p.to_string_lossy().to_string()],
-        spawn_cwd: root.to_path_buf(),
-    })
+
+    // 2. Conventional bin locations: `./bin/<name>.js`, `./bin/cli.js`, `./cli.js`
+    for rel in &[
+        format!("bin/{name}.js"),
+        "bin/cli.js".to_string(),
+        "bin/index.js".to_string(),
+        "cli.js".to_string(),
+    ] {
+        let script = root.join(rel);
+        if script.is_file() {
+            return Some(CliCandidate {
+                argv: vec![node, script.to_string_lossy().to_string()],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+
+    // 3. Global command on PATH (installed via `npm i -g`).
+    if let Some(bin) = which_on_path(name) {
+        return Some(CliCandidate {
+            argv: vec![bin.to_string_lossy().to_string()],
+            spawn_cwd: root.to_path_buf(),
+        });
+    }
+
+    None
 }
 
-/// Node: a `package.json` `bin` field (string or object) points at a JS
-/// script. Resolve it to an absolute path and run `node <abs script>` so the
-/// project's CLI works uninstalled and survives a cwd change. Requires `node`
-/// on PATH (honest `None` otherwise).
-fn node_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
-    let node = which_on_path("node")?;
-    let node_bin = node.to_string_lossy().to_string();
+fn package_json_bin_script(root: &Path, name: &str) -> Option<String> {
     let raw = fs::read_to_string(root.join("package.json")).ok()?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
     let bin = v.get("bin")?;
-    // `bin` may be a string ("./cli.js") or an object mapping name → script.
-    // We pick the first script (preferring an entry keyed by the tool name).
-    let script = match bin {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Object(map) => {
-            // Pick the entry keyed by the tool name if present (the primary
-            // bin), otherwise fall back to the first script entry. Handles
-            // multi-bin packages while keeping single-bin packages simple.
-            map.get(name)
-                .and_then(|v| v.as_str())
-                .or_else(|| map.iter().next().and_then(|(_, v)| v.as_str()))?
-                .to_string()
+    if let Some(s) = bin.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(obj) = bin.as_object() {
+        if let Some(s) = obj.get(name).and_then(|v| v.as_str()) {
+            return Some(s.to_string());
         }
-        _ => return None,
-    };
-    if script.trim().is_empty() {
-        return None;
+        // Fall back to the first key in the bin map.
+        if let Some((_k, v)) = obj.iter().next() {
+            if let Some(s) = v.as_str() {
+                return Some(s.to_string());
+            }
+        }
     }
-    // Resolve to an absolute path so `node <abs script> --help` works whether
-    // or not the package is installed, and survives the temp-dir spawn cwd.
-    let script_path = root.join(&script);
-    let abs_script = canonicalize_for_argv(&script_path);
-    Some(CliCandidate {
-        argv: vec![node_bin, abs_script],
-        spawn_cwd: root.to_path_buf(),
-    })
+    None
 }
 
-/// Go: invoke `go run .` from the project root (the canonical way to run an
-/// uninstalled Go CLI). Requires `go` on PATH and a `package main` source at
-/// root. Honest `None` when `go` is missing (the dev-machine case here).
-fn go_cli_candidate(root: &Path, _name: &str) -> Option<CliCandidate> {
-    which_on_path("go")?;
-    if !has_go_main(root) {
-        return None;
+/// Go: `go run .` if root has a `main` package, else `go run ./cmd/<name>`,
+/// else PATH lookup for an installed bin.
+fn go_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let go = which_on_path("go")?.to_string_lossy().to_string();
+
+    // 1. Root directory is `package main`.
+    if is_go_main_package(root) {
+        return Some(CliCandidate {
+            argv: vec![go, "run".to_string(), ".".to_string()],
+            spawn_cwd: root.to_path_buf(),
+        });
     }
-    // `go run .` is cwd-relative by design; the spawn runs in the project root
-    // (the pre-commit verify passes root as spawn_cwd, so this stays correct).
-    Some(CliCandidate {
-        argv: vec!["go".to_string(), "run".to_string(), ".".to_string()],
-        spawn_cwd: root.to_path_buf(),
-    })
+
+    // 2. `./cmd/<name>` or `./cmd/...` is `package main`.
+    let cmd_named = root.join("cmd").join(name);
+    if cmd_named.is_dir() && is_go_main_package(&cmd_named) {
+        return Some(CliCandidate {
+            argv: vec![go, "run".to_string(), format!("./cmd/{name}")],
+            spawn_cwd: root.to_path_buf(),
+        });
+    }
+    let cmd_root = root.join("cmd");
+    if cmd_root.is_dir() {
+        if let Ok(entries) = fs::read_dir(&cmd_root) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() && is_go_main_package(&p) {
+                    if let Some(sub) = p.file_name().and_then(|s| s.to_str()) {
+                        return Some(CliCandidate {
+                            argv: vec![go, "run".to_string(), format!("./cmd/{sub}")],
+                            spawn_cwd: root.to_path_buf(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Installed binary on PATH.
+    if let Some(bin) = which_on_path(name) {
+        return Some(CliCandidate {
+            argv: vec![bin.to_string_lossy().to_string()],
+            spawn_cwd: root.to_path_buf(),
+        });
+    }
+
+    None
 }
 
-/// True iff `root` contains a non-test `.go` file declaring `package main`.
-fn has_go_main(root: &Path) -> bool {
-    let Ok(entries) = fs::read_dir(root) else {
+fn is_go_main_package(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
         return false;
     };
     for entry in entries.flatten() {
-        let p = entry.path();
-        if p.extension().and_then(|e| e.to_str()) != Some("go") {
-            continue;
-        }
-        // _test.go files aren't runnable entry points.
-        if p.file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.ends_with("_test.go"))
-        {
-            continue;
-        }
-        if let Ok(raw) = fs::read_to_string(&p) {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "go") {
+            let Ok(raw) = fs::read_to_string(&path) else {
+                continue;
+            };
             if raw.lines().any(|l| l.trim() == "package main") {
                 return true;
             }
@@ -256,8 +310,8 @@ fn has_go_main(root: &Path) -> bool {
 }
 
 /// Python: prefer `python -m <pkg>` against an importable package dir at the
-/// root (the canonical uninstalled invocation). Fall back to an installed
-/// console-script on PATH. Honest `None` when neither is runnable.
+/// root or under `src/` (the canonical uninstalled invocation). Fall back to
+/// an installed console-script on PATH. Honest `None` when neither is runnable.
 fn python_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
     let python = which_on_path("python")
         .or_else(|| which_on_path("python3"))
@@ -265,12 +319,18 @@ fn python_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
 
     // A `pyproject.toml` `[project.scripts]` entry maps the console-script
     // name to `<pkg>.<module>:<func>`. We extract the package and, if it's
-    // importable as a directory at the root, invoke `python -m <pkg>`.
+    // importable as a directory at root or under src/, invoke `python -m <pkg>`.
     if let Some(pkg) = python_script_package(root, name) {
         if root.join(&pkg).is_dir() {
             return Some(CliCandidate {
                 argv: vec![python, "-m".to_string(), pkg],
                 spawn_cwd: root.to_path_buf(),
+            });
+        }
+        if root.join("src").join(&pkg).is_dir() {
+            return Some(CliCandidate {
+                argv: vec![python, "-m".to_string(), pkg],
+                spawn_cwd: root.join("src"),
             });
         }
     }
@@ -287,20 +347,28 @@ fn python_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
 }
 
 /// Extract the top-level package name from a `pyproject.toml` `[project.scripts]`
-/// entry whose key matches `name` (e.g. `sample-python = "sample_python.cli:main"`
-/// → `sample_python`). Returns `None` if no such entry / no importable target.
+/// or `[tool.poetry.scripts]` entry whose key matches `name` (e.g.
+/// `sample-python = "sample_python.cli:main"` → `sample_python`).
+/// Returns `None` if no such entry / no importable target.
 fn python_script_package(root: &Path, name: &str) -> Option<String> {
     let raw = fs::read_to_string(root.join("pyproject.toml")).ok()?;
     let v: toml::Value = toml::from_str(&raw).ok()?;
     let scripts = v
         .get("project")
-        .and_then(|p| p.get("scripts"))?
-        .as_table()?;
+        .and_then(|p| p.get("scripts"))
+        .and_then(|s| s.as_table())
+        .or_else(|| {
+            v.get("tool")
+                .and_then(|t| t.get("poetry"))
+                .and_then(|p| p.get("scripts"))
+                .and_then(|s| s.as_table())
+        })?;
     let target = scripts.get(name)?.as_str()?;
     // target is "<pkg>.<module>:<func>" — take the segment before the colon,
-    // then the leading dotted path's first component as the package name.
-    let module = target.split(':').next()?.trim();
-    module.split('.').next().map(|s| s.to_string())
+    // then the top-level package segment before the first dot.
+    let before_colon = target.split(':').next()?;
+    let top_pkg = before_colon.split('.').next()?;
+    Some(top_pkg.to_string())
 }
 
 /// Ruby: structural only — an `exe/<name>` or `bin/<name>` binstub invoked as

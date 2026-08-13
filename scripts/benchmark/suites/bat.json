@@ -1,0 +1,39 @@
+{
+  "name": "bat",
+  "description": "A cat(1) clone with syntax highlighting and Git integration (Rust CLI)",
+  "repo": "https://github.com/sharkdp/bat.git",
+  "branch": "master",
+  "target_bin": "bat",
+  "questions": [
+    "Q1. View Cargo.toml showing line numbers and git modifications, but without headers or grid decorations. Show and run the exact command.",
+    "Q2. Highlight lines 10 to 25 of src/main.rs specifically. Show the exact flag and command, then run it.",
+    "Q3. List all available syntax themes supported by bat. Run the command and paste 3 theme names.",
+    "Q4. Print README.md with plain formatting suitable for piping into another command (disabling paging and colors). Show the exact command."
+  ],
+  "checks": [
+    {
+      "id": "Q1",
+      "name": "Line numbers + Git style without decorations",
+      "command_regex": "bat.*(--style|-p|numbers|changes)",
+      "output_regex": "Cargo.toml|package"
+    },
+    {
+      "id": "Q2",
+      "name": "Line range highlight",
+      "command_regex": "bat.*(-r 10:25|--line-range 10:25|-H 10:25|--highlight-line 10:25)",
+      "output_regex": "(fn main|use|struct)"
+    },
+    {
+      "id": "Q3",
+      "name": "List themes",
+      "command_regex": "bat.*(--list-themes)",
+      "output_regex": "(Monokai|GitHub|Solarized|Nord|Dracula)"
+    },
+    {
+      "id": "Q4",
+      "name": "Plain unpaged output",
+      "command_regex": "bat.*(-p|--plain|--paging=never)",
+      "output_regex": "(bat|README)"
+    }
+  ]
+}

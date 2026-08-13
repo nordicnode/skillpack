@@ -158,15 +158,19 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         "allowed_tools": allowed_tools_hint(profile.language),
         "globs": cursor_globs_yaml(profile.language),
         "opencode_mode": opencode_mode_hint(profile.language),
+        "footguns": &intent.footguns,
     }))
     .expect("Tera context serializes from JSON literal")
 }
 
 /// Escape a string so it's safe to embed inside YAML double-quoted scalar.
-/// We escape backslash and double-quote — colons-followed-by-space are fine
-/// inside quotes so we don't touch them.
+/// We escape backslash and double-quote, and normalize carriage returns and newlines
+/// to spaces so the scalar stays clean on a single line.
 fn escape_yaml(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\r', "")
+        .replace('\n', " ")
 }
 
 /// The one-line description can itself contain a colon; wrap it through the
@@ -751,19 +755,21 @@ pub fn coerce_kebab(name: &str) -> String {
             prev_dash = true;
         }
     }
-    // Strip leading/trailing hyphens, then strip leading digits: the schema
-    // regex `^[a-z]...` requires the name to start with a letter, so a
-    // numeric-prefixed name like "123foo" → "foo" (not "123foo", which
-    // would fail verify's own `is_valid_kebab` check). Re-trim hyphens
-    // (stripping "123" from "123-foo" leaves "-foo") and re-check empty.
-    let s = out.trim_matches('-');
-    let s = s.trim_start_matches(|c: char| c.is_ascii_digit());
-    let s = s.trim_matches('-');
-    if s.is_empty() {
-        return "tool".to_string();
+    // Strip leading/trailing hyphens, then repeatedly strip leading digits and
+    // hyphens: the schema regex `^[a-z]...` requires the name to start with a
+    // letter, so numeric prefixes like "123foo" or "123-456-foo" → "foo"
+    // (not "456-foo", which would fail verify's own `is_valid_kebab` check).
+    let mut s = out.trim_matches('-');
+    while let Some(first) = s.chars().next() {
+        if first.is_ascii_digit() || first == '-' {
+            s = s.trim_start_matches(|c: char| c.is_ascii_digit() || c == '-');
+        } else {
+            break;
+        }
     }
-    if s.len() == 1 {
-        return s.to_string();
+    let s = s.trim_matches('-');
+    if s.is_empty() || !s.chars().next().unwrap().is_ascii_alphabetic() {
+        return "tool".to_string();
     }
     s.to_string()
 }
@@ -877,8 +883,11 @@ mod tests {
         // requires a letter first, so "123foo" → "foo", not "123foo".
         assert_eq!(coerce_kebab("123foo"), "foo");
         assert_eq!(coerce_kebab("123-foo"), "foo");
+        assert_eq!(coerce_kebab("123-456-tool"), "tool");
+        assert_eq!(coerce_kebab("123-456-foo-bar"), "foo-bar");
         // All-digits → fallback, not an empty string.
         assert_eq!(coerce_kebab("123"), "tool");
+        assert_eq!(coerce_kebab("123-456"), "tool");
         assert_eq!(coerce_kebab("9"), "tool");
     }
 
@@ -1018,5 +1027,20 @@ mod tests {
             .find(|f| f.rel_path == "skills/chronicle/SKILL.md")
             .unwrap();
         assert!(prim.contents.contains("name: chronicle"));
+    }
+
+    #[test]
+    fn test_renders_custom_footguns_into_guidance() {
+        let p = cli_profile();
+        let mut intent = cli_intent();
+        intent.footguns = vec![
+            "Do not combine --max-results with -x (fd rejects this).".to_string(),
+            "Flags like -e and -E are case-sensitive.".to_string(),
+        ];
+        let files = render_targets(&p, &intent, &[Target::Claude, Target::AgentsMd], None).unwrap();
+        let agents = files.iter().find(|f| f.rel_path == "AGENTS.md").unwrap();
+        assert!(agents.contents.contains("- Do not combine --max-results with -x (fd rejects this)."));
+        assert!(agents.contents.contains("- Flags like -e and -E are case-sensitive."));
+        assert!(agents.contents.contains("- Verify the tool is installed before relying on it"));
     }
 }

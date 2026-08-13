@@ -549,12 +549,14 @@ fn write_files<'a>(
     let mut skipped = Vec::new();
     for f in files {
         let p = root.join(&f.rel_path);
-        // Collision guard: AGENTS.md lives at repo root (not a skillpack-owned
-        // directory). If it already exists and --force was not passed, skip it
+        // Collision guard: root-level instruction files (AGENTS.md, CLAUDE.md,
+        // GEMINI.md, CONVENTIONS.md) live at repo root (not a skillpack-owned
+        // directory). If one already exists and --force was not passed, skip it
         // with a warning so we never silently stomp a hand-written file.
-        if f.rel_path == crate::verify::schema::AGENTS_MD_PATH && p.exists() && !force {
+        if is_collision_guarded(&f.rel_path) && p.exists() && !force {
             eprintln!(
-                "⚠ AGENTS.md already exists at {}; skipping (pass --force to overwrite).",
+                "⚠ {} already exists at {}; skipping (pass --force to overwrite).",
+                f.rel_path,
                 p.display()
             );
             skipped.push(f);
@@ -1166,8 +1168,8 @@ fn compute_candidates<'f>(
     for file in files {
         let disk_path = root.join(&file.rel_path);
 
-        // AGENTS.md collision guard.
-        if file.rel_path == "AGENTS.md" && disk_path.exists() && !force {
+        // Root-level plain instructions collision guard.
+        if is_collision_guarded(&file.rel_path) && disk_path.exists() && !force {
             results.push(CandidateResult {
                 file,
                 candidate: file.contents.clone(),
@@ -1477,6 +1479,18 @@ fn is_frontmatter_target(rel_path: &str) -> bool {
             && !rel_path.ends_with("CLAUDE.md")
             && !rel_path.ends_with("GEMINI.md")
             && !rel_path.ends_with("CONVENTIONS.md"))
+}
+
+/// True if the given rel-path is a root-level plain instructions file
+/// that should be protected by the collision guard when --force is omitted.
+fn is_collision_guarded(rel_path: &str) -> bool {
+    matches!(
+        rel_path,
+        crate::verify::schema::AGENTS_MD_PATH
+            | crate::verify::schema::CLAUDE_MD_PATH
+            | crate::verify::schema::GEMINI_MD_PATH
+            | crate::verify::schema::CONVENTIONS_MD_PATH
+    )
 }
 
 #[cfg(test)]

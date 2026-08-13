@@ -1,0 +1,39 @@
+{
+  "name": "fd",
+  "description": "Simple, fast and user-friendly alternative to find (Rust CLI)",
+  "repo": "https://github.com/sharkdp/fd.git",
+  "branch": "master",
+  "target_bin": "fd",
+  "questions": [
+    "Q1. Find all `.rs` files excluding `target/`. Show the exact command, then run it and paste the first 5 lines.",
+    "Q2. Make the search case-sensitive. Find files matching \"README\". Run it; paste the first 3 lines.",
+    "Q3. Disable fd's gitignore-respecting behavior so ignored files show up. Why does your command reveal them?",
+    "Q4. Find one file matching `*.rs` and run `wc -l` on it in a single fd command, using fd's exec-per-result flag."
+  ],
+  "checks": [
+    {
+      "id": "Q1",
+      "name": "Extension filter + Exclude",
+      "command_regex": "fd.*(-e rs|--extension rs).*(-E target|--exclude target)",
+      "output_regex": "(src/[A-Za-z0-9_./-]+\\.rs)"
+    },
+    {
+      "id": "Q2",
+      "name": "Case-sensitive search",
+      "command_regex": "fd.*(-s |--case-sensitive)",
+      "output_regex": "README"
+    },
+    {
+      "id": "Q3",
+      "name": "Disable gitignore filter",
+      "command_regex": "fd.*(-u |--no-ignore|-I |--no-ignore-vcs)(.*(--hidden|-H ))?",
+      "output_regex": "(gitignore|\\.git/info/exclude|ignored)"
+    },
+    {
+      "id": "Q4",
+      "name": "Exec per result (-x)",
+      "command_regex": "fd.*(-x wc -l|--exec wc -l)",
+      "output_regex": "\\d+\\s+\\S+\\.rs"
+    }
+  ]
+}
