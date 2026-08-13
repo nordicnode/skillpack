@@ -33,8 +33,11 @@ pub enum Commands {
         #[arg(long, value_name = "DIR", default_value = ".")]
         root: PathBuf,
 
-        /// Skip interactive prompts; require a `skillpack.toml` to exist.
-        /// Intended for CI — never offers to keep unverified output.
+        /// Skip interactive prompts. Intended for CI — never offers to keep
+        /// unverified output. Uses a committed `skillpack.toml` when present;
+        /// otherwise bootstraps the intent from `--description`/`--trigger`/
+        /// `--author` + `--invocation` or `--import` so the FIRST init can run
+        /// on a fresh checkout without a TTY.
         #[arg(long)]
         non_interactive: bool,
 
@@ -43,6 +46,36 @@ pub enum Commands {
         /// Without this flag, any non-pass result prompts the user.
         #[arg(long)]
         accept_warnings: bool,
+
+        /// One-sentence task description — `--non-interactive` bootstrap when
+        /// no `skillpack.toml` exists (ignored when a config is present).
+        #[arg(long, value_name = "TEXT")]
+        description: Option<String>,
+
+        /// Trigger phrase for `when_to_use`; repeatable (`--trigger a --trigger b`)
+        /// and comma/semicolon-separated values are split. For `--non-interactive`
+        /// bootstrap when no `skillpack.toml` exists (ignored when a config is
+        /// present).
+        #[arg(long, value_name = "PHRASE")]
+        trigger: Vec<String>,
+
+        /// Author name for plugin.json — `--non-interactive` bootstrap when no
+        /// `skillpack.toml` exists (ignored when a config is present). Optional;
+        /// omit and verify's `discovery.plugin.author` warns (advisory).
+        #[arg(long, value_name = "NAME")]
+        author: Option<String>,
+
+        /// Exact CLI invocation for CLI projects — `--non-interactive` bootstrap
+        /// when no `skillpack.toml` exists (ignored when a config is present).
+        /// Pass exactly one of `--invocation` / `--import`.
+        #[arg(long, value_name = "CMD")]
+        invocation: Option<String>,
+
+        /// Import pattern for library projects — `--non-interactive` bootstrap
+        /// when no `skillpack.toml` exists (ignored when a config is present).
+        /// Pass exactly one of `--invocation` / `--import`.
+        #[arg(long, value_name = "PATTERN")]
+        import: Option<String>,
 
         /// Override the license SPDX id for this run (writes it to skillpack.toml).
         #[arg(long, value_name = "SPDX")]

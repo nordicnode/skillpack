@@ -35,6 +35,11 @@ fn main() {
             target,
             force,
             template_dir,
+            description,
+            trigger,
+            author,
+            invocation,
+            import,
         } => run_init(
             &root,
             cli.verbose,
@@ -45,6 +50,11 @@ fn main() {
             target,
             force,
             template_dir.as_deref(),
+            description,
+            trigger,
+            author,
+            invocation,
+            import,
         ),
         Commands::Verify {
             root,
@@ -99,6 +109,86 @@ fn main() {
     std::process::exit(code);
 }
 
+/// Build an [`Intent`] from `init --non-interactive` flags when no
+/// `skillpack.toml` exists — CI bootstrap. Mirrors the interview's field
+/// semantics (description + triggers + exactly one of invocation/import;
+/// author optional; license defaults to MIT and is overridable via
+/// `--license`, which the caller applies afterwards).
+///
+/// Validation is deliberate: a pack with no description or no triggers would
+/// ship a SKILL.md that `verify` soft-fails, so we refuse at the flag level
+/// with an actionable message instead of writing a knowingly-weak pack.
+fn bootstrap_intent(
+    profile: &types::ProjectProfile,
+    description: Option<&str>,
+    triggers: &[String],
+    author: Option<&str>,
+    invocation: Option<&str>,
+    import: Option<&str>,
+) -> Result<types::Intent> {
+    let one_line_description = description.unwrap_or("").trim().to_string();
+    if one_line_description.is_empty() {
+        bail!(
+            "--non-interactive bootstrap needs --description <TEXT> \
+             (one sentence describing the task an agent would use this for)"
+        );
+    }
+
+    let when_to_use_phrases: Vec<String> = triggers
+        .iter()
+        .flat_map(|t| t.split([',', ';']))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if when_to_use_phrases.is_empty() {
+        bail!(
+            "--non-interactive bootstrap needs at least one --trigger <PHRASE> \
+             (repeat the flag, or comma/semicolon-separate values inside one)"
+        );
+    }
+
+    if invocation.is_some() && import.is_some() {
+        bail!(
+            "pass only one of --invocation (CLI project) or --import (library \
+             project), not both"
+        );
+    }
+    let invocation = invocation.map(str::trim).filter(|s| !s.is_empty());
+    let import = import.map(str::trim).filter(|s| !s.is_empty());
+    let (invocation_command, import_pattern) = match (invocation, import) {
+        (Some(cmd), None) => (Some(cmd.to_string()), None),
+        (None, Some(pat)) => (None, Some(pat.to_string())),
+        (None, None) => {
+            // Use the has_cli hint to make the error actionable.
+            if profile.has_cli {
+                bail!(
+                    "--non-interactive bootstrap needs --invocation <CMD> \
+                     (the exact command an agent should run)"
+                );
+            } else {
+                bail!(
+                    "--non-interactive bootstrap needs --import <PATTERN> \
+                     (the import pattern an agent should use)"
+                );
+            }
+        }
+        (Some(_), Some(_)) => unreachable!("guarded above"),
+    };
+
+    Ok(types::Intent {
+        one_line_description,
+        when_to_use_phrases,
+        invocation_command,
+        import_pattern,
+        author: author
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        license: Some("MIT".to_string()),
+        ..Default::default()
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_init(
     root: &Path,
@@ -110,6 +200,11 @@ fn run_init(
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
+    description: Option<String>,
+    triggers: Vec<String>,
+    author: Option<String>,
+    invocation: Option<String>,
+    import: Option<String>,
 ) -> i32 {
     match run_init_inner(
         root,
@@ -121,6 +216,11 @@ fn run_init(
         raw_targets,
         force,
         template_dir,
+        description,
+        triggers,
+        author,
+        invocation,
+        import,
     ) {
         Ok(c) => c,
         Err(e) => {
@@ -141,6 +241,11 @@ fn run_init_inner(
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
+    description: Option<String>,
+    triggers: Vec<String>,
+    author: Option<String>,
+    invocation: Option<String>,
+    import: Option<String>,
 ) -> Result<i32> {
     let profile = introspect::introspect(root).context("introspecting repo")?;
     if verbose {
@@ -172,21 +277,27 @@ fn run_init_inner(
     // Step 2 — interview or reuse config.
     let existing_cfg = Config::load(root)?;
     let intent = if non_interactive {
-        let Some(cfg) = &existing_cfg else {
-            bail!(
-                "--non-interactive set but no skillpack.toml found at {}.\n\
-                 To fix: run `skillpack init` once interactively to seed skillpack.toml, \
-                 then retry in CI.",
-                Config::path(root).display()
-            );
-        };
-        match cfg.to_intent() {
-            Some(i) => i,
-            None => bail!(
-                "skillpack.toml at {} is missing its [skill] table.\n\
-                 To fix: re-run `skillpack init` interactively.",
-                Config::path(root).display()
-            ),
+        match &existing_cfg {
+            Some(cfg) => match cfg.to_intent() {
+                Some(i) => i,
+                None => bail!(
+                    "skillpack.toml at {} is missing its [skill] table.\n\
+                     To fix: re-run `skillpack init` interactively.",
+                    Config::path(root).display()
+                ),
+            },
+            // No committed config: bootstrap the intent from the flags so the
+            // FIRST init can run in CI (no TTY, nothing committed yet).
+            // Previously a chicken-and-egg — --non-interactive required a
+            // skillpack.toml, which required an interactive run.
+            None => bootstrap_intent(
+                &profile,
+                description.as_deref(),
+                &triggers,
+                author.as_deref(),
+                invocation.as_deref(),
+                import.as_deref(),
+            )?,
         }
     } else if let Some(cfg) = &existing_cfg {
         if let Some(i) = cfg.to_intent() {

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use skillpack::exit;
 
 /// Root of the skillpack repo, so tests can locate `tests/fixtures`.
 fn repo_root() -> PathBuf {
@@ -170,7 +171,9 @@ fn pure_library_init_skips_invocation_and_writes_import_pattern() {
 }
 
 #[test]
-fn non_interactive_without_skillpack_toml_refuses_to_write() {
+fn non_interactive_without_flags_refuses_to_write() {
+    // `--non-interactive` with no committed skillpack.toml AND no bootstrap
+    // flags is a fatal error — the pack would have no description/triggers.
     let root = copy_fixture("rust-cli");
     Command::new("cargo")
         .args(["build", "--quiet"])
@@ -183,10 +186,118 @@ fn non_interactive_without_skillpack_toml_refuses_to_write() {
         .args(["init", "--root", ".", "--non-interactive"])
         .current_dir(&root)
         .assert()
-        .failure() // fatal: --non-interactive w/o toml exits non-zero
-        .stderr(predicate::str::contains("no skillpack.toml found"));
+        .code(exit::INIT_FATAL) // fatal: bootstrap needs --description
+        .stderr(predicate::str::contains("--description"));
     // No files should have been written.
     assert!(!root.join(".claude-plugin").exists());
+}
+
+#[test]
+fn non_interactive_bootstrap_with_flags_generates_pack() {
+    // The FIRST init can run in CI: no skillpack.toml, no TTY — the intent
+    // comes entirely from flags.
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+            "--license",
+            "MIT",
+            "--description",
+            "Print a journal entry to stdout",
+            "--trigger",
+            "log a journal entry, record a quick note",
+            "--author",
+            "CI Bot",
+            "--invocation",
+            "sample-rust --new \"entry\"",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Files must exist and the config must round-trip the bootstrapped intent.
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".claude-plugin/plugin.json").exists());
+    assert!(root.join("skills/sample-rust/SKILL.md").exists());
+    let toml = fs::read_to_string(root.join("skillpack.toml")).unwrap();
+    assert!(toml.contains("Print a journal entry to stdout"));
+    assert!(toml.contains("record a quick note"));
+    assert!(toml.contains("CI Bot"));
+
+    // verify on the bootstrapped pack must pass clean.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify OK").or(predicate::str::contains("0 failed")));
+}
+
+#[test]
+fn non_interactive_bootstrap_rejects_both_invocation_and_import() {
+    let root = copy_fixture("rust-cli");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--description",
+            "d",
+            "--trigger",
+            "x",
+            "--invocation",
+            "cmd",
+            "--import",
+            "pat",
+        ])
+        .current_dir(&root)
+        .assert()
+        .code(exit::INIT_FATAL)
+        .stderr(predicate::str::contains("only one of --invocation"));
+    assert!(!root.join(".claude-plugin").exists());
+}
+
+#[test]
+fn non_interactive_bootstrap_pure_library_uses_import() {
+    // node-lib has no CLI: bootstrap with --import produces a library SKILL.md.
+    let root = copy_fixture("node-lib");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+            "--description",
+            "Parse CSV files with a small library",
+            "--trigger",
+            "ingest csv",
+            "--import",
+            "import { parse } from 'sample-lib'",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let skill = fs::read_to_string(root.join("skills/sample-lib/SKILL.md")).unwrap();
+    assert!(skill.contains("import { parse } from 'sample-lib'"));
+    assert!(!skill.contains("## Invocation"));
+    assert!(skill.contains("## Usage"));
 }
 
 #[test]

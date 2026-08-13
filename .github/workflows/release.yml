@@ -37,6 +37,11 @@ jobs:
             echo "Tag $tag does not match Cargo.toml version $cargo_ver (expected v$cargo_ver)"
             exit 1
           fi
+      # A vulnerability disclosed AFTER the last `main` CI run (which audits
+      # on every push/PR) must still block publishing. Cheap relative to the
+      # publish itself; fails the job on any advisory in the locked tree.
+      - name: cargo audit
+        run: cargo install cargo-audit --locked && cargo audit
       - name: cargo publish
         run: cargo publish --locked --token "$CARGO_REGISTRY_TOKEN"
         env:

@@ -35,7 +35,7 @@ skillpack init --target all
 skillpack verify
 ```
 
-Your answers are saved to a `skillpack.toml` (commit it), so re-runs are instant and CI-friendly: `skillpack init --non-interactive` needs no prompts.
+Your answers are saved to a `skillpack.toml` (commit it), so re-runs are instant and CI-friendly: `skillpack init --non-interactive` needs no prompts. For a fully scripted first run — no TTY, nothing committed yet — pass the bootstrap flags: `skillpack init --non-interactive --description "..." --trigger "..." --author "..." --invocation "..."` (or `--import "..."` for a library).
 
 ## What you get
 

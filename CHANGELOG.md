@@ -8,6 +8,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `init --non-interactive` can now bootstrap the FIRST pack from flags
+  (`--description`, `--trigger`, `--author`, `--invocation` or `--import`)
+  when no `skillpack.toml` exists — previously a chicken-and-egg: CI needed a
+  committed config, which needed an interactive run. A fresh checkout can now
+  be scaffolded end-to-end with no TTY: `skillpack init --non-interactive
+  --description ... --trigger ... --invocation ...`. Missing required fields
+  fail with an actionable message naming the flag; passing both
+  `--invocation` and `--import` is rejected. With a committed config the
+  flags are ignored (config wins), so re-runs stay deterministic.
+
 ### Fixed
 
 - `.gitignore` now excludes `.freebuff/` — the desktop-app local database was
@@ -16,6 +28,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - All 11 rustdoc warnings eliminated (stale `GeneratedFile` links, links to
   private items, an unclosed HTML tag, a redundant link target) — `cargo doc`
   is now warning-free.
+- `release.yml` now runs `cargo audit` before `cargo publish`, so a
+  vulnerability disclosed after the last `main` CI run blocks publishing.
 
 ## [0.11.3] - 2026-08-13
 

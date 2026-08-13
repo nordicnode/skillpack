@@ -106,7 +106,12 @@ No-op when there's no fixable drift.
 
 | Flag                    | Purpose                                                                          |
 |-------------------------|----------------------------------------------------------------------------------|
-| `init --non-interactive` | skip prompts; requires a `skillpack.toml` (for CI)                             |
+| `init --non-interactive` | skip prompts (for CI). Uses a committed `skillpack.toml` when present; otherwise bootstraps from the flags below — the FIRST init can run on a fresh checkout with no TTY |
+| `init --description <TEXT>` | one-sentence task description (bootstrap) |
+| `init --trigger <PHRASE>` | when_to_use trigger phrase; repeatable, and comma/semicolon-separated values split (bootstrap) |
+| `init --author <NAME>` | author name for plugin.json; optional (bootstrap) |
+| `init --invocation <CMD>` | exact CLI command for CLI projects — pass exactly one of `--invocation`/`--import` (bootstrap) |
+| `init --import <PATTERN>` | import pattern for library projects — pass exactly one of `--invocation`/`--import` (bootstrap) |
 | `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
 | `init --license <SPDX>` | override the license for this run                              |
 | `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, or `all` (all six). Repeatable. |
