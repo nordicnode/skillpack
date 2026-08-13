@@ -70,15 +70,32 @@ jobs:
         run: cargo fmt --check
       - name: clippy --all-targets
         run: cargo clippy --all-targets -- -D warnings
-      - name: test (incl. ignored runtime round trips)
-        run: cargo test --all-targets -- --include-ignored
+      - name: test
+        run: cargo test --all-targets
+      # The `#[ignore]`-gated spawn round trips (go/ruby/php) compile and run a
+      # real runtime from a cold cache. Run them AFTER the main suite in their
+      # own step so a cold `go run .` / `dotnet run` never contends with the
+      # self-dogfood release builds — previously a single `--include-ignored`
+      # invocation let a cold compile exceed HELP_TIMEOUT under parallel load
+      # (flaky windows-latest failures). The filter matches exactly the three
+      # ignored tests; the runtimes are installed by the setup-* actions above
+      # and each test self-skips if its runtime is missing anyway.
+      - name: test runtime round trips (isolated)
+        run: cargo test --test integration_end_to_end -- --include-ignored go_cli ruby_cli php_cli
 
   # MSRV gate: `rust-version` in Cargo.toml (1.85) is a real claim — a
   # `cargo install skillpack` on the MSRV must work. The main matrix builds on
   # 1.95.0, which would never catch a dependency bump that silently raises the
   # floor. Checks lib + bins (the shipped artifact), not dev-dependencies.
+  #
+  # `RUSTUP_TOOLCHAIN` is set on the job so rustup uses 1.85.0 even though the
+  # repo's rust-toolchain.toml pins 1.95.0 — without it the env-var-less
+  # `cargo` invocation would silently run the pinned 1.95.0 and the job would
+  # test nothing.
   msrv:
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: '1.85.0'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -86,7 +103,7 @@ jobs:
           toolchain: '1.85.0'
       - uses: Swatinem/rust-cache@v2
       - name: check lib + bins at MSRV
-        run: cargo check --lib --bins
+        run: cargo check --locked --lib --bins
 
   # Dependency vulnerability scan against the RustSec advisory DB. Runs on the
   # lockfile; a newly disclosed advisory fails the job until the affected
