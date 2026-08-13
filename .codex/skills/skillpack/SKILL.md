@@ -49,7 +49,7 @@ Run `skillpack --help` to discover the available flags. Documented flags (verifi
 
 This CLI uses subcommands. Each one has its own flags (verified by `skillpack verify`):
 
-- `init` — flags: `--root`, `--non-interactive`, `--author`, `--invocation`, `--import`, `--accept-warnings`, `--description`, `--trigger`, `--verbose`, `--debug`, `--license`, `--target`, `--force`, `--template-dir`
+- `init` — flags: `--root`, `--non-interactive`, `--author`, `--invocation`, `--import`, `--accept-warnings`, `--auto`, `--license`, `--trigger`, `--description`, `--verbose`, `--debug`, `--target`, `--force`, `--template-dir`
 - `verify` — flags: `--root`, `--format`, `--fix`, `--min-score`, `--watch`, `--template-dir`, `--verbose`, `--debug`
 - `doctor` — flags: `--root`, `--format`, `--verbose`, `--debug`
 - `update` — flags: `--root`, `--target`, `--force`, `--template-dir`, `--verbose`, `--debug`

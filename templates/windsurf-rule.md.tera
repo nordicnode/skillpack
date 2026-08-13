@@ -1,0 +1,7 @@
+---
+description: "{{ one_line_description }}"
+alwaysApply: false
+{% if globs %}globs: [{{ globs }}]
+{% endif %}---
+
+{% include "skill_body_partial" %}

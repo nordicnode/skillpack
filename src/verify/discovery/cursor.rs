@@ -91,6 +91,28 @@ pub fn parse_cursor_mdc_frontmatter(raw: &str) -> Option<CursorFrontmatter> {
 /// itself doesn't enforce it, but a name like `My Rule.mdc` is a maintenance
 /// smell.
 pub(crate) fn check_one_mdc(root: &Path, path: &Path) -> Result<CheckResult> {
+    check_one_rule_md(root, path, "discovery.cursor.mdc", ".mdc", "Cursor")
+}
+
+/// Validate a single `.windsurf/rules/<name>.md` — the Windsurf (Cascade)
+/// rules format uses the SAME frontmatter schema as Cursor rules, so the
+/// checks share one implementation with a different check_id prefix and
+/// label.
+pub(crate) fn check_one_windsurf_rule(root: &Path, path: &Path) -> Result<CheckResult> {
+    check_one_rule_md(root, path, "discovery.windsurf.rule", ".md", "Windsurf")
+}
+
+/// Shared rule-file check for Cursor `.mdc` and Windsurf `.md` (identical
+/// `description`/`globs`/`alwaysApply` frontmatter schemas). `prefix` is the
+/// check_id namespace, `ext` the file-extension label in messages, `product`
+/// the harness name in fix hints.
+fn check_one_rule_md(
+    root: &Path,
+    path: &Path,
+    prefix: &str,
+    ext: &str,
+    product: &str,
+) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let raw = super::strip_bom(&raw);
     let rel = rel_unix(root, path);
@@ -98,8 +120,8 @@ pub(crate) fn check_one_mdc(root: &Path, path: &Path) -> Result<CheckResult> {
     // No frontmatter at all → the existing description-missing fail.
     let Some(fm) = parse_cursor_mdc_frontmatter(raw) else {
         return Ok(CheckResult::fail(
-            "discovery.cursor.mdc.description",
-            ".mdc has a `description`",
+            &format!("{prefix}.description"),
+            &format!("{ext} has a `description`"),
             format!("{rel}: frontmatter is missing `description`"),
             "To fix: add `description: <one sentence, apply when ...>` to the frontmatter.",
         ));
@@ -108,8 +130,8 @@ pub(crate) fn check_one_mdc(root: &Path, path: &Path) -> Result<CheckResult> {
     // Unterminated `---` block → the body is being parsed as frontmatter.
     if !fm.closed {
         return Ok(CheckResult::fail(
-            "discovery.cursor.mdc.frontmatter_unclosed",
-            ".mdc frontmatter block is closed by a `---` delimiter",
+            &format!("{prefix}.frontmatter_unclosed"),
+            &format!("{ext} frontmatter block is closed by a `---` delimiter"),
             format!("{rel}: frontmatter block is not closed (missing the closing `---`)"),
             "To fix: add a closing `---` line after the last frontmatter field.",
         ));
@@ -117,18 +139,20 @@ pub(crate) fn check_one_mdc(root: &Path, path: &Path) -> Result<CheckResult> {
 
     let Some(description) = fm.description.as_deref() else {
         return Ok(CheckResult::fail(
-            "discovery.cursor.mdc.description",
-            ".mdc has a `description`",
+            &format!("{prefix}.description"),
+            &format!("{ext} has a `description`"),
             format!("{rel}: frontmatter is missing `description`"),
             "To fix: add `description: <one sentence, apply when ...>` to the frontmatter.",
         ));
     };
     if description.trim().is_empty() {
         return Ok(CheckResult::fail(
-            "discovery.cursor.mdc.description",
-            ".mdc `description` is non-empty",
+            &format!("{prefix}.description"),
+            &format!("{ext} `description` is non-empty"),
             format!("{rel}: `description` is empty"),
-            "To fix: write one sentence describing when Cursor should attach this rule.",
+            format!(
+                "To fix: write one sentence describing when {product} should attach this rule."
+            ),
         ));
     }
 
@@ -138,42 +162,44 @@ pub(crate) fn check_one_mdc(root: &Path, path: &Path) -> Result<CheckResult> {
     // guidance (which is a soft recommendation, not enforced).
     if description.trim().chars().count() > schema::SKILL_LISTING_CHAR_CAP {
         return Ok(CheckResult::fail(
-            "discovery.cursor.mdc.description_length",
-            "`.mdc` `description` stays under 1,536 chars",
+            &format!("{prefix}.description_length"),
+            &format!("`{ext}` `description` stays under 1,536 chars"),
             format!(
                 "{rel}: `description` is {} chars (cap {})",
                 description.trim().chars().count(),
                 schema::SKILL_LISTING_CHAR_CAP
             ),
-            "To fix: trim the description; Cursor uses it for auto-attach, so keep it one line.",
+            format!(
+                "To fix: trim the description; {product} uses it for auto-attach, so keep it one line."
+            ),
         ));
     }
 
-    // alwaysApply is required by the Cursor schema. We warn (not fail) on its
-    // absence: Cursor itself tolerates a missing field (defaults to false),
-    // but an explicit value is the documented contract — a warning teaches
-    // the maintainer without blocking them.
+    // alwaysApply is required by the rule schema. We warn (not fail) on its
+    // absence: the harness itself tolerates a missing field (defaults to
+    // false), but an explicit value is the documented contract — a warning
+    // teaches the maintainer without blocking them.
     let always_apply = fm.always_apply.as_deref().unwrap_or("").trim();
     if always_apply.is_empty() {
         return Ok(CheckResult::warn(
-            "discovery.cursor.mdc.always_apply",
-            ".mdc has an explicit `alwaysApply`",
+            &format!("{prefix}.always_apply"),
+            &format!("{ext} has an explicit `alwaysApply`"),
             format!("{rel}: `alwaysApply` is missing or empty"),
             "To fix: add `alwaysApply: true` or `alwaysApply: false` to the frontmatter.",
         ));
     }
     if always_apply != "true" && always_apply != "false" {
         return Ok(CheckResult::warn(
-            "discovery.cursor.mdc.always_apply",
-            ".mdc `alwaysApply` is a boolean",
+            &format!("{prefix}.always_apply"),
+            &format!("{ext} `alwaysApply` is a boolean"),
             format!("{rel}: `alwaysApply` is `{always_apply}` (expected `true`/`false`)"),
             "To fix: set `alwaysApply: true` or `alwaysApply: false`.",
         ));
     }
 
     Ok(CheckResult::pass(
-        "discovery.cursor.mdc",
-        ".mdc is structurally valid",
+        prefix,
+        &format!("{ext} is structurally valid"),
         format!("{rel} validates"),
     ))
 }
@@ -191,6 +217,26 @@ pub(crate) fn find_cursor_mdc_files(root: &Path) -> Vec<std::path::PathBuf> {
             for entry in names {
                 let path = entry.path();
                 if path.is_file() && path.extension().is_some_and(|e| e == "mdc") {
+                    out.push(path);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Every `.windsurf/rules/<name>.md`, sorted — the Windsurf rule directory
+/// (same frontmatter shape as Cursor, `.md` extension).
+pub(crate) fn find_windsurf_rule_files(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let dir = root.join(schema::WINDSURF_RULES_DIR);
+    if dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(&dir) {
+            let mut names: Vec<_> = entries.flatten().collect();
+            names.sort_by_key(|e| e.file_name());
+            for entry in names {
+                let path = entry.path();
+                if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                     out.push(path);
                 }
             }

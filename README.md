@@ -35,7 +35,7 @@ skillpack init --target all
 skillpack verify
 ```
 
-Your answers are saved to a `skillpack.toml` (commit it), so re-runs are instant and CI-friendly: `skillpack init --non-interactive` needs no prompts. For a fully scripted first run — no TTY, nothing committed yet — pass the bootstrap flags: `skillpack init --non-interactive --description "..." --trigger "..." --author "..." --invocation "..."` (or `--import "..."` for a library).
+Your answers are saved to a `skillpack.toml` (commit it), so re-runs are instant and CI-friendly: `skillpack init --non-interactive` needs no prompts. Want the least interaction possible? `skillpack init --auto` needs **zero** flags and **zero** prompts — it derives the description from your README, the author from `git config`, the license from your LICENSE file, and the invocation from the detected CLI, then writes the whole pack and verifies it. (For a library, add `--import "..."`; for anything exotic, the explicit bootstrap flags — `--description`/`--trigger`/`--author`/`--invocation`/`--import` — are there too.)
 
 ## What you get
 
@@ -46,7 +46,13 @@ Your answers are saved to a `skillpack.toml` (commit it), so re-runs are instant
 - **Codex** — the same skill, under Codex's `.codex/skills/` convention.
 - **OpenCode** — an agent definition (`.opencode/agents/…md`).
 - **GitHub Copilot** — repo instructions (`.github/copilot-instructions.md`).
-- **AGENTS.md** — a plain instructions file that 20+ agents read natively.
+- **AGENTS.md** — a plain instructions file that 60k+ projects' agents read natively, including Codex, Windsurf, Zed, JetBrains Junie, aider, and Freebuff.
+- **CLAUDE.md** — the Claude Code–ecosystem memory file (read by Cline, Roo Code, and Claude Code itself).
+- **GEMINI.md** — project instructions for Google's Gemini CLI.
+- **Windsurf** — Cascade rules (`.windsurf/rules/…md`), same frontmatter as Cursor.
+- **Aider** — repo conventions (`CONVENTIONS.md`).
+
+`--target all` writes all ten. Have an agent harness that reads a different file? Its format is almost certainly one of the above — plain markdown, a rules file, or a skill directory — and you can point it at what skillpack generates.
 
 CLI projects get a skill that documents the real command and its flags; pure libraries get install + import instructions instead. When your CLI's surface changes, `skillpack update` refreshes the generated files without re-answering the questions.
 

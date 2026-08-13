@@ -26,6 +26,10 @@ const CURSOR_RULE_TPL: &str = include_str!("../templates/cursor-rule.mdc.tera");
 const OPENCODE_AGENT_TPL: &str = include_str!("../templates/opencode-agent.md.tera");
 const COPILOT_INSTRUCTIONS_TPL: &str = include_str!("../templates/copilot-instructions.md.tera");
 const AGENTS_MD_TPL: &str = include_str!("../templates/AGENTS.md.tera");
+const CLAUDE_MD_TPL: &str = include_str!("../templates/CLAUDE.md.tera");
+const GEMINI_MD_TPL: &str = include_str!("../templates/GEMINI.md.tera");
+const CONVENTIONS_MD_TPL: &str = include_str!("../templates/CONVENTIONS.md.tera");
+const WINDSURF_RULE_TPL: &str = include_str!("../templates/windsurf-rule.md.tera");
 const SKILL_BODY_TPL: &str = include_str!("../templates/skill_body.md.tera");
 
 static TERA: Lazy<Tera> = Lazy::new(|| {
@@ -46,6 +50,14 @@ static TERA: Lazy<Tera> = Lazy::new(|| {
         .expect("copilot instructions template is valid");
     tera.add_raw_template("AGENTS.md", AGENTS_MD_TPL)
         .expect("AGENTS.md template is valid");
+    tera.add_raw_template("CLAUDE.md", CLAUDE_MD_TPL)
+        .expect("CLAUDE.md template is valid");
+    tera.add_raw_template("GEMINI.md", GEMINI_MD_TPL)
+        .expect("GEMINI.md template is valid");
+    tera.add_raw_template("CONVENTIONS.md", CONVENTIONS_MD_TPL)
+        .expect("CONVENTIONS.md template is valid");
+    tera.add_raw_template("windsurf-rule.md", WINDSURF_RULE_TPL)
+        .expect("windsurf rule template is valid");
     // json_encode is built into Tera; nothing custom to register.
     tera
 });
@@ -366,7 +378,7 @@ fn render_one_target(
         Target::AgentsMd => {
             // AGENTS.md: root-level instructions file, plain markdown, no
             // frontmatter. Per agents.md (Linux Foundation stewarded) —
-            // read natively by 20+ coding agents.
+            // read natively by 60k+ projects' agents.
             let mut c = ctx.clone();
             c.insert("noun", "tool");
             let agents = tera
@@ -375,6 +387,58 @@ fn render_one_target(
             out.push(GeneratedFileOutput {
                 rel_path: schema::AGENTS_MD_PATH.to_string(),
                 contents: agents,
+            });
+        }
+        Target::ClaudeMd => {
+            // CLAUDE.md: root-level instructions file read by Claude Code,
+            // Cline, Roo Code. Plain markdown — same body as AGENTS.md.
+            let mut c = ctx.clone();
+            c.insert("noun", "tool");
+            let claude_md = tera
+                .render("CLAUDE.md", &c)
+                .context("rendering CLAUDE.md")?;
+            out.push(GeneratedFileOutput {
+                rel_path: schema::CLAUDE_MD_PATH.to_string(),
+                contents: claude_md,
+            });
+        }
+        Target::Gemini => {
+            // GEMINI.md: root-level instructions file read natively by the
+            // Gemini CLI. Plain markdown.
+            let mut c = ctx.clone();
+            c.insert("noun", "tool");
+            let gemini = tera
+                .render("GEMINI.md", &c)
+                .context("rendering GEMINI.md")?;
+            out.push(GeneratedFileOutput {
+                rel_path: schema::GEMINI_MD_PATH.to_string(),
+                contents: gemini,
+            });
+        }
+        Target::Windsurf => {
+            // Windsurf (Cascade) rules: `.windsurf/rules/<name>.md` with
+            // the same frontmatter as Cursor rules.
+            let mut c = ctx.clone();
+            c.insert("noun", "rule");
+            let rule = tera
+                .render("windsurf-rule.md", &c)
+                .context("rendering windsurf-rule.md")?;
+            out.push(GeneratedFileOutput {
+                rel_path: format!(".windsurf/rules/{name}.md"),
+                contents: rule,
+            });
+        }
+        Target::Aider => {
+            // CONVENTIONS.md: root-level conventions file read by aider.
+            // Plain markdown.
+            let mut c = ctx.clone();
+            c.insert("noun", "tool");
+            let conventions = tera
+                .render("CONVENTIONS.md", &c)
+                .context("rendering CONVENTIONS.md")?;
+            out.push(GeneratedFileOutput {
+                rel_path: schema::CONVENTIONS_MD_PATH.to_string(),
+                contents: conventions,
             });
         }
     }
@@ -416,6 +480,17 @@ fn render_skill_file_only(
                 contents: mdc,
             }))
         }
+        Target::Windsurf => {
+            let mut c = ctx.clone();
+            c.insert("noun", "rule");
+            let rule = tera
+                .render("windsurf-rule.md", &c)
+                .context("rendering windsurf-rule.md")?;
+            Ok(Some(GeneratedFileOutput {
+                rel_path: format!(".windsurf/rules/{name}.md"),
+                contents: rule,
+            }))
+        }
         Target::OpenCode => {
             let mut c = ctx.clone();
             c.insert("noun", "agent");
@@ -427,7 +502,9 @@ fn render_skill_file_only(
                 contents: agent,
             }))
         }
-        Target::Copilot | Target::AgentsMd => Ok(None),
+        Target::Copilot | Target::AgentsMd | Target::ClaudeMd | Target::Gemini | Target::Aider => {
+            Ok(None)
+        }
     }
 }
 
@@ -443,6 +520,10 @@ const TEMPLATE_MAP: &[(&str, &str)] = &[
     ("opencode-agent.md.tera", "opencode-agent.md"),
     ("copilot-instructions.md.tera", "copilot-instructions.md"),
     ("AGENTS.md.tera", "AGENTS.md"),
+    ("CLAUDE.md.tera", "CLAUDE.md"),
+    ("GEMINI.md.tera", "GEMINI.md"),
+    ("CONVENTIONS.md.tera", "CONVENTIONS.md"),
+    ("windsurf-rule.md.tera", "windsurf-rule.md"),
     ("skill_body.md.tera", "skill_body_partial"),
 ];
 

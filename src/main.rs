@@ -30,6 +30,7 @@ fn main() {
         Commands::Init {
             root,
             non_interactive,
+            auto,
             accept_warnings,
             license,
             target,
@@ -45,6 +46,7 @@ fn main() {
             cli.verbose,
             cli.debug,
             non_interactive,
+            auto,
             accept_warnings,
             license,
             target,
@@ -107,6 +109,73 @@ fn main() {
         std::process::exit(exit::INIT_FATAL)
     };
     std::process::exit(code);
+}
+
+/// Derive the [`Intent`] entirely from the repo — `init --auto`. Zero
+/// prompts, zero required flags: description from the README hint, triggers
+/// from `--trigger` (falling back to the description hint itself), author
+/// from the manifest / git config, license from the LICENSE file (caller's
+/// `--license` override applies after), invocation from the detected CLI.
+///
+/// Fails with an actionable message when something essential can't be
+/// derived: no README hint → no description; a library with no `--import`
+/// → no way to tell the agent how to consume it.
+fn auto_intent(
+    profile: &types::ProjectProfile,
+    triggers: &[String],
+    import: Option<&str>,
+) -> Result<types::Intent> {
+    let one_line_description = profile
+        .description_hint
+        .clone()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "--auto could not derive a description (no README hint found). \
+                 Pass --description, or run `skillpack init` interactively."
+            )
+        })?;
+
+    let when_to_use_phrases: Vec<String> = if triggers.is_empty() {
+        // Fall back to the description hint itself as the single trigger —
+        // better than an empty when_to_use (which verify warns on), and the
+        // maintainer can refine via `skillpack update --trigger ...`.
+        vec![one_line_description.clone()]
+    } else {
+        triggers
+            .iter()
+            .flat_map(|t| t.split([',', ';']))
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+
+    // CLI projects: the bare tool name is the canonical invocation (the same
+    // default the interview offers). Libraries: --import is required — a
+    // library skill with no import pattern can't tell the agent how to use it.
+    let (invocation_command, import_pattern) = if profile.has_cli {
+        (Some(profile.name.clone()), None)
+    } else {
+        match import.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(p) => (None, Some(p.to_string())),
+            None => bail!(
+                "--auto: no CLI detected, so this looks like a library — pass \
+                 --import <PATTERN> so the skill can document how an agent \
+                 consumes it"
+            ),
+        }
+    };
+
+    Ok(types::Intent {
+        one_line_description,
+        when_to_use_phrases,
+        invocation_command,
+        import_pattern,
+        author: profile.authors.clone(),
+        license: profile.license.clone().or(Some("MIT".to_string())),
+        ..Default::default()
+    })
 }
 
 /// Build an [`Intent`] from `init --non-interactive` flags when no
@@ -195,6 +264,7 @@ fn run_init(
     verbose: bool,
     debug: bool,
     non_interactive: bool,
+    auto: bool,
     accept_warnings: bool,
     license_override: Option<String>,
     raw_targets: Vec<String>,
@@ -211,6 +281,7 @@ fn run_init(
         verbose,
         debug,
         non_interactive,
+        auto,
         accept_warnings,
         license_override,
         raw_targets,
@@ -236,6 +307,7 @@ fn run_init_inner(
     verbose: bool,
     debug: bool,
     non_interactive: bool,
+    auto: bool,
     accept_warnings: bool,
     license_override: Option<String>,
     raw_targets: Vec<String>,
@@ -251,6 +323,11 @@ fn run_init_inner(
     if verbose {
         print_profile(&profile, false);
     }
+
+    // `--auto` implies non-interactive: zero-interaction init must never
+    // stop to prompt — on a critical verification failure it refuses to write
+    // (exit 2) exactly like `--non-interactive` does.
+    let non_interactive = non_interactive || auto;
 
     // Resolve `--target all` + validate every value. Empty → `[Claude]`.
     let targets = if raw_targets.is_empty() {
@@ -274,9 +351,12 @@ fn run_init_inner(
         );
     }
 
-    // Step 2 — interview or reuse config.
+    // Step 2 — interview or reuse config. `--auto` and `--non-interactive`
+    // never prompt. A committed config always wins in those modes (re-runs
+    // stay deterministic); without a config, `--auto` derives everything from
+    // the repo and `--non-interactive` bootstraps from the explicit flags.
     let existing_cfg = Config::load(root)?;
-    let intent = if non_interactive {
+    let intent = if auto || non_interactive {
         match &existing_cfg {
             Some(cfg) => match cfg.to_intent() {
                 Some(i) => i,
@@ -286,10 +366,14 @@ fn run_init_inner(
                     Config::path(root).display()
                 ),
             },
-            // No committed config: bootstrap the intent from the flags so the
-            // FIRST init can run in CI (no TTY, nothing committed yet).
-            // Previously a chicken-and-egg — --non-interactive required a
-            // skillpack.toml, which required an interactive run.
+            // No committed config: --auto derives the intent from the repo
+            // (description from the README hint, author from git config,
+            // license from the LICENSE file, invocation from the detected
+            // CLI) so a fresh checkout inits with ZERO flags and zero prompts.
+            None if auto => auto_intent(&profile, &triggers, import.as_deref())?,
+            // Plain --non-interactive without a config: the intent comes from
+            // the bootstrap flags (description/trigger/author + invocation or
+            // import), each validated to be present.
             None => bootstrap_intent(
                 &profile,
                 description.as_deref(),
@@ -1374,7 +1458,10 @@ fn is_frontmatter_target(rel_path: &str) -> bool {
         || rel_path.ends_with(".mdc")
         || (rel_path.ends_with(".md")
             && !rel_path.ends_with("AGENTS.md")
-            && !rel_path.ends_with("copilot-instructions.md"))
+            && !rel_path.ends_with("copilot-instructions.md")
+            && !rel_path.ends_with("CLAUDE.md")
+            && !rel_path.ends_with("GEMINI.md")
+            && !rel_path.ends_with("CONVENTIONS.md"))
 }
 
 #[cfg(test)]

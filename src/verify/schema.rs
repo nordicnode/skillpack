@@ -95,8 +95,30 @@ pub const COPILOT_INSTRUCTIONS_PATH: &str = ".github/copilot-instructions.md";
 /// Use any headings you like; the agent simply parses the text you provide."
 /// Plain markdown, no frontmatter, no required fields. Read natively by 20+
 /// coding agents (Codex, Cursor, Windsurf, Copilot, Aider, Zed, Warp, JetBrains
-/// Junie, etc.). Verified July 2026.
+/// Junie, Freebuff, etc.). Verified July 2026.
 pub const AGENTS_MD_PATH: &str = "AGENTS.md";
+
+/// `CLAUDE.md` lives at the repository root. Source: the Claude Code
+/// ecosystem convention — Claude Code, Cline, Roo Code, and their forks read
+/// a root `CLAUDE.md` for project instructions. Plain markdown, no
+/// frontmatter (same structural contract as AGENTS.md). Verified July 2026.
+pub const CLAUDE_MD_PATH: &str = "CLAUDE.md";
+
+/// `GEMINI.md` lives at the repository root. Source:
+/// google-gemini.github.io/gemini-cli/docs/cli/gemini-md.html — "You can use
+/// these files to give project-specific instructions ... to make the AI's
+/// responses more accurate." Plain markdown, no frontmatter. Verified July 2026.
+pub const GEMINI_MD_PATH: &str = "GEMINI.md";
+
+/// Windsurf (Cascade) project rules live under `.windsurf/rules/<name>.md`.
+/// Source: the Windsurf docs and the cursor↔windsurf converter ecosystem —
+/// the same `description`/`globs`/`alwaysApply` frontmatter shape as Cursor
+/// rules, `.md` files under `.windsurf/rules/`. Verified July 2026.
+pub const WINDSURF_RULES_DIR: &str = ".windsurf/rules";
+
+/// Aider reads a root-level `CONVENTIONS.md` for repo conventions. Plain
+/// markdown, no frontmatter. Verified July 2026 against the aider docs.
+pub const CONVENTIONS_MD_PATH: &str = "CONVENTIONS.md";
 
 // Action-verb heuristic: the first word of a good skill description is an
 // action verb (e.g. "Lint", "Generate", "Format"). We don't enforce grammar —

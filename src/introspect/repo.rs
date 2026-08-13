@@ -23,6 +23,26 @@ pub(crate) fn detect_repo_url(root: &Path) -> Option<String> {
     }
 }
 
+/// `git config user.name`, best-effort. Fills the plugin.json `author` for
+/// `init --auto` and `doctor` when the manifest declares no authors — the
+/// maintainer's identity is one `git` spawn away, so a zero-interaction init
+/// shouldn't prompt for it.
+pub(crate) fn detect_author(root: &Path) -> Option<String> {
+    let mut cmd = Command::new("git");
+    cmd.args(["config", "user.name"]).current_dir(root);
+    match crate::spawn::run(&mut cmd, Duration::from_secs(3)) {
+        SpawnOutcome::RanClean(out) => {
+            let s = out.trim().to_string();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Heuristic: read LICENSE, look for the SPDX id text.
 pub(crate) fn detect_license(root: &Path) -> Option<String> {
     for filename in &["LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"] {

@@ -10,6 +10,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `init --auto`: zero-flag, zero-prompt init. The intent is derived entirely
+  from the repo — description from the README hint, author from the manifest
+  or `git config user.name`, license from the LICENSE file (or `--license`),
+  invocation from the detected CLI. `--import` is required for libraries
+  (actionable error otherwise); `--trigger` is optional (falls back to the
+  description hint). Implies non-interactive: on a critical verification
+  failure it refuses to write (exit 2) instead of prompting.
+- Four new harness targets, bringing the total to ten: `claude-md`
+  (`CLAUDE.md` — Claude Code / Cline / Roo Code), `gemini` (`GEMINI.md` —
+  Gemini CLI, per the official docs), `windsurf` (`.windsurf/rules/<name>.md`
+  — same frontmatter schema as Cursor rules), and `aider` (`CONVENTIONS.md`).
+  The three plain-markdown targets share the copilot/AGENTS.md structural
+  check (now a single shared implementation); Windsurf reuses the Cursor
+  rule check with its own check_id prefix. AGENTS.md coverage is documented
+  for Freebuff and 60k+ projects' agents.
+
+### Added
+
 - Multi-skill packs (the documented future direction, now shipped): a
   `[[skills]]` array in `skillpack.toml` renders one per-skill file per
   ecosystem (`skills/<name>/SKILL.md`, `.codex/skills/<name>/SKILL.md`,

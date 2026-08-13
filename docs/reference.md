@@ -107,6 +107,7 @@ No-op when there's no fixable drift.
 | Flag                    | Purpose                                                                          |
 |-------------------------|----------------------------------------------------------------------------------|
 | `init --non-interactive` | skip prompts (for CI). Uses a committed `skillpack.toml` when present; otherwise bootstraps from the flags below — the FIRST init can run on a fresh checkout with no TTY |
+| `init --auto` | zero flags, zero prompts: derives the intent entirely from the repo (description from the README hint, author from manifest/git config, license from LICENSE or `--license`, invocation from the detected CLI; `--import` required for libraries, `--trigger` optional). Implies non-interactive — on a critical verify failure it refuses to write (exit 2) rather than prompt |
 | `init --description <TEXT>` | one-sentence task description (bootstrap) |
 | `init --trigger <PHRASE>` | when_to_use trigger phrase; repeatable, and comma/semicolon-separated values split (bootstrap) |
 | `init --author <NAME>` | author name for plugin.json; optional (bootstrap) |
@@ -114,7 +115,7 @@ No-op when there's no fixable drift.
 | `init --import <PATTERN>` | import pattern for library projects — pass exactly one of `--invocation`/`--import` (bootstrap) |
 | `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
 | `init --license <SPDX>` | override the license for this run                              |
-| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, or `all` (all six). Repeatable. |
+| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, `claude-md`, `gemini`, `windsurf`, `aider`, or `all` (all ten). Repeatable. |
 | `init --force` | overwrite an existing `AGENTS.md` at repo root (skip+warn otherwise). Has no effect on other targets, which write to skillpack-owned paths. |
 | `init --template-dir <DIR>` | overlay custom `.tera` templates from a dir; missing files fall back to embedded defaults |
 | `update` | incrementally refresh distribution files from an existing `skillpack.toml` — no interview, no verify gate. Writes only changed files; preserves body prose by splicing fresh frontmatter. |

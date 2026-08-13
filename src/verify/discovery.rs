@@ -27,10 +27,13 @@ mod agentsmd;
 mod copilot;
 mod cursor;
 mod opencode;
+mod plainmd;
 
 use agentsmd::{check_agents_md, find_agents_md};
 use copilot::{check_copilot_instructions, find_copilot_instructions};
-use cursor::{check_one_mdc, find_cursor_mdc_files};
+use cursor::{
+    check_one_mdc, check_one_windsurf_rule, find_cursor_mdc_files, find_windsurf_rule_files,
+};
 pub use cursor::{parse_cursor_mdc_frontmatter, CursorFrontmatter};
 use opencode::{check_one_opencode_agent, find_opencode_agent_files};
 pub use opencode::{parse_opencode_agent_frontmatter, OpenCodeFrontmatter};
@@ -179,11 +182,56 @@ pub fn run(
         out.push(check_copilot_instructions(root, &p)?);
     }
 
+    // Windsurf (Cascade): `.windsurf/rules/<name>.md` — same frontmatter
+    // schema as Cursor rules, `.md` extension.
+    let windsurf_rules = find_windsurf_rule_files(root);
+    if windsurf_rules.is_empty() && root.join(schema::WINDSURF_RULES_DIR).is_dir() {
+        out.push(CheckResult::fail(
+            "discovery.windsurf.rule.missing",
+            "at least one Windsurf rule exists",
+            ".windsurf/rules/ exists but contains no rule file",
+            "To fix: run `skillpack init --target windsurf` or add a rule under .windsurf/rules/<name>.md.",
+        ));
+    } else {
+        for rule_path in windsurf_rules {
+            out.push(check_one_windsurf_rule(root, &rule_path)?);
+        }
+    }
+
     // AGENTS.md: root-level instructions file, plain markdown, no frontmatter.
-    // Per agents.md (Linux Foundation stewarded) — read natively by 20+ coding
-    // agents. Same structural check as Copilot: file exists, non-empty, `#` heading.
+    // Per agents.md (Linux Foundation stewarded) — read natively by 60k+
+    // projects' agents (Codex, Cursor, Windsurf, Copilot, Aider, Zed, Warp,
+    // JetBrains Junie, Freebuff, ...). Same structural check as Copilot:
+    // file exists, non-empty, `#` heading.
     if let Some(p) = find_agents_md(root) {
         out.push(check_agents_md(root, &p)?);
+    }
+
+    // CLAUDE.md (Claude Code / Cline / Roo Code), GEMINI.md (Gemini CLI) and
+    // CONVENTIONS.md (aider) — root-level plain-markdown instructions files,
+    // same structural check as Copilot/AGENTS.md.
+    for (rel, check_id, empty_hint) in [
+        (
+            schema::CLAUDE_MD_PATH,
+            "discovery.claude_md",
+            "To fix: add instructions content, or run `skillpack init --target claude-md`.",
+        ),
+        (
+            schema::GEMINI_MD_PATH,
+            "discovery.gemini",
+            "To fix: add instructions content, or run `skillpack init --target gemini`.",
+        ),
+        (
+            schema::CONVENTIONS_MD_PATH,
+            "discovery.aider",
+            "To fix: add instructions content, or run `skillpack init --target aider`.",
+        ),
+    ] {
+        if let Some(p) = plainmd::find_plain_file(root, rel) {
+            out.push(plainmd::check_plain_md(
+                root, &p, check_id, rel, empty_hint,
+            )?);
+        }
     }
 
     // When no ecosystem files are present at all, the plugin is malformed —
@@ -192,8 +240,8 @@ pub fn run(
     if out.is_empty() {
         out.push(CheckResult::fail(
             "discovery.empty",
-            "at least one ecosystem is present (Claude / Codex / Cursor / OpenCode / Copilot / AGENTS.md)",
-            "no distribution files found (none of: .claude-plugin/, .codex/skills/, .cursor/rules/, .opencode/agents/, .github/copilot-instructions.md, AGENTS.md)",
+            "at least one ecosystem is present (Claude / Codex / Cursor / OpenCode / Copilot / AGENTS.md / CLAUDE.md / GEMINI.md / Windsurf / Aider)",
+            "no distribution files found (none of: .claude-plugin/, .codex/skills/, .cursor/rules/, .windsurf/rules/, .opencode/agents/, .github/copilot-instructions.md, AGENTS.md, CLAUDE.md, GEMINI.md, CONVENTIONS.md)",
             "To fix: run `skillpack init --target <ecosystem>` first.",
         ));
     }

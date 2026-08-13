@@ -47,6 +47,16 @@ pub enum Commands {
         #[arg(long)]
         accept_warnings: bool,
 
+        /// Zero-interaction init: derive the intent entirely from the repo —
+        /// description from the README, author from `git config`, license from
+        /// the LICENSE file (or `--license`), invocation from the detected
+        /// CLI — and write without any prompts. Pass `--trigger` to set the
+        /// when-to-use phrases (otherwise the description hint is used), and
+        /// `--import` for a pure library. Fails with an actionable message
+        /// when something essential can't be derived (e.g. no README hint).
+        #[arg(long)]
+        auto: bool,
+
         /// One-sentence task description — `--non-interactive` bootstrap when
         /// no `skillpack.toml` exists (ignored when a config is present).
         #[arg(long, value_name = "TEXT")]
@@ -247,11 +257,27 @@ pub enum Target {
     /// Per docs.github.com/copilot — plain markdown, no frontmatter.
     Copilot,
     /// AGENTS.md: a root-level `AGENTS.md` instructions file read natively by
-    /// 20+ coding agents (Codex, Cursor, Windsurf, Copilot, Aider, Zed, Warp,
-    /// JetBrains Junie, etc.). Per agents.md (Linux Foundation stewarded) —
-    /// plain markdown, no frontmatter, no required fields.
+    /// 60k+ projects' agents (Codex, Cursor, Windsurf, Copilot, Aider, Zed,
+    /// Warp, JetBrains Junie, Freebuff, etc.). Per agents.md (Linux Foundation
+    /// stewarded) — plain markdown, no frontmatter, no required fields.
     #[clap(name = "agentsmd")]
     AgentsMd,
+    /// CLAUDE.md: root-level instructions file read by Claude Code, Cline,
+    /// Roo Code, and the Claude Code ecosystem of forks. Plain markdown.
+    #[clap(name = "claude-md")]
+    ClaudeMd,
+    /// GEMINI.md: root-level instructions file read natively by the Gemini
+    /// CLI. Per google-gemini.github.io/gemini-cli/docs/cli/gemini-md.html —
+    /// plain markdown, no frontmatter.
+    Gemini,
+    /// Windsurf (Cascade): `.windsurf/rules/<name>.md` rule files with the
+    /// same frontmatter shape as Cursor rules (`description` required,
+    /// `globs`/`alwaysApply` optional). Per the Windsurf docs + the
+    /// cursor↔windsurf converter projects.
+    Windsurf,
+    /// Aider: a root-level `CONVENTIONS.md` the aider coding agent reads for
+    /// repo conventions. Plain markdown, no frontmatter.
+    Aider,
 }
 
 /// Expand a list of targets, resolving the string `"all"` into every concrete
@@ -270,11 +296,15 @@ pub fn resolve_targets(raw: &[String]) -> anyhow::Result<Vec<Target>> {
                 Target::OpenCode,
                 Target::Copilot,
                 Target::AgentsMd,
+                Target::ClaudeMd,
+                Target::Gemini,
+                Target::Windsurf,
+                Target::Aider,
             ]);
         } else {
             out.push(Target::from_str(r, true).map_err(|s| {
                 anyhow::anyhow!(
-                    "invalid --target `{s}`; expected claude|cursor|codex|opencode|copilot|agentsmd|all"
+                    "invalid --target `{s}`; expected claude|cursor|codex|opencode|copilot|agentsmd|claude-md|gemini|windsurf|aider|all"
                 )
             })?);
         }

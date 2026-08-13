@@ -65,7 +65,10 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
     let repo_url = repo::detect_repo_url(root);
     let license = repo::detect_license(root).or_else(|| manifest::manifest_license(root, language));
     let version = manifest::project_manifest_version(root, language);
-    let authors = manifest::project_manifest_authors(root, language);
+    // Manifest authors first; fall back to `git config user.name` so `--auto`
+    // and `doctor` can fill plugin.json's author without a prompt.
+    let authors =
+        manifest::project_manifest_authors(root, language).or_else(|| repo::detect_author(root));
     let description_hint = repo::read_readme_hint(root);
     let d = cli_probe::detect_cli(root, language, manifest_name.clone(), &mut diag);
     let has_cli = d.has_cli;
