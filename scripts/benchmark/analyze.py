@@ -37,9 +37,9 @@ import sys
 # every tool output and the final assistant text. fd-specific (the default
 # target repo), matching docs/demo methodology.
 QUESTION_CHECKS = [
-    # Q1: -e rs + --exclude target; output shows src/*.rs files (not target/)
+    # Q1: -e rs + exclude target (-E or --exclude); output shows src/*.rs
     (
-        re.compile(r"fd.*(-e rs|--extension rs).*--exclude target", re.S),
+        re.compile(r"fd.*(-e rs|--extension rs).*(-E target|--exclude target)", re.S),
         re.compile(r"(src/[A-Za-z0-9_./-]+\.rs)", re.S),
     ),
     # Q2: -s (case-sensitive); output shows README
@@ -47,9 +47,10 @@ QUESTION_CHECKS = [
         re.compile(r"fd.*(-s |--case-sensitive)", re.S),
         re.compile(r"README", re.S),
     ),
-    # Q3: -u/--no-ignore + -H/--hidden; text explains the gitignore mechanism
+    # Q3: ignore-disable flag (-u/--no-ignore, -I, or --no-ignore-vcs,
+    # optionally with -H/--hidden); text explains the gitignore mechanism
     (
-        re.compile(r"fd.*(-u |--no-ignore)(.*--hidden|-H )?", re.S),
+        re.compile(r"fd.*(-u |--no-ignore|-I |--no-ignore-vcs)(.*(--hidden|-H ))?", re.S),
         re.compile(r"(gitignore|\.git/info/exclude|ignored)", re.I),
     ),
     # Q4: exec-per-result wc -l (-x/--exec wc -l)

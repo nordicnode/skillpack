@@ -8,6 +8,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Repeatable OpenCode benchmark harness (`scripts/benchmark/`): `run.sh`
+  runs an A/B of a plain repo clone vs `init --auto --target all` output
+  through OpenCode — same repo, same default agent, same model, same
+  questions (the old demo's `--agent` confound is gone). `analyze.py`
+  evidence-scores each question and reports per-condition medians across
+  `--runs N`. Uses opencode's configured model by default; pin with
+  `--model`. First committed results (fd, glm-5.2, 2 runs/condition):
+  −32% agent steps, −44% wall clock, −6% tokens, 3.5/4 → 4/4 correct.
+
 ### Fixed
 
 - `init --auto` README hint no longer leaks badge/markup rows (shields.io,

@@ -1,0 +1,9 @@
+created: 2026-08-13T18:51:18Z
+model: 
+runs: 2
+opencode: 1.18.18
+skillpack: skillpack 0.11.3
+target repo: https://github.com/sharkdp/fd.git @ ee20f42
+target build: fd 10.4.2
+questions: /home/mikey/Desktop/dev/skillpack/scripts/benchmark/questions.txt
+confound control: same default agent in both conditions (no --agent)

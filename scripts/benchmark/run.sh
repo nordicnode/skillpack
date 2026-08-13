@@ -40,7 +40,10 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-MODEL="${SKILLPACK_BENCH_MODEL:-opencode/claude-haiku-4-5}"
+# Default: opencode's configured model (works with any provider — gateway,
+# a local proxy like the 9router/NVIDIA NIM setup, an API key, …). Pin a
+# specific model with --model for cross-machine reproducibility.
+MODEL="${SKILLPACK_BENCH_MODEL:-}"
 RUNS="${SKILLPACK_BENCH_RUNS:-1}"
 QUESTIONS="${SKILLPACK_BENCH_QUESTIONS:-$HERE/questions.txt}"
 OUT="${SKILLPACK_BENCH_OUT:-$HERE/results}"
@@ -116,10 +119,12 @@ run_condition() {
     ( cd "$dir" && "$BIN" init --auto --target all --force )
     cp "$dir/AGENTS.md" "$OUT/$stem.agents.md"
   fi
-  echo "[run] $stem: opencode run (model=$MODEL) — this is the slow step"
+  echo "[run] $stem: opencode run (model=${MODEL:-<config default>}) — this is the slow step"
   local start end wall
   start=$(date +%s%N)
-  if ( cd "$dir" && opencode run "$(cat "$QUESTIONS")" -m "$MODEL" --pure --format json --print-logs \
+  local model_args=()
+  [[ -n "$MODEL" ]] && model_args=(-m "$MODEL")
+  if ( cd "$dir" && opencode run "$(cat "$QUESTIONS")" "${model_args[@]}" --pure --format json --print-logs \
         >"$OUT/$stem.json" 2>"$OUT/$stem.logs" ); then
     end=$(date +%s%N)
     awk -v d="$((end - start))" 'BEGIN { printf "%.2f\n", d / 1e9 }' > "$OUT/$stem.wall"

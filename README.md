@@ -66,7 +66,18 @@ Four `fd` search tasks, run with [OpenCode](https://opencode.ai) on a plain clon
 | Token total | 38,134 | 22,248 | **-42%** |
 | Wall clock | 130 s | 27 s | **-79%** |
 
-Both conditions got all four answers right — the win is *efficiency*, not capability. The biggest one: the plain-clone agent hit fd's `--max-results`/`-x` incompatibility and retried four times; the generated agent had the verified flag mapping and answered in one step. Full methodology and honest limitations (including one spot where the skillpack agent was *less* accurate) are in [`docs/agent-demo.md`](docs/agent-demo.md).
+The latest run (repeatable harness, `glm-5.2`, two runs per condition):
+
+| Metric (median) | plain clone | clone + skillpack | delta |
+|---|---|---|---|
+| Agent step rounds | 12.5 | 8.5 | **-32%** |
+| Wall clock | 158 s | 88 s | **-44%** |
+| Tokens | 11,875 | 11,198 | -6% |
+| Correct (evidence-scored) | 3.5/4 | **4/4** | +14% |
+
+Efficiency *and* correctness improved: both skillpack runs answered all four fd tasks correctly, while one baseline run skipped a question entirely. The baseline agent used long flag names and hit `fd --help` five times (including the `--max-results`/`-x` incompatibility); the skillpack agent used the generated skill's verified short flags on the first try and never needed `--help`.
+
+Full methodology, per-run detail, and honest caveats: [`docs/benchmark.md`](docs/benchmark.md). The original one-off demo (different model, an `--agent` confound the harness now fixes) is in [`docs/agent-demo.md`](docs/agent-demo.md).
 
 That demo was a one-off. The repeatable harness lives in [`scripts/benchmark/`](scripts/benchmark/) — one command (`run.sh --runs 3`) runs the same fd A/B through OpenCode with medians and evidence scoring, and it fixes the demo's confound by holding the agent wrapper constant (no `--agent`; the skillpack condition differs only by its generated `AGENTS.md`). Methodology and how to run it: [`docs/benchmark.md`](docs/benchmark.md).
 
