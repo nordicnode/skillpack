@@ -1244,7 +1244,8 @@ mod tests {
 
     #[test]
     fn skill_frontmatter_parse_multiline_strips_quotes_cleanly() {
-        let block = "name: my-tool\ndescription: \"first line\nsecond line\"\nwhen_to_use: \"test\"";
+        let block =
+            "name: my-tool\ndescription: \"first line\nsecond line\"\nwhen_to_use: \"test\"";
         let fm = SkillFrontmatter::parse(block);
         assert_eq!(fm.name.as_deref(), Some("my-tool"));
         assert_eq!(

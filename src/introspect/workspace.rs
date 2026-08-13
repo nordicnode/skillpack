@@ -60,10 +60,8 @@ pub(crate) fn expand_workspace_members(root: &Path, raw_members: &[String]) -> V
             let parent = root.join(prefix);
             if parent.is_dir() {
                 if let Ok(entries) = fs::read_dir(&parent) {
-                    let mut subdirs: Vec<_> = entries
-                        .flatten()
-                        .filter(|e| e.path().is_dir())
-                        .collect();
+                    let mut subdirs: Vec<_> =
+                        entries.flatten().filter(|e| e.path().is_dir()).collect();
                     subdirs.sort_by_key(|e| e.file_name());
                     for sub in subdirs {
                         if let Some(sub_name) = sub.file_name().to_str() {

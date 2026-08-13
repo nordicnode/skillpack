@@ -1039,8 +1039,14 @@ mod tests {
         ];
         let files = render_targets(&p, &intent, &[Target::Claude, Target::AgentsMd], None).unwrap();
         let agents = files.iter().find(|f| f.rel_path == "AGENTS.md").unwrap();
-        assert!(agents.contents.contains("- Do not combine --max-results with -x (fd rejects this)."));
-        assert!(agents.contents.contains("- Flags like -e and -E are case-sensitive."));
-        assert!(agents.contents.contains("- Verify the tool is installed before relying on it"));
+        assert!(agents
+            .contents
+            .contains("- Do not combine --max-results with -x (fd rejects this)."));
+        assert!(agents
+            .contents
+            .contains("- Flags like -e and -E are case-sensitive."));
+        assert!(agents
+            .contents
+            .contains("- Verify the tool is installed before relying on it"));
     }
 }
