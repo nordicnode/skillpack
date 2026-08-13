@@ -6,11 +6,11 @@
 //! working directory restricted to the project root."
 //!
 //! This module is the thin top-level orchestrator: it calls
-//! [`detect_language`] then delegates each concern to a sibling submodule —
-//! [`cli_candidates`] (resolve a candidate argv), [`cli_probe`] (spawn
-//! `--help` + walk workspace members), [`manifest`] (pull scalar fields
-//! from a language manifest), [`repo`] (git origin, LICENSE, README hint),
-//! and [`workspace`] (workspace-only root + member-name heuristics).
+//! `detect_language` then delegates each concern to a sibling submodule —
+//! `cli_candidates` (resolve a candidate argv), `cli_probe` (spawn
+//! `--help` + walk workspace members), `manifest` (pull scalar fields
+//! from a language manifest), `repo` (git origin, LICENSE, README hint),
+//! and `workspace` (workspace-only root + member-name heuristics).
 //!
 //! Detection order is deliberate: if both a `Cargo.toml` and a `package.json`
 //! exist we pick the one most likely to *ship a CLI* (Rust, then node), which

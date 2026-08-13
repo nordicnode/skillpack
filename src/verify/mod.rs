@@ -127,7 +127,7 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
 
 /// How `verify` presents its results (Improvement B). The human format is the
 /// default; `json` is for CI gating / scripting and uses the machine-readable
-/// `check_id`s already on each [`CheckResult`](self::result::CheckResult).
+/// `check_id`s already on each [`CheckResult`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum OutputFormat {
     Human,

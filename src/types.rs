@@ -4,7 +4,7 @@
 //!   `introspect` → [`ProjectProfile`]
 //!   `interview`  → [`Intent`]
 //!   `generate`   consumes both → writes files
-//!   `verify`     reads the files → [`CheckResult`] per check
+//!   `verify`     reads the files → [`CheckResult`](crate::verify::result::CheckResult) per check
 //!
 //! `has_cli` is the single branching point for the pure-library path
 //! (design §5.1 "Pure-library path"). Everything downstream keys off it.

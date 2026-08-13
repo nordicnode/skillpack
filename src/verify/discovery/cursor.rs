@@ -14,7 +14,7 @@ use super::{find_kv_colon, rel_unix};
 /// (verified July 2026 against the live docs + the polarpoint.io writeup):
 ///   description: <string, required> — drives auto-attach when alwaysApply:false
 ///   globs:        [list of glob patterns]   — optional
-///   alwaysApply:  <bool>                    — required
+///   alwaysApply:  `<bool>`                  — required
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CursorFrontmatter {
     pub description: Option<String>,

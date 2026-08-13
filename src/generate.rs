@@ -1,5 +1,5 @@
 //! Generate the three distribution files from a [`ProjectProfile`] + [`Intent`]
-//! via Tera templates. Pure (no disk writes here): returns [`GeneratedFile`]s;
+//! via Tera templates. Pure (no disk writes here): returns [`GeneratedFileOutput`]s;
 //! the CLI dispatcher decides whether to write them (after pre-commit verify).
 //!
 //! Design §5.1 step 3 + §6.3. Idempotent: identical inputs produce byte-identical
@@ -571,9 +571,7 @@ pub fn coerce_kebab(name: &str) -> String {
     s.to_string()
 }
 
-/// Output path + rendered contents, root-relative. Re-exports the shared
-/// [`GeneratedFile`](crate::types::GeneratedFile) shape; kept as its own type
-/// so callers don't need to import the path tuple awkwardly.
+/// Output path + rendered contents, root-relative.
 #[derive(Debug, Clone)]
 pub struct GeneratedFileOutput {
     pub rel_path: String,

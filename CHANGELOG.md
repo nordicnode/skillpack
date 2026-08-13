@@ -8,6 +8,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `.gitignore` now excludes `.freebuff/` — the desktop-app local database was
+  being swept into the crates.io tarball (`cargo package` includes untracked,
+  non-ignored files). Private local data would have shipped with the crate.
+- All 11 rustdoc warnings eliminated (stale `GeneratedFile` links, links to
+  private items, an unclosed HTML tag, a redundant link target) — `cargo doc`
+  is now warning-free.
+
 ## [0.11.3] - 2026-08-13
 
 ### Changed
