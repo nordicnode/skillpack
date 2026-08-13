@@ -5,7 +5,7 @@
 [![CI](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml/badge.svg)](https://github.com/nordicnode/skillpack/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/skillpack.svg)](https://crates.io/crates/skillpack)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Rust 1.74+](https://img.shields.io/badge/rust-1.74%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
 Coding agents (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, and any AGENTS.md reader — Codex, Windsurf, Aider, Zed, Warp, JetBrains Junie, etc.) now discover and invoke
 tools by reading marketplace manifests, skill files, and CLIs — not by `npm install`-ing
@@ -88,7 +88,7 @@ cargo install skillpack    # from crates.io
 Or build from source: `cargo install --path .` (or `cargo build --release` for a
 local binary under `target/release/`).
 
-Requires Rust 1.74+. Published on [crates.io](https://crates.io/crates/skillpack).
+Requires Rust 1.85+. Published on [crates.io](https://crates.io/crates/skillpack).
 
 ## Quick start
 
@@ -121,10 +121,10 @@ a PR gate. A reusable workflow ships in this repo — one line in your workflow:
 ```yaml
 jobs:
   skillpack:
-    uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.9.4
+    uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.11.2
 ```
 
-Pin to a released tag (e.g. `@v0.9.4`); bump the pin when you want new
+Pin to a released tag (e.g. `@v0.11.2`); bump the pin when you want new
 features. The job installs `skillpack` from crates.io and runs
 `skillpack verify --format json` against the consumer repo, mirroring
 skillpack's own CI matrix (ubuntu / macOS / Windows, same runtime setup-*
@@ -132,7 +132,7 @@ actions per supported language). Override the installed crate version:
 
 ```yaml
 with:
-  skillpack-version: '0.9.4'   # any crates.io-published version
+  skillpack-version: '0.11.2'  # any crates.io-published version
 ```
 
 Prefer wiring your own workflow? `cargo install skillpack --locked` and run
@@ -173,9 +173,17 @@ schema:
 - `version` is present in `plugin.json` (warns on missing/empty)
 - `author` is present in `plugin.json` (warns on missing or `"Unspecified"`)
 - `version` in `plugin.json` matches the project manifest version (warns on drift; a stale 0.6.4 vs 0.8.1 self-dogfood caught by this check)
+- `homepage` / `repository` in `plugin.json` match the git origin URL (warns on drift; skipped when no git origin is configured)
 - `allowed-tools` in `SKILL.md` frontmatter matches the Anthropic grammar (comma-separated; each token a bare identifier like `Read` or a namespaced call like `Bash(npm test:*)`) — warns on malformed tokens (unbalanced parens, non-alpha identifiers). Applied to Codex `SKILL.md` too.
+- the SKILL.md frontmatter block is closed by a `---` delimiter (an unterminated block would swallow the body — fails)
+- a `skills/<name>/SKILL.md` (or `.codex/skills/<name>/SKILL.md`) directory name matches its frontmatter `name:` (warns on mismatch — agents load skills by directory)
 
-**Drift repair (`--fix`)** — `verify --fix` mechanically regenerates *only the file the drift lives in* (never wholesale regen — that's `skillpack init`). Currently repairs `plugin.json` version drift: rewrites `.claude-plugin/plugin.json` from the current manifest + intent, leaving your `SKILL.md`/`marketplace.json` intact. No-op when there's no fixable drift.
+**Drift repair (`--fix`)** — `verify --fix` mechanically regenerates *only the file the drift lives in* (never wholesale regen — that's `skillpack init`). Repairs:
+
+- `plugin.json` drift — `version`, `homepage`/`repository` URL, missing `description` or `author` — by rewriting `.claude-plugin/plugin.json` from the current manifest + intent, leaving your `SKILL.md`/`marketplace.json` intact.
+- `SKILL.md` frontmatter drift — `name`, `when_to_use`, `allowed-tools`, and the `name_drift` checks (Claude + Codex) — by regenerating ONLY the `---` frontmatter block from the current intent and splicing it onto your committed body, so hand-tailored body prose survives byte-for-byte.
+
+No-op when there's no fixable drift.
 
 **Cursor** (`.cursor/rules/<name>.mdc`) — frontmatter is parsed and
 validated against cursor.com/docs/rules: `description` present, non-empty,

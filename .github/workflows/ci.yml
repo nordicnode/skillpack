@@ -72,3 +72,31 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: test (incl. ignored runtime round trips)
         run: cargo test --all-targets -- --include-ignored
+
+  # MSRV gate: `rust-version` in Cargo.toml (1.85) is a real claim — a
+  # `cargo install skillpack` on the MSRV must work. The main matrix builds on
+  # 1.95.0, which would never catch a dependency bump that silently raises the
+  # floor. Checks lib + bins (the shipped artifact), not dev-dependencies.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.85.0'
+      - uses: Swatinem/rust-cache@v2
+      - name: check lib + bins at MSRV
+        run: cargo check --lib --bins
+
+  # Dependency vulnerability scan against the RustSec advisory DB. Runs on the
+  # lockfile; a newly disclosed advisory fails the job until the affected
+  # dependency is bumped.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 'stable'
+      - name: cargo audit
+        run: cargo install cargo-audit --locked && cargo audit

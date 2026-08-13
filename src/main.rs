@@ -904,13 +904,13 @@ fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool, debug: bo
 /// wholesale. Returns exit 0 on success.
 fn run_update(
     root: &Path,
-    _verbose: bool,
-    _debug: bool,
+    verbose: bool,
+    debug: bool,
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
 ) -> i32 {
-    match run_update_inner(root, raw_targets, force, template_dir) {
+    match run_update_inner(root, verbose, debug, raw_targets, force, template_dir) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -1049,11 +1049,24 @@ fn render_from_config(
 
 fn run_update_inner(
     root: &Path,
+    verbose: bool,
+    debug: bool,
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
 ) -> Result<i32> {
     let (profile, intent, files) = render_from_config(root, &raw_targets, template_dir)?;
+    if verbose {
+        print_profile(&profile, false);
+    }
+    if debug {
+        eprintln!(
+            "[debug] detected name={} language={} has_cli={}",
+            profile.name,
+            profile.language.as_str(),
+            profile.has_cli
+        );
+    }
     let results = compute_candidates(root, &files, force)?;
 
     let mut written: Vec<&GeneratedFileOutput> = Vec::new();
@@ -1090,8 +1103,11 @@ fn run_update_inner(
         }
     }
 
-    // Update skillpack.toml with current introspection (version/name may have changed).
-    Config::from_intent(&name, &intent).save(root)?;
+    // Update skillpack.toml with current introspection (version/name may have
+    // changed) — but only when the serialized form actually differs, so a
+    // no-op `update` doesn't churn the config's mtime or rewrite a
+    // hand-formatted file.
+    Config::from_intent(&name, &intent).save_if_changed(root)?;
 
     // Summary.
     println!(
@@ -1122,13 +1138,13 @@ fn run_update_inner(
 /// drifted/missing files and exit 1 if any. A CI gate for stale artifacts.
 fn run_diff(
     root: &Path,
-    _verbose: bool,
-    _debug: bool,
+    verbose: bool,
+    debug: bool,
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
 ) -> i32 {
-    match run_diff_inner(root, &raw_targets, force, template_dir) {
+    match run_diff_inner(root, verbose, debug, &raw_targets, force, template_dir) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -1139,11 +1155,24 @@ fn run_diff(
 
 fn run_diff_inner(
     root: &Path,
+    verbose: bool,
+    debug: bool,
     raw_targets: &[String],
     force: bool,
     template_dir: Option<&Path>,
 ) -> Result<i32> {
-    let (_profile, _intent, files) = render_from_config(root, raw_targets, template_dir)?;
+    let (profile, _intent, files) = render_from_config(root, raw_targets, template_dir)?;
+    if verbose {
+        print_profile(&profile, false);
+    }
+    if debug {
+        eprintln!(
+            "[debug] detected name={} language={} has_cli={}",
+            profile.name,
+            profile.language.as_str(),
+            profile.has_cli
+        );
+    }
     let results = compute_candidates(root, &files, force)?;
 
     let mut drifted = 0usize;

@@ -8,6 +8,37 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Declared MSRV raised to Rust 1.85 (`rust-version` in `Cargo.toml`), matching
+  what the locked `clap`/`tera` actually require — `cargo install` on Rust
+  1.74–1.84 previously failed with a hard toolchain error. README badge and
+  toolchain comment updated; CI gains an MSRV job that checks lib + bins at
+  1.85.0 so the floor can't drift again.
+- Removed three unused direct dependencies (`thiserror`, `walkdir`,
+  `indexmap`) — they had zero references in `src/` and only bloated compile
+  time and the lockfile.
+
+### Added
+
+- New `verify` discovery checks: an unterminated `---` frontmatter block in a
+  `SKILL.md` / cursor `.mdc` / opencode agent file now FAILs (`*.frontmatter_unclosed`)
+  instead of being silently parsed as valid frontmatter with the body swallowed;
+  a `skills/<name>/SKILL.md` (or `.codex/skills/<name>/SKILL.md`) whose directory
+  name disagrees with its frontmatter `name:` warns (`*.dir_name_mismatch`).
+- `discovery.plugin.url_drift` now reports BOTH `homepage` and `repository`
+  drifts in one warning — the old early return hid a second stale field.
+- CI gains a `cargo audit` job (RustSec advisory scan of the lockfile).
+- `update`/`diff` now honor the global `--verbose`/`--debug` flags (they were
+  silently ignored).
+- `update` no longer rewrites `skillpack.toml` when its serialized content is
+  unchanged (no mtime churn); uses the same frontmatter-splice semantics.
+- The interview accepts semicolons as trigger-phrase separators (was
+  comma-only).
+- `release.yml` reads the crate version from the `[package]` table only — the
+  old `^version` grep would break if a workspace-level `version` line ever
+  appeared.
+
 ## [0.11.2] - 2026-07-13
 
 ### Added

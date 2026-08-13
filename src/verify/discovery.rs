@@ -250,9 +250,9 @@ fn check_marketplace(root: &Path) -> Result<CheckResult> {
         ));
     }
 
-    if v.get("owner").map_or(true, |o| {
-        o.is_null() || o == &serde_json::Value::Object(Default::default())
-    }) {
+    if v.get("owner")
+        .is_none_or(|o| o.is_null() || o == &serde_json::Value::Object(Default::default()))
+    {
         return Ok(CheckResult::fail(
             "discovery.marketplace.owner",
             "marketplace.json has an `owner` object",
@@ -383,7 +383,7 @@ fn check_plugin_json(root: &Path, repo_url: &Option<String>) -> Result<CheckResu
     // missing description on a plugin is a real discoverability problem for an
     // agent — warn, don't fail.
     if v.get("description")
-        .map_or(true, |d| d.as_str().map_or(true, str::is_empty))
+        .is_none_or(|d| d.as_str().is_none_or(str::is_empty))
     {
         return Ok(CheckResult::warn(
             "discovery.plugin.description",
@@ -430,18 +430,35 @@ fn check_plugin_json(root: &Path, repo_url: &Option<String>) -> Result<CheckResu
     // origin) — a non-git or fresh repo cannot drift on a URL there's no
     // canonical source for.
     if let Some(canonical) = repo_url {
-        for field in &["homepage", "repository"] {
-            let current = v.get(*field).and_then(|x| x.as_str()).unwrap_or("");
-            if current != canonical {
-                return Ok(CheckResult::warn(
-                    "discovery.plugin.url_drift",
-                    &format!("plugin.json `{}` matches the git origin URL", field),
-                    format!(
-                        "plugin.json `{field}` `{current}` != git origin `{canonical}`"
-                    ),
-                    "To fix: re-run `skillpack init` to regenerate plugin.json from the current remote, or intentionally pin the URL.",
-                ));
-            }
+        // Collect EVERY drifted field before warning — an early return on the
+        // first mismatch would hide a second drift (homepage AND repository
+        // both stale) behind a single warning.
+        let drifted: Vec<&str> = ["homepage", "repository"]
+            .iter()
+            .filter(|field| {
+                let current = v.get(**field).and_then(|x| x.as_str()).unwrap_or("");
+                current != canonical
+            })
+            .copied()
+            .collect();
+        if !drifted.is_empty() {
+            let detail = drifted
+                .iter()
+                .map(|f| {
+                    let current = v.get(*f).and_then(|x| x.as_str()).unwrap_or("");
+                    format!("`{f}` `{current}`")
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Ok(CheckResult::warn(
+                "discovery.plugin.url_drift",
+                &format!(
+                    "plugin.json `{}` matches the git origin URL",
+                    drifted.join("`, `")
+                ),
+                format!("plugin.json {detail} != git origin `{canonical}`"),
+                "To fix: re-run `skillpack init` to regenerate plugin.json from the current remote, or intentionally pin the URL.",
+            ));
         }
     }
 
@@ -475,6 +492,10 @@ fn check_plugin_json(root: &Path, repo_url: &Option<String>) -> Result<CheckResu
 /// `serde_json::Value` (parsing YAML loosely via serde_yaml-free path: we use a
 /// tiny hand parser for the few keys we care about, to avoid a heavy YAML
 /// dependency). Exposed for unit tests.
+///
+/// `closed` on the returned struct is false when the opening `---` was found
+/// but no closing `---` delimiter appeared before EOF — the caller can fail
+/// the file honestly instead of treating the swallowed body as frontmatter.
 pub fn parse_skill_frontmatter(raw: &str) -> Option<SkillFrontmatter> {
     let mut lines = raw.lines();
     let first = lines.next()?.trim();
@@ -482,14 +503,18 @@ pub fn parse_skill_frontmatter(raw: &str) -> Option<SkillFrontmatter> {
         return None;
     }
     let mut body = String::new();
+    let mut closed = false;
     for line in lines {
         if line.trim() == "---" {
+            closed = true;
             break;
         }
         body.push_str(line);
         body.push('\n');
     }
-    Some(SkillFrontmatter::parse(&body))
+    let mut fm = SkillFrontmatter::parse(&body);
+    fm.closed = closed;
+    Some(fm)
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -498,6 +523,11 @@ pub struct SkillFrontmatter {
     pub description: Option<String>,
     pub when_to_use: Option<String>,
     pub allowed_tools: Option<String>,
+    /// True when the `---` block was terminated by a closing `---` line.
+    /// False for an unterminated block (or when constructed via `Default`
+    /// from a file with no frontmatter at all — the caller distinguishes
+    /// the two via `parse_skill_frontmatter` returning `None`).
+    pub closed: bool,
 }
 
 impl SkillFrontmatter {
@@ -565,9 +595,30 @@ fn check_one_skill_md(
 ) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let raw = strip_bom(&raw);
-    let fm = parse_skill_frontmatter(raw).unwrap_or_default();
-
     let rel = rel_unix(root, path);
+
+    // A file with no frontmatter at all → the existing description-missing
+    // fail (kept byte-for-byte so hand-written skills degrade the same way).
+    let Some(fm) = parse_skill_frontmatter(raw) else {
+        return Ok(CheckResult::fail(
+            &format!("{prefix}.description"),
+            "SKILL.md has a `description`",
+            format!("{rel}: frontmatter is missing `description`"),
+            "To fix: add `description: <one sentence, use when ...>` to the frontmatter.",
+        ));
+    };
+
+    // An unterminated `---` block swallows the whole body as frontmatter —
+    // the description checks below could otherwise pass on a malformed file.
+    // Fail BEFORE the field checks so the structural defect is what surfaces.
+    if !fm.closed {
+        return Ok(CheckResult::fail(
+            &format!("{prefix}.frontmatter_unclosed"),
+            "SKILL.md frontmatter block is closed by a `---` delimiter",
+            format!("{rel}: frontmatter block is not closed (missing the closing `---`)"),
+            "To fix: add a closing `---` line after the last frontmatter field.",
+        ));
+    }
 
     // description present.
     let Some(description) = fm.description.as_deref() else {
@@ -657,6 +708,38 @@ fn check_one_skill_md(
         }
     }
 
+    // Skill-directory vs frontmatter name: agents load skills by DIRECTORY
+    // (`skills/<name>/SKILL.md` / `.codex/skills/<name>/SKILL.md`), so a
+    // directory that disagrees with the advertised `name:` is a discoverability
+    // defect even when the name itself matches the canonical project name.
+    // Only fires for paths nested under a `skills/` dir — a root `SKILL.md`
+    // has no skill directory to disagree with. Warn (not fail): some agents
+    // read the frontmatter `name` and ignore the path.
+    let under_skills_dir = path
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|gp| gp.file_name())
+        .is_some_and(|n| n == "skills");
+    if under_skills_dir {
+        if let (Some(dir), Some(fm_name)) = (
+            path.parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str()),
+            fm.name.as_deref(),
+        ) {
+            if dir != fm_name {
+                let mut r = CheckResult::warn(
+                    &format!("{prefix}.dir_name_mismatch"),
+                    "skill directory name matches its frontmatter `name`",
+                    format!("{rel}: directory `{dir}` != frontmatter `name: {fm_name}`"),
+                    "To fix: rename the skill directory (or the frontmatter `name`) so they match — agents load skills by directory.",
+                );
+                r.location = Some((rel.clone(), None));
+                return Ok(r);
+            }
+        }
+    }
+
     // description leads with an alpha word (action-verb heuristic).
     let first_word = combined.split_whitespace().next().unwrap_or("");
     let starts_alpha = first_word.chars().next().is_some_and(char::is_alphabetic);
@@ -674,7 +757,7 @@ fn check_one_skill_md(
     if fm
         .when_to_use
         .as_deref()
-        .map_or(true, |w| w.trim().is_empty())
+        .is_none_or(|w| w.trim().is_empty())
     {
         let mut r = CheckResult::warn(
             &format!("{prefix}.when_to_use"),
@@ -846,4 +929,201 @@ fn read_optional(path: &Path) -> Result<Option<String>> {
     std::fs::read_to_string(path)
         .with_context(|| format!("read {}", path.display()))
         .map(Some)
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for the review-hardening checks: both URL-drift fields
+    //! surface, unterminated frontmatter fails, and the skill directory name
+    //! is cross-checked against the frontmatter `name`.
+
+    use super::*;
+    use crate::verify::result::Severity;
+
+    fn scratch() -> std::path::PathBuf {
+        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root =
+            std::env::temp_dir().join(format!("skillpack-discovery-{}-{}", std::process::id(), n));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn write(root: &std::path::Path, rel: &str, contents: &str) -> std::path::PathBuf {
+        let p = root.join(rel);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&p, contents).unwrap();
+        p
+    }
+
+    #[test]
+    fn url_drift_reports_both_fields_when_both_drift() {
+        let root = scratch();
+        write(
+            &root,
+            ".claude-plugin/plugin.json",
+            r#"{
+  "name": "widget",
+  "description": "does things",
+  "version": "1.0.0",
+  "author": { "name": "Jane" },
+  "homepage": "https://stale.example/a",
+  "repository": "https://stale.example/b"
+}
+"#,
+        );
+        let r = check_plugin_json(&root, &Some("https://github.com/acme/widget".into())).unwrap();
+        assert_eq!(r.severity, Severity::Warn);
+        assert_eq!(r.check_id, "discovery.plugin.url_drift");
+        assert!(
+            r.message.contains("homepage") && r.message.contains("repository"),
+            "both drifted fields must be named, got: {}",
+            r.message
+        );
+        assert!(r.message.contains("stale.example/a"));
+        assert!(r.message.contains("stale.example/b"));
+        assert!(r.message.contains("github.com/acme/widget"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn url_drift_single_field_only_names_that_field() {
+        let root = scratch();
+        write(
+            &root,
+            ".claude-plugin/plugin.json",
+            r#"{
+  "name": "widget",
+  "description": "does things",
+  "version": "1.0.0",
+  "author": { "name": "Jane" },
+  "homepage": "https://stale.example/a",
+  "repository": "https://github.com/acme/widget"
+}
+"#,
+        );
+        let r = check_plugin_json(&root, &Some("https://github.com/acme/widget".into())).unwrap();
+        assert_eq!(r.check_id, "discovery.plugin.url_drift");
+        assert!(
+            r.message.contains("homepage") && !r.message.contains("repository"),
+            "only homepage drifted; repository must stay out of the message, got: {}",
+            r.message
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn url_drift_no_warning_when_both_match() {
+        let root = scratch();
+        write(
+            &root,
+            ".claude-plugin/plugin.json",
+            r#"{
+  "name": "widget",
+  "description": "does things",
+  "version": "1.0.0",
+  "author": { "name": "Jane" },
+  "homepage": "https://github.com/acme/widget",
+  "repository": "https://github.com/acme/widget"
+}
+"#,
+        );
+        let r = check_plugin_json(&root, &Some("https://github.com/acme/widget".into())).unwrap();
+        assert_eq!(r.check_id, "discovery.plugin");
+        assert_eq!(r.severity, Severity::Pass);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unterminated_skill_frontmatter_fails() {
+        let root = scratch();
+        let path = write(
+            &root,
+            "skills/foo/SKILL.md",
+            "---\nname: foo\ndescription: \"looks valid\"\n", // no closing `---`
+        );
+        let r = check_one_skill_md(&root, &path, "discovery.skill", &None).unwrap();
+        assert_eq!(r.severity, Severity::Error);
+        assert_eq!(r.check_id, "discovery.skill.frontmatter_unclosed");
+        assert!(r.message.contains("not closed"), "got: {}", r.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn skill_dir_name_mismatch_warns() {
+        let root = scratch();
+        // Directory `bar`, frontmatter `name: foo` — agents load by directory.
+        let path = write(
+            &root,
+            "skills/bar/SKILL.md",
+            "---\nname: foo\ndescription: \"hello\"\nwhen_to_use: \"x\"\n---\n\nbody\n",
+        );
+        let r = check_one_skill_md(&root, &path, "discovery.skill", &None).unwrap();
+        assert_eq!(r.severity, Severity::Warn);
+        assert_eq!(r.check_id, "discovery.skill.dir_name_mismatch");
+        assert!(
+            r.message.contains("`bar`") && r.message.contains("foo"),
+            "got: {}",
+            r.message
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn skill_dir_name_matching_is_clean() {
+        let root = scratch();
+        let path = write(
+            &root,
+            "skills/foo/SKILL.md",
+            "---\nname: foo\ndescription: \"hello\"\nwhen_to_use: \"x\"\n---\n\nbody\n",
+        );
+        let r = check_one_skill_md(&root, &path, "discovery.skill", &None).unwrap();
+        assert_eq!(r.severity, Severity::Pass);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn codex_skill_dir_name_mismatch_warns() {
+        let root = scratch();
+        let path = write(
+            &root,
+            ".codex/skills/bar/SKILL.md",
+            "---\nname: foo\ndescription: \"hello\"\nwhen_to_use: \"x\"\n---\n\nbody\n",
+        );
+        let r = check_one_skill_md(&root, &path, "discovery.codex.skill", &None).unwrap();
+        assert_eq!(r.severity, Severity::Warn);
+        assert_eq!(r.check_id, "discovery.codex.skill.dir_name_mismatch");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unterminated_cursor_frontmatter_fails() {
+        let root = scratch();
+        let path = write(
+            &root,
+            ".cursor/rules/foo.mdc",
+            "---\ndescription: \"apply when x\"\n", // no closing `---`
+        );
+        let r = super::check_one_mdc(&root, &path).unwrap();
+        assert_eq!(r.severity, Severity::Error);
+        assert_eq!(r.check_id, "discovery.cursor.mdc.frontmatter_unclosed");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unterminated_opencode_frontmatter_fails() {
+        let root = scratch();
+        let path = write(
+            &root,
+            ".opencode/agents/foo.md",
+            "---\ndescription: \"does things\"\n", // no closing `---`
+        );
+        let r = super::check_one_opencode_agent(&root, &path).unwrap();
+        assert_eq!(r.severity, Severity::Error);
+        assert_eq!(r.check_id, "discovery.opencode.agent.frontmatter_unclosed");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

@@ -109,6 +109,21 @@ impl Config {
         Ok(path)
     }
 
+    /// Write the config only when its serialized form differs from what is
+    /// currently on disk. Returns `true` when a write happened. Keeps
+    /// `update` from churning `skillpack.toml`'s mtime (and rewriting a
+    /// user's hand-formatted file) when nothing actually changed.
+    pub fn save_if_changed(&self, root: &Path) -> Result<bool> {
+        let serialized =
+            toml::to_string_pretty(self).context("failed to serialize skillpack.toml")?;
+        let current = fs::read_to_string(Self::path(root)).unwrap_or_default();
+        if current == serialized {
+            return Ok(false);
+        }
+        self.save(root)?;
+        Ok(true)
+    }
+
     /// Validate structural invariants that `verify` cannot catch later.
     /// Called by `load` right after parse. Only checks `skill.name` —
     /// a non-kebab name corrupts every generated artifact at the source

@@ -48,11 +48,11 @@ pub fn run(profile: &ProjectProfile, prompter: &dyn Prompter) -> Result<Intent> 
     let one_line_description = q1.trim().to_string();
 
     let q2 = prompter.text(
-        "When should an agent use this? (trigger verbs or scenarios, comma-separated)",
+        "When should an agent use this? (trigger verbs or scenarios, comma- or semicolon-separated)",
         "",
     )?;
     let when_to_use_phrases: Vec<String> = q2
-        .split(',')
+        .split([',', ';'])
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();

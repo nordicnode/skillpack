@@ -19,6 +19,11 @@ use super::{find_kv_colon, rel_unix};
 pub struct CursorFrontmatter {
     pub description: Option<String>,
     pub always_apply: Option<String>,
+    /// True when the `---` block was terminated by a closing `---` line.
+    /// False for an unterminated block (or `Default` when the caller found
+    /// no leading `---` at all — `parse_cursor_mdc_frontmatter` returns
+    /// `None` for that case, so the two are distinguishable).
+    pub closed: bool,
 }
 
 impl CursorFrontmatter {
@@ -67,14 +72,18 @@ pub fn parse_cursor_mdc_frontmatter(raw: &str) -> Option<CursorFrontmatter> {
         return None;
     }
     let mut body = String::new();
+    let mut closed = false;
     for line in lines {
         if line.trim() == "---" {
+            closed = true;
             break;
         }
         body.push_str(line);
         body.push('\n');
     }
-    Some(CursorFrontmatter::parse(&body))
+    let mut fm = CursorFrontmatter::parse(&body);
+    fm.closed = closed;
+    Some(fm)
 }
 
 /// Validate a single `.cursor/rules/<name>.mdc` against Cursor's documented
@@ -84,9 +93,27 @@ pub fn parse_cursor_mdc_frontmatter(raw: &str) -> Option<CursorFrontmatter> {
 pub(crate) fn check_one_mdc(root: &Path, path: &Path) -> Result<CheckResult> {
     let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let raw = super::strip_bom(&raw);
-    let fm = parse_cursor_mdc_frontmatter(raw).unwrap_or_default();
-
     let rel = rel_unix(root, path);
+
+    // No frontmatter at all → the existing description-missing fail.
+    let Some(fm) = parse_cursor_mdc_frontmatter(raw) else {
+        return Ok(CheckResult::fail(
+            "discovery.cursor.mdc.description",
+            ".mdc has a `description`",
+            format!("{rel}: frontmatter is missing `description`"),
+            "To fix: add `description: <one sentence, apply when ...>` to the frontmatter.",
+        ));
+    };
+
+    // Unterminated `---` block → the body is being parsed as frontmatter.
+    if !fm.closed {
+        return Ok(CheckResult::fail(
+            "discovery.cursor.mdc.frontmatter_unclosed",
+            ".mdc frontmatter block is closed by a `---` delimiter",
+            format!("{rel}: frontmatter block is not closed (missing the closing `---`)"),
+            "To fix: add a closing `---` line after the last frontmatter field.",
+        ));
+    }
 
     let Some(description) = fm.description.as_deref() else {
         return Ok(CheckResult::fail(

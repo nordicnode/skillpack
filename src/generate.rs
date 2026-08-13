@@ -218,7 +218,33 @@ pub fn render_targets(
             continue;
         }
         match target {
-            Target::Claude => out.extend(render(profile, intent, template_dir)?),
+            Target::Claude => {
+                // Inline the three-file Claude render so we reuse the `tera`
+                // built above — `render()` would rebuild it (and re-derive
+                // the context) for no reason. Output order matches `render()`:
+                // marketplace, plugin, SKILL.md.
+                let mut c = ctx.clone();
+                c.insert("noun", "skill");
+                let marketplace = tera
+                    .render("marketplace.json", &c)
+                    .context("rendering marketplace.json")?;
+                let plugin = tera
+                    .render("plugin.json", &c)
+                    .context("rendering plugin.json")?;
+                let skill = tera.render("SKILL.md", &c).context("rendering SKILL.md")?;
+                out.push(GeneratedFileOutput {
+                    rel_path: ".claude-plugin/marketplace.json".to_string(),
+                    contents: marketplace,
+                });
+                out.push(GeneratedFileOutput {
+                    rel_path: ".claude-plugin/plugin.json".to_string(),
+                    contents: plugin,
+                });
+                out.push(GeneratedFileOutput {
+                    rel_path: format!("skills/{name}/SKILL.md"),
+                    contents: skill,
+                });
+            }
             Target::Cursor => {
                 let mut c = ctx.clone();
                 c.insert("noun", "rule");

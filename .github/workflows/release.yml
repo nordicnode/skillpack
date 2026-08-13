@@ -27,9 +27,12 @@ jobs:
           toolchain: '1.95.0'
       - uses: Swatinem/rust-cache@v2
       - name: Verify the tag version matches Cargo.toml
+        # Read `version` only from the `[package]` table (not a bare `^version`
+        # grep, which would break if a workspace-level `version` line ever
+        # appears above it).
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          cargo_ver=$(grep -E '^version' Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          cargo_ver=$(awk 'BEGIN{in_pkg=0} /^\[package\]/{in_pkg=1; next} /^\[/{in_pkg=0} in_pkg && /^version[[:space:]]*=/{gsub(/[" ]/, "", $3); print $3; exit}' Cargo.toml)
           if [ "$tag" != "v$cargo_ver" ]; then
             echo "Tag $tag does not match Cargo.toml version $cargo_ver (expected v$cargo_ver)"
             exit 1

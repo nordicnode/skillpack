@@ -15,6 +15,11 @@ use super::{find_kv_colon, is_valid_kebab, rel_unix};
 pub struct OpenCodeFrontmatter {
     pub description: Option<String>,
     pub mode: Option<String>,
+    /// True when the `---` block was terminated by a closing `---` line.
+    /// False for an unterminated block (or `Default` when the caller found
+    /// no leading `---` at all — `parse_opencode_agent_frontmatter` returns
+    /// `None` for that case, so the two are distinguishable).
+    pub closed: bool,
 }
 
 impl OpenCodeFrontmatter {
@@ -46,14 +51,18 @@ pub fn parse_opencode_agent_frontmatter(raw: &str) -> Option<OpenCodeFrontmatter
         return None;
     }
     let mut body = String::new();
+    let mut closed = false;
     for line in lines {
         if line.trim() == "---" {
+            closed = true;
             break;
         }
         body.push_str(line);
         body.push('\n');
     }
-    Some(OpenCodeFrontmatter::parse(&body))
+    let mut fm = OpenCodeFrontmatter::parse(&body);
+    fm.closed = closed;
+    Some(fm)
 }
 
 /// Validate a single `.opencode/agents/<name>.md` against OpenCode's
@@ -71,6 +80,16 @@ pub(crate) fn check_one_opencode_agent(root: &Path, path: &Path) -> Result<Check
             "To fix: add a `---` frontmatter block with `description:`.",
         ));
     };
+
+    // Unterminated `---` block → the body is being parsed as frontmatter.
+    if !fm.closed {
+        return Ok(CheckResult::fail(
+            "discovery.opencode.agent.frontmatter_unclosed",
+            "frontmatter block is closed by a `---` delimiter",
+            "frontmatter block is not closed (missing the closing `---`)",
+            "To fix: add a closing `---` line after the last frontmatter field.",
+        ));
+    }
 
     // `description` is required per opencode.ai/docs/agents.
     let desc = fm.description.as_deref().unwrap_or("");
