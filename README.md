@@ -68,6 +68,8 @@ Four `fd` search tasks, run with [OpenCode](https://opencode.ai) on a plain clon
 
 Both conditions got all four answers right — the win is *efficiency*, not capability. The biggest one: the plain-clone agent hit fd's `--max-results`/`-x` incompatibility and retried four times; the generated agent had the verified flag mapping and answered in one step. Full methodology and honest limitations (including one spot where the skillpack agent was *less* accurate) are in [`docs/agent-demo.md`](docs/agent-demo.md).
 
+That demo was a one-off. The repeatable harness lives in [`scripts/benchmark/`](scripts/benchmark/) — one command (`run.sh --runs 3`) runs the same fd A/B through OpenCode with medians and evidence scoring, and it fixes the demo's confound by holding the agent wrapper constant (no `--agent`; the skillpack condition differs only by its generated `AGENTS.md`). Methodology and how to run it: [`docs/benchmark.md`](docs/benchmark.md).
+
 ## Use it in CI
 
 `verify` exits non-zero when something's broken, so it drops straight into CI as a pull-request gate. A reusable workflow ships in this repo — one line in your workflow:

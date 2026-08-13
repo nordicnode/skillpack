@@ -810,7 +810,16 @@ fn check_one_skill_md(
 
     // description leads with an alpha word (action-verb heuristic).
     let first_word = combined.split_whitespace().next().unwrap_or("");
-    let starts_alpha = first_word.chars().next().is_some_and(char::is_alphabetic);
+    // A description may legitimately open with a code-formatted name
+    // (`` `fd` is a program to ... ``) — strip a wrapping pair of backticks
+    // before the alpha heuristic so the check rewards real prose instead of
+    // punishing code fences. Badge/markup leakage (``[![CICD]...]``) still
+    // fails: its first token has no alpha core.
+    let word_core = first_word
+        .strip_prefix('`')
+        .and_then(|w| w.strip_suffix('`'))
+        .unwrap_or(first_word);
+    let starts_alpha = word_core.chars().next().is_some_and(char::is_alphabetic);
     if !starts_alpha {
         return Ok(CheckResult::warn(
             &format!("{prefix}.description_action_verb"),

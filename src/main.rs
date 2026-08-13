@@ -151,11 +151,26 @@ fn auto_intent(
             .collect()
     };
 
-    // CLI projects: the bare tool name is the canonical invocation (the same
-    // default the interview offers). Libraries: --import is required — a
-    // library skill with no import pattern can't tell the agent how to use it.
+    // CLI projects: prefer the RESOLVED binary's file stem (a crate with a
+    // renamed `[[bin]]` — fd-find → `fd` — would otherwise be documented as
+    // the package name and the pre-commit verify would fail spawning it),
+    // falling back to the package name for runtime-style argvs (`go run .`,
+    // `node script.js`). Libraries: --import is required — a library skill
+    // with no import pattern can't tell the agent how to use it.
     let (invocation_command, import_pattern) = if profile.has_cli {
-        (Some(profile.name.clone()), None)
+        let invocation = profile
+            .cli_command
+            .as_ref()
+            .and_then(|c| c.first())
+            // Only trust an absolute path to an existing executable (the
+            // built artifact / resolved PATH script); a bare runtime name
+            // like `go` or `node` says nothing about the tool's name.
+            .filter(|s| Path::new(s).is_file())
+            .and_then(|s| Path::new(s).file_stem())
+            .and_then(|s| s.to_str())
+            .map(String::from)
+            .unwrap_or_else(|| profile.name.clone());
+        (Some(invocation), None)
     } else {
         match import.map(str::trim).filter(|s| !s.is_empty()) {
             Some(p) => (None, Some(p.to_string())),
@@ -1480,6 +1495,45 @@ mod confirm_tests {
     fn proceed_with_warnings_routes_through_overridable_confirm() {
         assert!(!with_confirm(false, || CONFIRM.proceed_with_warnings()));
         assert!(with_confirm(true, || CONFIRM.proceed_with_warnings()));
+    }
+
+    // `--auto` on a crate with a renamed [[bin]] (fd-find ships `fd`) must
+    // document the RESOLVED binary's stem, not the package name — otherwise
+    // the pre-commit verify fails spawning `fd-find --help` and `--auto`
+    // refuses to write. Runtime-style argvs (`go run .`, `node script.js`)
+    // fall back to the package name.
+    #[test]
+    fn auto_intent_uses_resolved_binary_stem_for_renamed_bins() {
+        // Point at a real file so the resolver trusts it.
+        let bin = std::env::current_exe().unwrap(); // an existing executable
+        let stem = bin.file_stem().unwrap().to_str().unwrap().to_string();
+        let profile = types::ProjectProfile {
+            name: "fd-find".into(),
+            language: types::Language::Rust,
+            has_cli: true,
+            cli_command: Some(vec![bin.to_string_lossy().to_string(), "--help".into()]),
+            cli_help_output: Some("usage".into()),
+            cli_subcommand_help: Vec::new(),
+            repo_url: None,
+            license: Some("MIT".into()),
+            version: None,
+            authors: None,
+            description_hint: Some("Find files by name".into()),
+            diag: types::DiagTrace::default(),
+        };
+        let intent = auto_intent(&profile, &[], None).unwrap();
+        assert_eq!(
+            intent.invocation_command.as_deref(),
+            Some(stem.as_str()),
+            "renamed bin must be documented as its real name"
+        );
+
+        // `go run .` — a bare runtime name is NOT a resolvable file → package
+        // name wins.
+        let mut go = profile.clone();
+        go.cli_command = Some(vec!["go".into(), "run".into(), ".".into()]);
+        let intent = auto_intent(&go, &[], None).unwrap();
+        assert_eq!(intent.invocation_command.as_deref(), Some("fd-find"));
     }
 
     // Regression: a README hint with a multibyte char across byte 120 must

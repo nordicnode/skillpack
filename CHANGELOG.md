@@ -8,6 +8,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `init --auto` README hint no longer leaks badge/markup rows (shields.io,
+  CI status, language links) into the derived description — `read_readme_hint`
+  now skips lines that are markup-only, so a repo like fd whose README leads
+  with a badge banner gets the real tagline (previously the description
+  became a badge URL and the generated pack failed verify at 93/100).
+- `verify`'s `description_action_verb` check accepts descriptions that open
+  with a code-formatted name (`` `fd` is a program to ... ``) — the leading
+  backtick pair is stripped before the alpha-word heuristic. Markup/badge
+  leakage still fails.
+
 ### Added
 
 - `init --auto`: zero-flag, zero-prompt init. The intent is derived entirely

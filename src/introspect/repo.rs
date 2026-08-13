@@ -70,6 +70,33 @@ pub(crate) fn detect_license(root: &Path) -> Option<String> {
 /// We only read the first slice of the README to bound cost.
 const README_HEAD_LINES: usize = 500;
 
+/// True if the line is badge/markup only — markdown images and links, inline
+/// HTML, and the `[![alt](img)](url)` wrapper form — with no prose left
+/// after stripping. Badge rows (shields.io / CI status / language flags)
+/// commonly lead READMEs; they must never leak into the description hint.
+fn is_markup_only(line: &str) -> bool {
+    static RE: std::sync::OnceLock<[regex::Regex; 3]> = std::sync::OnceLock::new();
+    let [img, link, html] = RE.get_or_init(|| {
+        [
+            // Images first: `![alt](url)` (inner of the badge wrapper).
+            regex::Regex::new(r"!\[[^\]]*\]\([^)]*\)").unwrap(),
+            // Then links: `[text](url)` — after the image strip, the outer
+            // `[![alt](img)](url)` wrapper collapses to `[](url)` and is
+            // consumed here too.
+            regex::Regex::new(r"\[[^\]]*\]\([^)]*\)").unwrap(),
+            // Inline HTML tags last.
+            regex::Regex::new(r"<[^>]*>").unwrap(),
+        ]
+    });
+    let mut s = line.to_string();
+    s = img.replace_all(&s, "").into_owned();
+    s = link.replace_all(&s, "").into_owned();
+    s = html.replace_all(&s, "").into_owned();
+    // Nothing letter-like left ⇒ the line carried no prose (URLs, alt text,
+    // and tag names are all stripped with their surrounding markup).
+    !s.chars().any(|c| c.is_ascii_alphabetic())
+}
+
 /// First paragraph(s) of the README, capped for cost. Used only as a *hint*
 /// surfaced under `--verbose`; the interview is the source of truth.
 pub(crate) fn read_readme_hint(root: &Path) -> Option<String> {
@@ -82,15 +109,19 @@ pub(crate) fn read_readme_hint(root: &Path) -> Option<String> {
                 .collect::<Vec<_>>()
                 .join("\n");
             // Find the first non-heading, non-empty prose paragraph. Skip
-            //   raw HTML tags (READMEs often lead with `<div`, `<p`, `<a`)
-            //   as well as markdown headings + image lines so the surfaced
-            //   hint is prose a maintainer would actually want in a
-            //   description, not logo/banner markup.
+            //   raw HTML tags (READMEs often lead with `<div`, `<p`, `<a`),
+            //   markdown headings + image lines, and badge/markup-only rows
+            //   (shields.io links, CI status) so the surfaced hint is prose
+            //   a maintainer would actually want in a description.
             let paragraph = head
                 .lines()
                 .skip_while(|l| {
                     let t = l.trim();
-                    t.is_empty() || t.starts_with('#') || t.starts_with('!') || t.starts_with('<')
+                    t.is_empty()
+                        || t.starts_with('#')
+                        || t.starts_with('!')
+                        || t.starts_with('<')
+                        || is_markup_only(t)
                 })
                 .take_while(|l| !l.trim().is_empty())
                 .collect::<Vec<_>>()
@@ -151,6 +182,39 @@ mod tests {
         assert!(
             hint.contains("frobs widgets"),
             "desc_hint must land on first prose line, got: {hint:?}"
+        );
+    }
+
+    #[test]
+    fn read_readme_hint_skips_badge_rows() {
+        // Reproduces the fd README shape: a heading, then a row of shields.io
+        // / CI badge links, then the real tagline. The badge row must not
+        // leak into the hint (it would otherwise become the --auto
+        // description and fail verify's "leads with an action" check).
+        let dir = std::env::temp_dir().join(format!(
+            "skillpack-readme-badges-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("README.md"),
+            "# fd\n\n\
+             [![CICD](https://github.com/sharkdp/fd/actions/workflows/CICD.yml/badge.svg)](https://github.com/sharkdp/fd/actions/workflows/CICD.yml) \
+             [![Version info](https://img.shields.io/crates/v/fd-find.svg)](https://crates.io/crates/fd-find) \
+             [[中文](https://github.com/cha0ran/fd-zh)] [[한국어](https://github.com/spearkkk/fd-kor)]\n\n\
+             fd is a simple, fast and user-friendly alternative to find.\n",
+        )
+        .unwrap();
+        let hint = read_readme_hint(&dir).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            hint, "fd is a simple, fast and user-friendly alternative to find.",
+            "desc_hint must skip badge rows and land on the tagline, got: {hint:?}"
         );
     }
 }

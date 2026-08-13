@@ -1,0 +1,9 @@
+Four independent tasks. Do all four, one at a time, in order. For each: show the exact command, run it, and paste the relevant output.
+
+Q1. Find all `.rs` files excluding `target/`. Show the exact command, then run it and paste the first 5 lines.
+
+Q2. Make the search case-sensitive. Find files matching "README". Run it; paste the first 3 lines.
+
+Q3. Disable fd's gitignore-respecting behavior so ignored files show up. Why does your command reveal them?
+
+Q4. Find one file matching `*.rs` and run `wc -l` on it in a single fd command, using fd's exec-per-result flag.
