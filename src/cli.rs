@@ -301,10 +301,12 @@ pub fn resolve_targets(raw: &[String]) -> anyhow::Result<Vec<Target>> {
                 Target::Windsurf,
                 Target::Aider,
             ]);
+        } else if r == "freebuff" || r == "agents.md" || r == "agents-md" {
+            out.push(Target::AgentsMd);
         } else {
             out.push(Target::from_str(r, true).map_err(|s| {
                 anyhow::anyhow!(
-                    "invalid --target `{s}`; expected claude|cursor|codex|opencode|copilot|agentsmd|claude-md|gemini|windsurf|aider|all"
+                    "invalid --target `{s}`; expected claude|cursor|codex|opencode|copilot|agentsmd|claude-md|gemini|windsurf|aider|freebuff|all"
                 )
             })?);
         }
@@ -318,4 +320,19 @@ pub fn resolve_targets(raw: &[String]) -> anyhow::Result<Vec<Target>> {
         }
     }
     Ok(seen)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_targets_handles_freebuff_and_aliases() {
+        let targets = resolve_targets(&["freebuff".to_string(), "agents.md".to_string()]).unwrap();
+        assert_eq!(targets, vec![Target::AgentsMd]);
+
+        let all = resolve_targets(&["all".to_string()]).unwrap();
+        assert_eq!(all.len(), 10);
+        assert!(all.contains(&Target::AgentsMd));
+    }
 }
