@@ -10,6 +10,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- README rewritten to be user-facing: plain-language quick start, "what you
+  get" per ecosystem, and a measured-results section up front. The full
+  check list, every CLI flag, and the platform notes moved to the new
+  `docs/reference.md`, which the README links to.
 - Declared MSRV raised to Rust 1.85 (`rust-version` in `Cargo.toml`), matching
   what the locked `clap`/`tera` actually require — `cargo install` on Rust
   1.74–1.84 previously failed with a hard toolchain error. README badge and
@@ -38,6 +42,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `release.yml` reads the crate version from the `[package]` table only — the
   old `^version` grep would break if a workspace-level `version` line ever
   appeared.
+
+### Fixed
+
+- `HELP_TIMEOUT` raised 15s → 30s: the Windows CI `go run .` round trip timed
+  out again under parallel-test load (the same flake that raised it 8s → 15s
+  previously). The go round-trip test now also pre-warms the build cache
+  before `init`, mirroring the rust-cli / csharp fixtures.
 
 ## [0.11.2] - 2026-07-13
 

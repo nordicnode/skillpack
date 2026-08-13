@@ -1945,6 +1945,17 @@ fn go_cli_init_then_verify_round_trip() {
         license = \"MIT\"\n";
     fs::write(root.join("skillpack.toml"), toml).unwrap();
 
+    // Pre-warm the Go build cache so the `go run . --help` spawns inside
+    // init's pre-commit verify don't time out on a cold compile — same
+    // pattern as the rust-cli / csharp fixtures pre-building before init
+    // (a cold `go run` under parallel CI load can exceed HELP_TIMEOUT;
+    // the binary this emits into the temp fixture root is discarded).
+    Command::new("go")
+        .args(["build", "./"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
     Command::cargo_bin("skillpack")
         .unwrap()
         .args([
