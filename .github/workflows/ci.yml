@@ -161,22 +161,31 @@ jobs:
           echo "package contents clean ($(wc -l < /tmp/pkg.txt) files)"
           cat /tmp/pkg.txt
 
-  # The reusable workflow (.github/workflows/skillpack.yml) pins a
-  # `skillpack-version` default that must track Cargo.toml's version. This
-  # fails the release-plz PR (and any manual bump) until the two are in sync,
-  # so a released tag can never point consumers at a stale crate version.
+  # The version appears in three places that must move together: Cargo.toml's
+  # [package].version, the reusable workflow's `skillpack-version` default
+  # (.github/workflows/skillpack.yml), and the committed plugin.json manifest.
+  # release-plz bumps only Cargo.toml, so this fails its PR (and any manual
+  # bump) until the other two are synced — the drift that broke the
+  # self-dogfood `--min-score 100` verify on the 0.12.1 release.
   version-sync:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: verify reusable-workflow version matches Cargo.toml
+      - name: verify version is synced across Cargo.toml, skillpack.yml, plugin.json
         run: |
           cargo_ver=$(awk 'BEGIN{in_pkg=0} /^\[package\]/{in_pkg=1; next} /^\[/{in_pkg=0} in_pkg && /^version[[:space:]]*=/{gsub(/[" ]/, "", $3); print $3; exit}' Cargo.toml)
           wf_ver=$(grep -oP "default: '\K[0-9]+\.[0-9]+\.[0-9]+" .github/workflows/skillpack.yml | head -1)
+          plugin_ver=$(grep -oP '"version": "\K[0-9]+\.[0-9]+\.[0-9]+' .claude-plugin/plugin.json | head -1)
+          fail=0
           if [ "$cargo_ver" != "$wf_ver" ]; then
             echo "::error::Cargo.toml version ($cargo_ver) != skillpack.yml skillpack-version default ($wf_ver)"
-            exit 1
+            fail=1
           fi
+          if [ "$cargo_ver" != "$plugin_ver" ]; then
+            echo "::error::Cargo.toml version ($cargo_ver) != plugin.json version ($plugin_ver); run `skillpack init` to regenerate"
+            fail=1
+          fi
+          if [ "$fail" = "1" ]; then exit 1; fi
           echo "version sync OK: $cargo_ver"
 
   # Code coverage via cargo-llvm-cov (prebuilt, faster and less flaky than
