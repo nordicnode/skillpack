@@ -1,6 +1,5 @@
 <div align="center">
   <img src="docs/logo.png" width="480" alt="skillpack logo">
-  <h1>skillpack</h1>
   <p><strong>The agent-distribution layer for modern OSS tools and libraries.</strong></p>
   <p>Generate, verify, and maintain agent instructions across Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, Freebuff, and 10+ AI coding ecosystems.</p>
 
