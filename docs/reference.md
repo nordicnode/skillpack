@@ -63,9 +63,10 @@ without false-positive failures from the other ecosystems.
 - flags the CLI advertises in `--help` that `SKILL.md` doesn't document (a
   discoverability warning)
 - for CLIs with subcommands (clap-style `Commands:` sections), `init` captures
-  each subcommand's `--help` and documents them in a `### Subcommands` block;
-  `verify` spawns `<cli> <sub> --help` per documented subcommand and
-  drift-checks its flags
+  the subcommand tree recursively (each subcommand's `--help`, plus nested
+  sub-subcommands like `git remote add`) and documents them in a `### Subcommands`
+  block with two-space nesting; `verify` spawns `<cli> <path...> --help` per
+  documented subcommand path and drift-checks its flags
 - `<cli> --version` output contains the `plugin.json` version (advisory —
   warns on mismatch, skips silently if `--version` exits non-zero or prints
   nothing)
@@ -135,7 +136,9 @@ No-op when there's no fixable drift.
 | `doctor --format human\|json` | read-only diagnosis as serialized `ProjectProfile` for CI (default: human) — JSON form does not include category preview |
 | `--root <DIR>`           | project root to operate on (default: current dir); available on `init`, `verify`, `doctor`, `update`, `diff`      |
 | `--verbose`             | print what `skillpack` detected in the repo (introspection)      |
-| `--debug`             | print every subprocess call                                       |
+| `--debug`             | print every subprocess call (alias for `--log-level debug`)       |
+| `--log-level <LEVEL>` | structured-diagnostic verbosity: `off`/`error`/`warn`/`info`/`debug`/`trace` (default `warn`) |
+| `--log-format <FMT>`  | structured-diagnostic shape: `human` (default) or `json` (one JSON object per event on stderr) |
 
 Notes:
 

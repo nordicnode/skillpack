@@ -47,8 +47,6 @@ pub struct VerifyInput {
     /// `discovery` itself calling `coerce_kebab` or building a `ProjectProfile`.
     /// `None` only when introspection couldn't derive a name at all.
     pub profile_name: Option<String>,
-    /// Print every subprocess spawn to stderr (design §8.2 --debug).
-    pub debug: bool,
     /// Stdin bytes to feed the CLI during `verify` spawns. For interactive
     /// CLIs that block on stdin. `None` uses `/dev/null` (default).
     pub verify_stdin: Option<String>,
@@ -131,7 +129,6 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
             &input.spawn_root,
             &skill_md,
             cmd.as_deref(),
-            input.debug,
             input.verify_stdin.as_deref(),
         );
         invocation::run(&inv, &mut report)?;

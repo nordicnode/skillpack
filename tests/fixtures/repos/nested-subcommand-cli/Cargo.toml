@@ -1,0 +1,9 @@
+[package]
+name = "sample-nested"
+version = "0.1.0"
+license = "MIT"
+edition = "2021"
+
+[[bin]]
+name = "sample-nested"
+path = "src/main.rs"

@@ -20,9 +20,74 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub verbose: bool,
 
-    /// Print every subprocess call skillpack makes.
+    /// Print every subprocess call skillpack makes (alias for
+    /// `--log-level debug`).
     #[arg(long, global = true)]
     pub debug: bool,
+
+    /// Structured-diagnostic verbosity. Spawn calls and introspection traces
+    /// route through this logger (stderr); `--debug` is equivalent to
+    /// `--log-level debug`. Default `warn` keeps a plain run silent.
+    #[arg(long, global = true, value_enum, default_value_t = LogLevel::Warn)]
+    pub log_level: LogLevel,
+
+    /// Structured-diagnostic output shape. `human` (default) prints compact
+    /// single-line events; `json` emits one JSON object per event for
+    /// CI/log pipelines.
+    #[arg(long, global = true, value_enum, default_value_t = LogFormat::Human)]
+    pub log_format: LogFormat,
+}
+
+impl Cli {
+    /// Resolve the effective log filter from `--log-level` plus the
+    /// `--debug` convenience flag. `--verbose` intentionally does NOT raise
+    /// the level — it drives the introspection output (`print_profile`), which
+    /// is orthogonal to the structured diagnostics logger.
+    pub fn effective_log_filter(&self) -> tracing::level_filters::LevelFilter {
+        use tracing::level_filters::LevelFilter as F;
+        let mut filter = self.log_level.to_filter();
+        if self.debug {
+            filter = filter.max(F::DEBUG);
+        }
+        filter
+    }
+}
+
+/// Structured-diagnostic verbosity for `--log-level`. Spawn-call and
+/// introspection traces route through this (see `--log-format` for the output
+/// shape). Default is `warn`: only warnings and errors are logged, so a plain
+/// `skillpack` run is silent like before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum LogLevel {
+    Off,
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl LogLevel {
+    fn to_filter(self) -> tracing::level_filters::LevelFilter {
+        use tracing::level_filters::LevelFilter as F;
+        match self {
+            LogLevel::Off => F::OFF,
+            LogLevel::Error => F::ERROR,
+            LogLevel::Warn => F::WARN,
+            LogLevel::Info => F::INFO,
+            LogLevel::Debug => F::DEBUG,
+            LogLevel::Trace => F::TRACE,
+        }
+    }
+}
+
+/// Output shape for structured diagnostics (`--log-format`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum LogFormat {
+    /// Compact single-line human events on stderr.
+    Human,
+    /// One JSON object per event on stderr, for log pipelines.
+    Json,
 }
 
 #[derive(Debug, Subcommand)]
@@ -350,5 +415,28 @@ mod tests {
         let all = resolve_targets(&["all".to_string()]).unwrap();
         assert_eq!(all.len(), 10);
         assert!(all.contains(&Target::AgentsMd));
+    }
+
+    #[test]
+    fn effective_log_filter_maps_flags() {
+        use clap::Parser;
+        use tracing::level_filters::LevelFilter as F;
+
+        // Default (no flags) → warn: a plain run is silent.
+        let c = Cli::try_parse_from(["skillpack", "doctor"]).unwrap();
+        assert_eq!(c.effective_log_filter(), F::WARN);
+
+        // --debug is an alias for --log-level debug.
+        let c = Cli::try_parse_from(["skillpack", "doctor", "--debug"]).unwrap();
+        assert_eq!(c.effective_log_filter(), F::DEBUG);
+
+        // --log-level sets the base verbosity directly.
+        let c = Cli::try_parse_from(["skillpack", "doctor", "--log-level", "trace"]).unwrap();
+        assert_eq!(c.effective_log_filter(), F::TRACE);
+
+        // --debug explicitly raises even against --log-level off.
+        let c =
+            Cli::try_parse_from(["skillpack", "doctor", "--log-level", "off", "--debug"]).unwrap();
+        assert_eq!(c.effective_log_filter(), F::DEBUG);
     }
 }

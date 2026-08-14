@@ -85,6 +85,18 @@ fn run_inner(cmd: &mut Command, timeout: Duration, stdin_mode: StdinMode) -> Spa
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     isolate_process_group(cmd);
 
+    // The single spawn-logging point: every `--help`/`--version` probe (and
+    // any other guarded spawn) is emitted here as a structured debug event,
+    // so `--debug`/`--log-level debug` shows the full argv + cwd in one
+    // consistent shape (`--log-format json` makes it machine-parseable).
+    tracing::debug!(
+        target: "skillpack::spawn",
+        program = %cmd.get_program().to_string_lossy(),
+        args = ?cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect::<Vec<_>>(),
+        cwd = ?cmd.get_current_dir(),
+        "spawn"
+    );
+
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return SpawnOutcome::NotFound,

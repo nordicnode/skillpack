@@ -17,7 +17,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::spawn::{self, SpawnOutcome, HELP_TIMEOUT};
-use crate::types::{DiagTrace, Language};
+use crate::types::{DiagTrace, Language, SubcommandNode};
 
 use super::cli_candidates::{primary_cli_candidate, CliCandidate, DetectCli};
 use super::workspace::{
@@ -218,7 +218,7 @@ pub(crate) fn has_csproj(root: &Path) -> bool {
 
 /// Detect whether the project ships an invokable CLI, and if so capture its
 /// `--help` output under a hard timeout. Returns
-/// `(has_cli, command, output, subcommand_help)`.
+/// `(has_cli, command, output, subcommand_tree)`.
 ///
 /// `command` is the full multi-token `--help` argv the verifier re-spawns (e.g.
 /// `["node","/abs/bin/cli.js","--help"]`, `["go","run",".","--help"]`). The
@@ -226,10 +226,10 @@ pub(crate) fn has_csproj(root: &Path) -> bool {
 /// from the profile name + interview — this is the internal, machine-specific
 /// spawn argv (design §5.1, §6.3).
 ///
-/// `subcommand_help` holds `<cli> <sub> --help` per subcommand (clap-style),
-/// in declaration order, so the generated SKILL.md can document the real
-/// command surface and `verify` can drift-check it. Empty for non-subcommand
-/// CLIs — a flat `--help` yields no `Commands:` section.
+/// `subcommand_tree` holds the recursive `<cli> <path...> --help` capture
+/// (clap-style), in declaration order, so the generated SKILL.md can document
+/// the real command surface and `verify` can drift-check it. Empty for
+/// non-subcommand CLIs — a flat `--help` yields no `Commands:` section.
 ///
 /// Every falsy branch (no name, no root candidate, spawn failure) pushes a
 /// `DiagNote` so `skillpack doctor` explains why `has_cli=false` rather than
@@ -325,12 +325,12 @@ fn spawn_candidate(candidate: &CliCandidate, diag: &mut DiagTrace) -> DetectCli 
             // global flags). Best-effort: a subcommand that fails/times out is
             // omitted here — `verify` surfaces the gap if the skill documents
             // a subcommand we couldn't capture.
-            let subs = capture_subcommand_help(candidate, &output);
+            let subs = capture_subcommand_tree(candidate, &output);
             DetectCli {
                 has_cli: true,
                 command: Some(command),
                 help_output: Some(output),
-                subcommand_help: subs,
+                subcommand_tree: subs,
             }
         }
         SpawnOutcome::RanNonZero(_) => {
@@ -345,7 +345,7 @@ fn spawn_candidate(candidate: &CliCandidate, diag: &mut DiagTrace) -> DetectCli 
                 has_cli: true,
                 command: Some(command),
                 help_output: None,
-                subcommand_help: Vec::new(),
+                subcommand_tree: Vec::new(),
             }
         }
         SpawnOutcome::TimedOut => {
@@ -360,7 +360,7 @@ fn spawn_candidate(candidate: &CliCandidate, diag: &mut DiagTrace) -> DetectCli 
                 has_cli: true,
                 command: Some(command),
                 help_output: None,
-                subcommand_help: Vec::new(),
+                subcommand_tree: Vec::new(),
             }
         }
         SpawnOutcome::NotFound => {
@@ -388,32 +388,77 @@ fn spawn_candidate(candidate: &CliCandidate, diag: &mut DiagTrace) -> DetectCli 
     }
 }
 
-/// For a subcommand CLI, spawn `<candidate.argv> <sub> --help` per subcommand
-/// advertised in the top-level `--help`, returning `(sub, help)` in declaration
-/// order. Reuses the same guarded spawn + timeout as the top-level capture.
-/// Failures are omitted silently (introspect is best-effort).
-fn capture_subcommand_help(
+/// Hard cap on how deep [`capture_subcommand_tree`] recurses. Each level
+/// multiplies the spawn count, so the cap bounds the probe (and the generated
+/// SKILL.md's nesting) while still covering real-world CLIs like
+/// `git remote add` and `aws ec2 describe-instances` (two nested levels).
+/// Deeper nesting than this is out of scope, same posture as the old
+/// one-level-deep limit — but now genuinely recursive.
+const MAX_SUBCOMMAND_DEPTH: usize = 4;
+
+/// For a subcommand CLI, recursively capture `<cli> <path...> --help` for every
+/// subcommand advertised at each level, returning a `SubcommandNode` tree in
+/// declaration order. Reuses the same guarded spawn + timeout as the top-level
+/// capture. A spawn that fails/times out still contributes a node (its name came
+/// from the parent's `--help`) with empty `help` and no `children`, so verify
+/// can surface the gap if the skill documents that subcommand.
+fn capture_subcommand_tree(candidate: &CliCandidate, top_level_help: &str) -> Vec<SubcommandNode> {
+    capture_children(candidate, &[], top_level_help, 0)
+}
+
+/// Recursive core of [`capture_subcommand_tree`]. `prefix` is the subcommand
+/// path already walked (empty at the top level); `help_output` is the `--help`
+/// text of the node at `prefix`; `depth == prefix.len()`.
+fn capture_children(
     candidate: &CliCandidate,
-    top_level_help: &str,
-) -> Vec<(String, String)> {
-    let subs = crate::verify::invocation::extract_subcommands(top_level_help);
+    prefix: &[String],
+    help_output: &str,
+    depth: usize,
+) -> Vec<SubcommandNode> {
+    if depth >= MAX_SUBCOMMAND_DEPTH {
+        return Vec::new();
+    }
+    let subs = crate::verify::invocation::extract_subcommands(help_output);
     let mut out = Vec::with_capacity(subs.len());
     for sub in subs {
-        let mut cmd = Command::new(&candidate.argv[0]);
-        for arg in &candidate.argv[1..] {
-            cmd.arg(arg);
-        }
-        cmd.arg(&sub)
-            .arg("--help")
-            .current_dir(&candidate.spawn_cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if let SpawnOutcome::RanClean(help) = spawn::run(&mut cmd, HELP_TIMEOUT) {
-            out.push((sub, help));
-        }
+        let help = spawn_subcommand_help(candidate, prefix, &sub);
+        let mut child_prefix = prefix.to_vec();
+        child_prefix.push(sub.clone());
+        let children = if help.is_empty() {
+            Vec::new()
+        } else {
+            capture_children(candidate, &child_prefix, &help, depth + 1)
+        };
+        out.push(SubcommandNode {
+            name: sub,
+            help,
+            children,
+        });
     }
     out
+}
+
+/// Spawn `<candidate.argv> <prefix...> <sub> --help` and return the captured
+/// stdout+stderr, or `""` when the spawn failed/timed out. Best-effort:
+/// introspect never fails on a subcommand it can't probe.
+fn spawn_subcommand_help(candidate: &CliCandidate, prefix: &[String], sub: &str) -> String {
+    let mut cmd = Command::new(&candidate.argv[0]);
+    for arg in &candidate.argv[1..] {
+        cmd.arg(arg);
+    }
+    for p in prefix {
+        cmd.arg(p);
+    }
+    cmd.arg(sub)
+        .arg("--help")
+        .current_dir(&candidate.spawn_cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    match spawn::run(&mut cmd, HELP_TIMEOUT) {
+        SpawnOutcome::RanClean(help) => help,
+        _ => String::new(),
+    }
 }
 
 #[cfg(test)]

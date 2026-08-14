@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::types::Language;
+use crate::types::{Language, SubcommandNode};
 
 /// The captured CLI surface: `detect_cli`'s return. Named (not a bare 4-tuple)
 /// so the call site reads `d.has_cli` / `d.command` rather than decoding
@@ -20,7 +20,7 @@ pub(crate) struct DetectCli {
     pub(crate) has_cli: bool,
     pub(crate) command: Option<Vec<String>>,
     pub(crate) help_output: Option<String>,
-    pub(crate) subcommand_help: Vec<(String, String)>,
+    pub(crate) subcommand_tree: Vec<SubcommandNode>,
 }
 
 impl DetectCli {
@@ -29,7 +29,7 @@ impl DetectCli {
             has_cli: false,
             command: None,
             help_output: None,
-            subcommand_help: Vec::new(),
+            subcommand_tree: Vec::new(),
         }
     }
 }

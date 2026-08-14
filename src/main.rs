@@ -14,7 +14,7 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, ValueEnum};
 
-use skillpack::cli::{resolve_targets, Cli, Commands, Target};
+use skillpack::cli::{resolve_targets, Cli, Commands, LogFormat, Target};
 use skillpack::config::Config;
 use skillpack::exit;
 use skillpack::generate::{coerce_kebab, render_all, GeneratedFileOutput};
@@ -25,6 +25,7 @@ use skillpack::verify::{self, VerifyInput, VerifyReport};
 
 fn main() {
     let cli = Cli::parse();
+    init_logging(cli.effective_log_filter(), cli.log_format);
 
     let code = if let Ok(code) = std::panic::catch_unwind(|| match cli.command {
         Commands::Init {
@@ -45,7 +46,6 @@ fn main() {
         } => run_init(
             &root,
             cli.verbose,
-            cli.debug,
             non_interactive,
             auto,
             accept_warnings,
@@ -70,40 +70,25 @@ fn main() {
         } => run_verify(
             &root,
             cli.verbose,
-            cli.debug,
             format,
             fix,
             min_score,
             watch,
             template_dir.as_deref(),
         ),
-        Commands::Doctor { root, format } => run_doctor(&root, cli.verbose, cli.debug, format),
+        Commands::Doctor { root, format } => run_doctor(&root, cli.verbose, format),
         Commands::Update {
             root,
             target,
             force,
             template_dir,
-        } => run_update(
-            &root,
-            cli.verbose,
-            cli.debug,
-            target,
-            force,
-            template_dir.as_deref(),
-        ),
+        } => run_update(&root, cli.verbose, target, force, template_dir.as_deref()),
         Commands::Diff {
             root,
             target,
             force,
             template_dir,
-        } => run_diff(
-            &root,
-            cli.verbose,
-            cli.debug,
-            target,
-            force,
-            template_dir.as_deref(),
-        ),
+        } => run_diff(&root, cli.verbose, target, force, template_dir.as_deref()),
         Commands::Completions { shell } => {
             let mut cmd = <Cli as CommandFactory>::command();
             clap_complete::generate(shell, &mut cmd, "skillpack", &mut std::io::stdout());
@@ -116,6 +101,37 @@ fn main() {
         std::process::exit(exit::INIT_FATAL)
     };
     std::process::exit(code);
+}
+
+/// Configure the structured-diagnostics logger. Everything routed through it
+/// (spawn calls, introspection traces) lands on stderr; `--log-format json`
+/// switches to one-JSON-object-per-event for CI/log pipelines. Called once at
+/// process start, before any work (and before `catch_unwind`, so a panic in
+/// the logger can't mask the real error path).
+fn init_logging(filter: tracing::level_filters::LevelFilter, format: LogFormat) {
+    let builder = tracing_subscriber::fmt()
+        .with_max_level(filter)
+        .with_writer(std::io::stderr);
+    match format {
+        // Compact = `LEVEL target: message`; without_time keeps the human
+        // output deterministic (a wall-clock timestamp is noise in a CLI and
+        // makes byte-diffing debug runs impossible).
+        LogFormat::Human => builder.compact().without_time().init(),
+        LogFormat::Json => builder.json().init(),
+    }
+}
+
+/// Emit the `--debug` introspection trace (name/language/has_cli/diag-notes)
+/// through the structured logger. Shared by init/update/diff/doctor so the
+/// debug contract is one code path and one JSON shape.
+fn trace_detected(profile: &types::ProjectProfile) {
+    tracing::debug!(
+        name = %profile.name,
+        language = %profile.language.as_str(),
+        has_cli = profile.has_cli,
+        diag_notes = profile.diag.0.len(),
+        "detected"
+    );
 }
 
 /// Derive the [`Intent`] entirely from the repo — `init --auto`. Zero
@@ -284,7 +300,6 @@ fn bootstrap_intent(
 fn run_init(
     root: &Path,
     verbose: bool,
-    debug: bool,
     non_interactive: bool,
     auto: bool,
     accept_warnings: bool,
@@ -302,7 +317,6 @@ fn run_init(
     match run_init_inner(
         root,
         verbose,
-        debug,
         non_interactive,
         auto,
         accept_warnings,
@@ -329,7 +343,6 @@ fn run_init(
 fn run_init_inner(
     root: &Path,
     verbose: bool,
-    debug: bool,
     non_interactive: bool,
     auto: bool,
     accept_warnings: bool,
@@ -367,14 +380,7 @@ fn run_init_inner(
             .collect();
         eprintln!("targets: {}", names.join(", "));
     }
-    if debug {
-        eprintln!(
-            "[debug] detected name={} language={} has_cli={}",
-            profile.name,
-            profile.language.as_str(),
-            profile.has_cli
-        );
-    }
+    trace_detected(&profile);
 
     // Step 2 — interview or reuse config. `--auto` and `--non-interactive`
     // never prompt. A committed config always wins in those modes (re-runs
@@ -449,7 +455,7 @@ fn run_init_inner(
     // The primary skill's verify_stdin drives the CLI spawn — the pre-commit
     // gate uses one stdin mode, matching `verify`'s own single-stdin behavior.
     let verify_stdin = skills.first().and_then(|(_, i)| i.verify_stdin.clone());
-    let report = verify_rendered(&files, &profile, root, debug, verify_stdin)?;
+    let report = verify_rendered(&files, &profile, root, verify_stdin)?;
 
     if report.has_critical_failure() {
         eprintln!("\n❌ pre-commit verification FAILED. skillpack will NOT write files.");
@@ -549,7 +555,6 @@ fn verify_rendered(
     files: &[GeneratedFileOutput],
     profile: &types::ProjectProfile,
     root: &Path,
-    debug: bool,
     verify_stdin: Option<String>,
 ) -> Result<VerifyReport> {
     // Materialize the rendered files into a temp dir so verify (which expects
@@ -575,7 +580,6 @@ fn verify_rendered(
         cli_command: profile.cli_command.clone(),
         repo_url: profile.repo_url.clone(),
         profile_name: Some(coerce_kebab(&profile.name)),
-        debug,
         verify_stdin,
     };
     verify::run(&input)
@@ -802,7 +806,6 @@ fn print_profile(profile: &types::ProjectProfile, to_stderr: bool) {
 fn run_verify(
     root: &Path,
     verbose: bool,
-    debug: bool,
     format: verify::OutputFormat,
     fix: bool,
     min_score: Option<u8>,
@@ -814,9 +817,9 @@ fn run_verify(
             eprintln!("error: --watch is only valid with --format human");
             return exit::VERIFY_USAGE;
         }
-        return run_verify_watch(root, verbose, debug, format, fix, min_score, template_dir);
+        return run_verify_watch(root, verbose, format, fix, min_score, template_dir);
     }
-    match run_verify_inner(root, verbose, debug, format, fix, min_score, template_dir) {
+    match run_verify_inner(root, verbose, format, fix, min_score, template_dir) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -828,7 +831,6 @@ fn run_verify(
 fn run_verify_inner(
     root: &Path,
     verbose: bool,
-    debug: bool,
     format: verify::OutputFormat,
     fix: bool,
     min_score: Option<u8>,
@@ -868,7 +870,6 @@ fn run_verify_inner(
             spawn_root: root.to_path_buf(),
             cli_command: profile.cli_command.clone(),
             profile_name: Some(coerce_kebab(&profile.name)),
-            debug,
             verify_stdin: verify_stdin.clone(),
             repo_url: profile.repo_url.clone(),
         };
@@ -952,7 +953,6 @@ fn run_verify_inner(
 fn run_verify_watch(
     root: &Path,
     verbose: bool,
-    debug: bool,
     format: verify::OutputFormat,
     fix: bool,
     min_score: Option<u8>,
@@ -982,7 +982,7 @@ fn run_verify_watch(
         root.display()
     );
 
-    let _ = run_verify_single(root, verbose, debug, format, fix, min_score, template_dir);
+    let _ = run_verify_single(root, verbose, format, fix, min_score, template_dir);
 
     let debounce = Duration::from_secs(1);
     let mut last_event: Option<Instant> = None;
@@ -1022,15 +1022,8 @@ fn run_verify_watch(
                         if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
                             print!("\x1b[2J\x1b[H");
                         }
-                        let _ = run_verify_single(
-                            root,
-                            verbose,
-                            debug,
-                            format,
-                            fix,
-                            min_score,
-                            template_dir,
-                        );
+                        let _ =
+                            run_verify_single(root, verbose, format, fix, min_score, template_dir);
                     }
                 }
             }
@@ -1050,13 +1043,12 @@ fn run_verify_watch(
 fn run_verify_single(
     root: &Path,
     verbose: bool,
-    debug: bool,
     format: verify::OutputFormat,
     fix: bool,
     min_score: Option<u8>,
     template_dir: Option<&Path>,
 ) -> i32 {
-    match run_verify_inner(root, verbose, debug, format, fix, min_score, template_dir) {
+    match run_verify_inner(root, verbose, format, fix, min_score, template_dir) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {e:#}");
@@ -1069,8 +1061,8 @@ fn run_verify_single(
 /// never writes files. The trace is empty until candidate fns push notes
 /// (the `detect_*` falsy branches); doctor surfaces exactly why `has_cli`
 /// came out false so the maintainer can act.
-fn run_doctor(root: &Path, verbose: bool, debug: bool, format: crate::verify::OutputFormat) -> i32 {
-    match run_doctor_inner(root, verbose, debug, format) {
+fn run_doctor(root: &Path, verbose: bool, format: crate::verify::OutputFormat) -> i32 {
+    match run_doctor_inner(root, verbose, format) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -1082,7 +1074,6 @@ fn run_doctor(root: &Path, verbose: bool, debug: bool, format: crate::verify::Ou
 fn run_doctor_inner(
     root: &Path,
     verbose: bool,
-    debug: bool,
     format: crate::verify::OutputFormat,
 ) -> Result<i32> {
     let profile = introspect::introspect(root).context("introspecting repo for doctor")?;
@@ -1100,7 +1091,7 @@ fn run_doctor_inner(
                     .context("serializing doctor profile to JSON")?
             );
         }
-        crate::verify::OutputFormat::Human => render_doctor_human(&profile, verbose, debug),
+        crate::verify::OutputFormat::Human => render_doctor_human(&profile, verbose),
         crate::verify::OutputFormat::Sarif => {
             bail!("doctor does not support SARIF output; use `verify --format sarif`")
         }
@@ -1112,16 +1103,8 @@ fn run_doctor_inner(
 
 /// Render the human-facing diagnosis. Lifted verbatim from the pre-format
 /// behavior so `doctor` (no flag) and `doctor --format human` are byte-identical.
-fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool, debug: bool) {
-    if debug {
-        eprintln!(
-            "[debug] detected name={} language={} has_cli={} diag_notes={}",
-            profile.name,
-            profile.language.as_str(),
-            profile.has_cli,
-            profile.diag.0.len()
-        );
-    }
+fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool) {
+    trace_detected(profile);
     // Reuse the same profile block --verbose prints so doctor's output starts
     // from a known place.
     if verbose {
@@ -1189,12 +1172,11 @@ fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool, debug: bo
 fn run_update(
     root: &Path,
     verbose: bool,
-    debug: bool,
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
 ) -> i32 {
-    match run_update_inner(root, verbose, debug, raw_targets, force, template_dir) {
+    match run_update_inner(root, verbose, raw_targets, force, template_dir) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -1340,7 +1322,6 @@ fn render_from_config(
 fn run_update_inner(
     root: &Path,
     verbose: bool,
-    debug: bool,
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
@@ -1349,14 +1330,7 @@ fn run_update_inner(
     if verbose {
         print_profile(&profile, false);
     }
-    if debug {
-        eprintln!(
-            "[debug] detected name={} language={} has_cli={}",
-            profile.name,
-            profile.language.as_str(),
-            profile.has_cli
-        );
-    }
+    trace_detected(&profile);
     let results = compute_candidates(root, &files, force)?;
 
     let mut written: Vec<&GeneratedFileOutput> = Vec::new();
@@ -1430,12 +1404,11 @@ fn run_update_inner(
 fn run_diff(
     root: &Path,
     verbose: bool,
-    debug: bool,
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
 ) -> i32 {
-    match run_diff_inner(root, verbose, debug, &raw_targets, force, template_dir) {
+    match run_diff_inner(root, verbose, &raw_targets, force, template_dir) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -1447,7 +1420,6 @@ fn run_diff(
 fn run_diff_inner(
     root: &Path,
     verbose: bool,
-    debug: bool,
     raw_targets: &[String],
     force: bool,
     template_dir: Option<&Path>,
@@ -1456,14 +1428,7 @@ fn run_diff_inner(
     if verbose {
         print_profile(&profile, false);
     }
-    if debug {
-        eprintln!(
-            "[debug] detected name={} language={} has_cli={}",
-            profile.name,
-            profile.language.as_str(),
-            profile.has_cli
-        );
-    }
+    trace_detected(&profile);
     let results = compute_candidates(root, &files, force)?;
 
     let mut drifted = 0usize;
@@ -1601,7 +1566,7 @@ mod confirm_tests {
             has_cli: true,
             cli_command: Some(vec![bin.to_string_lossy().to_string(), "--help".into()]),
             cli_help_output: Some("usage".into()),
-            cli_subcommand_help: Vec::new(),
+            cli_subcommand_tree: Vec::new(),
             repo_url: None,
             license: Some("MIT".into()),
             version: None,
@@ -1638,7 +1603,7 @@ mod confirm_tests {
             has_cli: false,
             cli_command: None,
             cli_help_output: None,
-            cli_subcommand_help: Vec::new(),
+            cli_subcommand_tree: Vec::new(),
             repo_url: None,
             license: Some("MIT".into()),
             version: None,

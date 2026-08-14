@@ -2904,7 +2904,7 @@ fn deno_cli_init_then_verify_round_trip() {
 
 // Subcommand-drift e2e: the subcommand-cli fixture prints a clap-shaped
 // `Commands:` section in `--help` and per-subcommand `--help` with distinct
-// flags. `capture_subcommand_help` (introspect) captures each sub's help;
+// flags. `capture_subcommand_tree` (introspect) captures each sub's help;
 // `check_subcommand_drift` (verify) spawns `<base> <sub> --help` and set-diffs.
 // This is the only test that exercises the full subcommand spawn reassembly
 // (`base.pop()` trailing `--help` + `<base> <sub> --help`) end-to-end.
@@ -3001,6 +3001,166 @@ fn subcommand_cli_init_then_verify_round_trip() {
             "subcommand_drift must pass for all documented subs, got:\n{json}"
         );
     }
+}
+
+// Nested-subcommand-drift e2e: the nested-subcommand-cli fixture advertises
+// `remote` at the top level, whose own `--help` advertises `add`/`remove`,
+// whose own `--help` exposes distinct flags. `capture_subcommand_tree`
+// (introspect) recurses the whole chain; `check_subcommand_drift` (verify)
+// spawns `<base> <path...> --help` per nested bullet. The flat
+// subcommand-cli fixture covers the one-level case; this one covers recursion.
+#[test]
+fn nested_subcommand_cli_init_then_verify_round_trip() {
+    let root = copy_fixture("nested-subcommand-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let toml = "[skill]\n\
+        name = \"sample-nested\"\n\
+        one_line_description = \"Manage remotes in a nested-CLI tool\"\n\
+        when_to_use_phrases = [\"add a git remote\", \"remove a git remote\"]\n\
+        invocation_command = \"sample-nested remote add <name> <url>\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // init's introspect must have recursed the subcommand chain and the
+    // template must render nested bullets (two-space indent per depth).
+    let skill = fs::read_to_string(root.join("skills/sample-nested/SKILL.md")).unwrap();
+    assert!(
+        skill.contains("### Subcommands"),
+        "SKILL.md must contain ### Subcommands block, got:\n{skill}"
+    );
+    assert!(
+        skill.contains("- `remote`"),
+        "SKILL.md must document the top-level `remote` subcommand, got:\n{skill}"
+    );
+    assert!(
+        skill.contains("  - `add`"),
+        "SKILL.md must nest `add` under `remote`, got:\n{skill}"
+    );
+    assert!(
+        skill.contains("  - `remove`"),
+        "SKILL.md must nest `remove` under `remote`, got:\n{skill}"
+    );
+    // Per-leaf flags captured from the real nested `--help`:
+    assert!(
+        skill.contains("`--url`"),
+        "SKILL.md must list `remote add`'s --url flag, got:\n{skill}"
+    );
+    assert!(
+        skill.contains("`--name`"),
+        "SKILL.md must list `remote add`'s --name flag, got:\n{skill}"
+    );
+
+    // verify must pass, including the recursive per-path `--help` drift checks.
+    let json_out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        json_out.status.success(),
+        "verify must exit 0, got:\n{}",
+        String::from_utf8_lossy(&json_out.stdout)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&json_out.stdout).unwrap();
+    assert_eq!(
+        json["ok"],
+        serde_json::Value::Bool(true),
+        "verify ok must be true, got:\n{json}"
+    );
+
+    let sub_results: Vec<&serde_json::Value> = json["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["check_id"] == "invocation.subcommand_drift")
+        .collect();
+    assert!(
+        !sub_results.is_empty(),
+        "verify must emit invocation.subcommand_drift results, got:\n{json}"
+    );
+    for r in &sub_results {
+        assert_eq!(
+            r["severity"], "pass",
+            "subcommand_drift must pass for all documented paths, got:\n{json}"
+        );
+    }
+    // The nested path must surface as a joined name in at least one result.
+    assert!(
+        json_out
+            .stdout
+            .windows(b"remote add".len())
+            .any(|w| w == b"remote add"),
+        "a drift result must reference the nested `remote add` path, got:\n{}",
+        String::from_utf8_lossy(&json_out.stdout)
+    );
+}
+
+// Structured logging: `--log-format json` must emit one JSON object per event
+// on stderr (never stdout), and `--log-level debug` must surface the guarded
+// spawns through it. This guards the `tracing`-based logging layer that
+// replaced the old `[debug]` eprintlns.
+#[test]
+fn log_format_json_emits_structured_events_on_stderr() {
+    let root = copy_fixture("rust-cli");
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "doctor",
+            "--root",
+            ".",
+            "--format",
+            "json",
+            "--log-level",
+            "debug",
+            "--log-format",
+            "json",
+        ])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    // stdout must remain the doctor JSON report — logs never corrupt it.
+    serde_json::from_slice::<serde_json::Value>(&out.stdout)
+        .expect("doctor --format json stdout must stay pure JSON");
+    // stderr must be one JSON object per line, each carrying a level, and at
+    // least one DEBUG spawn event (introspect probes `git remote get-url`).
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert!(
+        !lines.is_empty(),
+        "expected structured log events on stderr"
+    );
+    for line in &lines {
+        let ev: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("stderr line is not JSON ({e}):\n{line}"));
+        assert!(
+            ev.get("level").is_some(),
+            "log event must carry a level, got:\n{line}"
+        );
+    }
+    assert!(
+        lines.iter().any(|l| l.contains("\"level\":\"DEBUG\"")),
+        "expected at least one DEBUG event, got:\n{stderr}"
+    );
 }
 
 #[test]

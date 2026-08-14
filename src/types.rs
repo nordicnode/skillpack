@@ -30,12 +30,13 @@ pub struct ProjectProfile {
     /// Captured `--help` output, if a CLI was spawned. `None` for pure
     /// libraries or when the spawn failed/timed out.
     pub cli_help_output: Option<String>,
-    /// Captured `<cli> <sub> --help` per subcommand, in declaration order.
-    /// `Vec` (not a map) so clap's declaration order survives into
-    /// deterministic snapshots. Empty for pure libraries, non-subcommand
-    /// CLIs, or when every per-sub spawn failed/timed out.
-    #[serde(default)]
-    pub cli_subcommand_help: Vec<(String, String)>,
+    /// Captured subcommand tree (`<cli> <path...> --help` per node), in
+    /// declaration order. Recursive: a node's `children` are the
+    /// sub-subcommands its own `--help` advertises (e.g. `git remote` →
+    /// `add`, `remove`). A node's `help` is empty when its spawn failed or
+    /// timed out. Empty for pure libraries and non-subcommand CLIs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cli_subcommand_tree: Vec<SubcommandNode>,
     /// Introspection decision trace for `skillpack doctor`. Empty when every
     /// detection branch succeeded (or when `doctor` wasn't run); each falsy
     /// branch in a candidate fn pushes one decision note here so `doctor` can
@@ -63,6 +64,20 @@ pub struct ProjectProfile {
     pub authors: Option<String>,
     /// First paragraph of README, used as a description hint. May be empty.
     pub description_hint: Option<String>,
+}
+
+/// One node in the captured CLI subcommand tree. `name` is the subcommand as
+/// `--help` advertises it; `help` is the captured `<cli> <path...> --help`
+/// (empty when that spawn failed or timed out — the node still exists because
+/// its name came from the parent's `--help`); `children` are the sub-subcommands
+/// the node's own `--help` advertises, in declaration order.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SubcommandNode {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub help: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<SubcommandNode>,
 }
 
 /// One decision point recorded during introspection for `skillpack doctor`.

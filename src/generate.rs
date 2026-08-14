@@ -13,7 +13,7 @@ use std::path::Path;
 use tera::{Context as TeraContext, Tera};
 
 use crate::cli::Target;
-use crate::types::{Intent, Language, ProjectProfile};
+use crate::types::{Intent, Language, ProjectProfile, SubcommandNode};
 use crate::verify::schema;
 
 /// Name → template source. Embedded via `include_str!` so templates ship inside
@@ -108,24 +108,32 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         .unwrap_or_default();
 
     // Subcommands: each advertised subcommand + the flags its own `--help`
-    // exposes (parsed from the captured per-sub help). Order = declaration
-    // order (clap), preserved by the `Vec` on the profile → deterministic
+    // exposes (parsed from the captured per-sub help), flattened pre-order
+    // with a per-node indent so the template renders nested bullets from a
+    // flat list (Tera has no recursive macros). Order = declaration order
+    // (clap), preserved by the `Vec` on the profile → deterministic
     // snapshots. Empty for non-subcommand CLIs and pure libraries.
-    let documented_subcommands: Vec<serde_json::Value> = profile
-        .cli_subcommand_help
-        .iter()
-        .map(|(name, help)| {
-            // Drop the universal --help/-h/--version/-V meta-flags (per
-            // invocation::is_meta_flag) so a subcommand bullet shows the
-            // tool-specific flags an agent would actually pass, not the
-            // help/version every CLI implicitly answers to.
-            let flags: Vec<String> = crate::verify::invocation::extract_flags(help)
-                .into_iter()
-                .filter(|f| !crate::verify::invocation::is_meta_flag(f))
-                .collect();
-            serde_json::json!({ "name": name, "flags": flags })
-        })
-        .collect();
+    let documented_subcommands: Vec<serde_json::Value> =
+        flatten_subcommands(&profile.cli_subcommand_tree)
+            .into_iter()
+            .map(|(name, help, depth)| {
+                // Drop the universal --help/-h/--version/-V meta-flags (per
+                // invocation::is_meta_flag) so a subcommand bullet shows the
+                // tool-specific flags an agent would actually pass, not the
+                // help/version every CLI implicitly answers to.
+                let flags: Vec<String> = crate::verify::invocation::extract_flags(&help)
+                    .into_iter()
+                    .filter(|f| !crate::verify::invocation::is_meta_flag(f))
+                    .collect();
+                serde_json::json!({
+                    "name": name,
+                    "flags": flags,
+                    // Two spaces per depth — matches the template's nested-bullet
+                    // indentation and verify's indentation-aware parser.
+                    "indent": "  ".repeat(depth),
+                })
+            })
+            .collect();
 
     // Precompute the joined when-to-use list so the template stays a thin
     // presentation layer (no Tera filter syntax for non-Rust contributors to
@@ -573,11 +581,36 @@ pub struct Keywords {
     pub inner: Vec<String>,
 }
 
+/// Pre-order flatten of the subcommand tree, carrying each node's depth so the
+/// template can render nested bullets from a flat list (Tera has no recursive
+/// macros). Declaration order is preserved at every level, so snapshots stay
+/// deterministic.
+fn flatten_subcommands(nodes: &[SubcommandNode]) -> Vec<(String, String, usize)> {
+    fn walk(nodes: &[SubcommandNode], depth: usize, out: &mut Vec<(String, String, usize)>) {
+        for n in nodes {
+            out.push((n.name.clone(), n.help.clone(), depth));
+            walk(&n.children, depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(nodes, 0, &mut out);
+    out
+}
+
+/// Recursively collect every subcommand name (declaration order) for the
+/// marketplace keyword list.
+fn collect_subcommand_names(nodes: &[SubcommandNode], out: &mut Vec<String>) {
+    for n in nodes {
+        out.push(n.name.clone());
+        collect_subcommand_names(&n.children, out);
+    }
+}
+
 /// Derive a small, stable keyword list from language + intent + CLI surface
 /// so the generated marketplace entry is discoverable without the maintainer
 /// hand-curating it. Always seeded with language + cli/library, then enriched:
 ///   - all trigger-phrase first-words (deduped)
-///   - CLI subcommand NAMES (from `cli_subcommand_help`) — high-signal verbs
+///   - CLI subcommand NAMES (from the subcommand tree) — high-signal verbs
 ///     like `init`, `verify`, `doctor` that a marketplace searcher would type
 ///   - one content word from the README `description_hint` (longest non-stopword)
 fn derive_keywords(profile: &ProjectProfile, intent: &Intent) -> Vec<String> {
@@ -600,9 +633,11 @@ fn derive_keywords(profile: &ProjectProfile, intent: &Intent) -> Vec<String> {
         }
     }
 
-    // CLI subcommand NAMES — high-signal marketplace keywords.
-    for (sub, _help) in &profile.cli_subcommand_help {
-        let sub = sub.to_lowercase();
+    // CLI subcommand NAMES (recursively) — high-signal marketplace keywords.
+    let mut names = Vec::new();
+    collect_subcommand_names(&profile.cli_subcommand_tree, &mut names);
+    for name in names {
+        let sub = name.to_lowercase();
         if !sub.is_empty() && !kws.contains(&sub) {
             kws.push(sub);
         }
@@ -827,7 +862,7 @@ mod tests {
         p.has_cli = true;
         p.cli_command = Some(vec!["chronicle".to_string(), "--help".to_string()]);
         p.cli_help_output = Some("Usage: chronicle [OPTIONS]\n  --new <entry>   Create an entry\n  --verbose        verbose\n".into());
-        p.cli_subcommand_help = Vec::new();
+        p.cli_subcommand_tree = Vec::new();
         p.license = Some("MIT".into());
         p
     }

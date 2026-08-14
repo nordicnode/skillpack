@@ -75,7 +75,7 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
     let has_cli = d.has_cli;
     let cli_command = d.command;
     let cli_help_output = d.help_output;
-    let cli_subcommand_help = d.subcommand_help;
+    let cli_subcommand_tree = d.subcommand_tree;
 
     let name = manifest_name
         .or_else(|| repo::repo_url_name(&repo_url))
@@ -100,7 +100,7 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
         has_cli,
         cli_command,
         cli_help_output,
-        cli_subcommand_help,
+        cli_subcommand_tree,
         diag,
         repo_url,
         license,
@@ -199,7 +199,7 @@ impl ProjectProfile {
             has_cli: false,
             cli_command: None,
             cli_help_output: None,
-            cli_subcommand_help: Vec::new(),
+            cli_subcommand_tree: Vec::new(),
             diag: DiagTrace::default(),
             repo_url: None,
             license: None,

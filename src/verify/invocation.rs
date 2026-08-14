@@ -42,8 +42,6 @@ pub struct InvocationInput {
     pub skill_root: std::path::PathBuf,
     /// Working directory for the CLI spawn — always the real project root.
     pub spawn_cwd: std::path::PathBuf,
-    /// When true, print every subprocess spawn to stderr (design §8.2 --debug).
-    pub debug: bool,
     /// Stdin bytes to feed the CLI during verify spawns. For interactive
     /// CLIs that block on stdin. `None` uses `/dev/null` (default).
     pub verify_stdin: Option<String>,
@@ -57,7 +55,6 @@ impl InvocationInput {
         spawn_cwd: &Path,
         skill_md: &str,
         cli_command: Option<&[String]>,
-        debug: bool,
         verify_stdin: Option<&str>,
     ) -> Self {
         Self {
@@ -65,7 +62,6 @@ impl InvocationInput {
             cli_command: cli_command.map(<[std::string::String]>::to_vec),
             skill_root: skill_root.to_path_buf(),
             spawn_cwd: spawn_cwd.to_path_buf(),
-            debug,
             verify_stdin: verify_stdin.map(|s| s.to_string()),
         }
     }
@@ -117,13 +113,7 @@ pub fn run(input: &InvocationInput, report: &mut VerifyReport) -> Result<()> {
         return Ok(());
     }
 
-    let help = run_help(
-        cmd,
-        &input.spawn_cwd,
-        input.debug,
-        input.verify_stdin.as_deref(),
-        report,
-    )?;
+    let help = run_help(cmd, &input.spawn_cwd, input.verify_stdin.as_deref(), report)?;
     if report.has_critical_failure() {
         return Ok(());
     }
@@ -140,7 +130,6 @@ pub fn run(input: &InvocationInput, report: &mut VerifyReport) -> Result<()> {
         cmd,
         &input.spawn_cwd,
         &input.skill_md,
-        input.debug,
         input.verify_stdin.as_deref(),
         report,
     )?;
@@ -269,23 +258,15 @@ fn heading_block(skill_md: &str, heading: &str) -> Option<String> {
 
 /// Spawn `<cmd[0]> [cmd[1..]]` (e.g. `chronicle --help`) under a hard timeout,
 /// push the outcome as a check, and return the captured stdout+stderr on
-/// success. When `debug` is set, the spawn argv is printed to stderr (§8.2).
+/// success. Spawn calls are emitted as `tracing::debug!` events by the shared
+/// spawn core (design §8.2 --debug / --log-level debug).
 fn run_help(
     cmd: &[String],
     root: &Path,
-    debug: bool,
     stdin: Option<&str>,
     report: &mut VerifyReport,
 ) -> Result<String> {
     let program = &cmd[0];
-    if debug {
-        eprintln!(
-            "[debug] spawn (cwd={}): {}{}",
-            root.display(),
-            program,
-            cmd[1..].iter().map(|a| format!(" {a}")).collect::<String>()
-        );
-    }
     let mut c = Command::new(program);
     for arg in &cmd[1..] {
         c.arg(arg);
@@ -531,13 +512,27 @@ pub fn extract_subcommands(help_output: &str) -> Vec<String> {
     out
 }
 
-/// Pull the subcommand names a SKILL.md *documents* (the `### Subcommands`
+/// Pull the subcommand *paths* a SKILL.md documents (the `### Subcommands`
 /// bullets), so verify checks drift against exactly what the skill advertises
-/// — the published surface, not the introspected one. Mirrors
+/// — the published surface, not the introspected one. Nested bullets become
+/// multi-segment paths (`git remote add` → `["remote", "add"]`). Mirrors
 /// [`extract_documented_invocation`]: a template section is the signal.
 /// `### Subcommands` is an h3 (deliberately a subsection under the `## Invocation`
 /// h2), so this is its own scan rather than reusing the h2-only `heading_block`.
-pub fn extract_documented_subcommands(skill_md: &str) -> Vec<String> {
+pub fn extract_documented_subcommands(skill_md: &str) -> Vec<Vec<String>> {
+    documented_subcommand_bullets(skill_md)
+        .into_iter()
+        .map(|(path, _bullet)| path)
+        .collect()
+}
+
+/// Parse the `### Subcommands` block into `(path, bullet_line)` pairs,
+/// indentation-aware. A bullet's nesting level is its leading-space count
+/// divided by two (the template emits two spaces per depth), and each bullet's
+/// path is its ancestor chain plus its own name. The bullet line is returned
+/// verbatim so the per-subcommand flag diff reads exactly the flags that
+/// bullet advertises.
+pub fn documented_subcommand_bullets(skill_md: &str) -> Vec<(Vec<String>, String)> {
     let want = "### Subcommands";
     let mut in_block = false;
     let mut block = String::new();
@@ -557,7 +552,9 @@ pub fn extract_documented_subcommands(skill_md: &str) -> Vec<String> {
             block.push('\n');
         }
     }
+
     let mut out = Vec::new();
+    let mut stack: Vec<(usize, String)> = Vec::new(); // (level, name)
     for line in block.lines() {
         let trimmed = line.trim();
         if !trimmed.starts_with("- ") {
@@ -565,16 +562,24 @@ pub fn extract_documented_subcommands(skill_md: &str) -> Vec<String> {
         }
         // Each bullet is `- `name` ...`; the first backticked token is the name.
         let after = trimmed.strip_prefix("- ").unwrap_or(trimmed);
-        let name = after
+        let Some(name) = after
             .split('`')
             .nth(1)
             .map(str::trim)
-            .filter(|s| !s.is_empty());
-        if let Some(n) = name {
-            if !out.contains(&n.to_string()) {
-                out.push(n.to_string());
-            }
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        // Two-space indent per depth (the template's contract).
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        let level = indent / 2;
+        while stack.len() > level {
+            stack.pop();
         }
+        let mut path: Vec<String> = stack.iter().map(|(_, n)| n.clone()).collect();
+        path.push(name.to_string());
+        out.push((path, line.to_string()));
+        stack.push((level, name.to_string()));
     }
     out
 }
@@ -613,38 +618,30 @@ fn check_subcommand_drift(
     base_cmd: &[String],
     spawn_cwd: &Path,
     skill_md: &str,
-    debug: bool,
     stdin: Option<&str>,
     report: &mut VerifyReport,
 ) -> Result<()> {
-    let documented = extract_documented_subcommands(skill_md);
-    if documented.is_empty() {
+    let bullets = documented_subcommand_bullets(skill_md);
+    if bullets.is_empty() {
         return Ok(());
     }
     // The base argv already carries `--help` (introspect appends it); drop the
-    // trailing `--help` so we can rebuild `<base> <sub> --help`.
+    // trailing `--help` so we can rebuild `<base> <path...> --help`.
     let mut base = base_cmd.to_vec();
     if base.last().is_some_and(|t| t == "--help") {
         base.pop();
     }
 
-    for sub in &documented {
+    for (path, bullet) in &bullets {
         let mut cmd = base.clone();
-        cmd.push(sub.clone());
+        cmd.extend(path.iter().cloned());
         cmd.push("--help".to_string());
-        if debug {
-            eprintln!(
-                "[debug] spawn (cwd={}): {}",
-                spawn_cwd.display(),
-                cmd.join(" ")
-            );
-        }
         let captured = spawn_capture(&cmd, spawn_cwd, HELP_TIMEOUT, stdin);
         let Some(help) = captured else {
             report.push(CheckResult::fail(
                 "invocation.subcommand_drift",
                 "every documented subcommand can be spawned for drift checks",
-                format!("documented subcommand `{sub}` could not be spawned for `--help` (missing runtime / non-zero exit / timeout)"),
+                format!("documented subcommand `{}` could not be spawned for `--help` (missing runtime / non-zero exit / timeout)", path.join(" ")),
                 "To fix: build/install the CLI so the subcommand is runnable, or remove the subcommand from SKILL.md.",
             ));
             continue;
@@ -652,20 +649,21 @@ fn check_subcommand_drift(
         // Documented flags for THIS subcommand: the SKILL.md's subcommand
         // bullet, parsed back out. Reusing extract_flags on the bullet line
         // keeps the comparison consistent with the top-level drift check.
-        diff_one_subcommand(skill_md, sub, &help, report);
+        diff_one_subcommand(bullet, path, &help, report);
     }
     Ok(())
 }
 
-/// Pure drift + reverse-drift diff for one documented subcommand against its
-/// captured `--help` text. Split out of `check_subcommand_drift` so the
+/// Pure drift + reverse-drift diff for one documented subcommand path against
+/// its captured `--help` text. Split out of `check_subcommand_drift` so the
 /// suggestion strings can be regression-tested without spawning a real CLI —
 /// `check_subcommand_drift` is responsible only for the spawn + the
 /// spawn-fail result; this fn owns every message that depends on actually
-/// reading the captured help.
-fn diff_one_subcommand(skill_md: &str, sub: &str, help: &str, report: &mut VerifyReport) {
-    let bullet = subcommand_bullet(skill_md, sub);
-    let doc_flags: Vec<String> = extract_flags(&bullet)
+/// reading the captured help. `path` is the subcommand chain
+/// (`["remote", "add"]`), `bullet` its SKILL.md bullet line (verbatim).
+fn diff_one_subcommand(bullet: &str, path: &[String], help: &str, report: &mut VerifyReport) {
+    let sub = path.join(" ");
+    let doc_flags: Vec<String> = extract_flags(bullet)
         .into_iter()
         .filter(|f| !is_meta_flag(f))
         .collect();
@@ -780,18 +778,6 @@ fn check_version_drift(
             format!("`{stdout}` contains plugin.json version `{plugin_version}`"),
         ));
     }
-}
-
-/// The single SKILL.md bullet line for a documented subcommand (the line
-/// starting with `- \`<sub>\``), so per-sub drift reads only that subcommand's
-/// advertised flags — not the whole `### Subcommands` block or the body.
-fn subcommand_bullet(skill_md: &str, sub: &str) -> String {
-    let needle = format!("- `{sub}`");
-    skill_md
-        .lines()
-        .find(|l| l.trim().starts_with(&needle))
-        .unwrap_or_default()
-        .to_string()
 }
 
 /// Extract the set of `--double-dash` and `-single-dash` flags from a blob.
@@ -1047,7 +1033,43 @@ x --new
 ";
         assert_eq!(
             extract_documented_subcommands(skill),
-            vec!["init".to_string(), "verify".to_string()]
+            vec![vec!["init".to_string()], vec!["verify".to_string()]]
+        );
+    }
+
+    /// Nested `### Subcommands` bullets (the template emits two spaces per
+    /// depth) must parse into multi-segment paths, and a following top-level
+    /// bullet must pop back to the root (not inherit the nested parent).
+    #[test]
+    fn documented_subcommand_bullets_parse_nested_paths() {
+        let skill = "\
+### Subcommands
+
+- `remote` — flags: `--verbose`
+  - `add` — flags: `--name`
+  - `remove` — flags: `--name`
+- `status` — flags: `--porcelain`
+";
+        assert_eq!(
+            documented_subcommand_bullets(skill),
+            vec![
+                (
+                    vec!["remote".to_string()],
+                    "- `remote` — flags: `--verbose`".to_string()
+                ),
+                (
+                    vec!["remote".to_string(), "add".to_string()],
+                    "  - `add` — flags: `--name`".to_string()
+                ),
+                (
+                    vec!["remote".to_string(), "remove".to_string()],
+                    "  - `remove` — flags: `--name`".to_string()
+                ),
+                (
+                    vec!["status".to_string()],
+                    "- `status` — flags: `--porcelain`".to_string()
+                ),
+            ]
         );
     }
 
@@ -1071,10 +1093,10 @@ x --new
     fn subcommand_reverse_drift_hint_interpolates_name() {
         // `init` bullet documents `--foo`; the help advertises `--foo` PLUS
         // `--secret` → reverse drift fires with `init` as the sub name.
-        let skill_md = "### Subcommands\n\n- `init`: create\n  `--foo`\n";
+        let bullet = "- `init`: create\n  `--foo`";
         let help = "Usage: init\n\nOptions:\n  --foo   f\n  --secret   s\n";
         let mut report = VerifyReport::default();
-        diff_one_subcommand(skill_md, "init", help, &mut report);
+        diff_one_subcommand(bullet, &["init".to_string()], help, &mut report);
         let warn = report
             .results
             .iter()
