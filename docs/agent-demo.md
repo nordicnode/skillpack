@@ -1,114 +1,141 @@
 # skillpack demo: real-world agent delta (measured)
 
-> **Note**: this page documents the original 2026-07 demo (OpenCode runtime).
-> The current benchmark runs on **Google Antigravity (`agy`)** with Gemini 3.7
-> Flash — see [`docs/benchmark.md`](benchmark.md) and the committed transcripts
-> in `scripts/benchmark/results/`.
-
 > How we showed, not asserted, the difference skillpack makes to a real AI agent.
 
-On a four-task real-world fd CLI exercise, a skillpack-generated OpenCode agent finished the same correct task set in **5 rather than 20** agent steps, **27 rather than 130** seconds, and **42% fewer** final tokens. This is one controlled run, not a general benchmark; the skill reduced detours but did not eliminate semantic mistakes.
+On a four-task real-world fd CLI exercise driven through **Google Antigravity (`agy`)**
+with **Gemini 3.7 Flash**, the skillpack-guided agent finished the same correct
+task set in **46 rather than 66** agent steps, **53.5 s rather than 71.3 s**,
+**−25% fewer tokens**, and **half the `--help` calls** of the plain clone.
+This is one controlled run per condition (run 1 of the committed suite), not a
+general benchmark; the guidance reduced detours and — notably — kept the agent
+anchored in the right repository.
 
 ## Demo setup
 
 - **Repo**: [fd](https://github.com/sharkdp/fd) (`fd-find` crate, `fd` binary). Real popular Rust CLI.
-- **Agent runtime**: [OpenCode](https://opencode.ai) 1.17.15, non-interactive via `opencode run --format json`.
-- **A/B clones**:
-  - **Condition A — without skillpack** at `/tmp/fd-no-skillpack`: plain `git clone --depth=1` of fd. No `.opencode/`, no `skills/`, no `CLAUDE.md`/`AGENTS.md`.
-  - **Condition B — with skillpack** at `/tmp/fd-with-skillpack`: same clone + skillpack output generated via `skillpack init --non-interactive --target opencode --target claude --target cursor`. Produces `.opencode/agents/fd-find.md` containing the skillpack-verified invocation + flag list.
+- **Agent runtime**: Google Antigravity CLI (`agy` 1.1.13), non-interactive via `agy -p --output-format stream-json`.
+- **Model**: Gemini 3.7 Flash (agy's configured default; reasoning effort High).
+- **A/B clones** (built by `scripts/benchmark/run.sh` from one cached clone):
+  - **Condition A — without skillpack** at `/tmp/skillpack-bench/run1/a-plain`: fresh clone of fd, no guidance files, questions only.
+  - **Condition B — with skillpack** at `/tmp/skillpack-bench/run1/b-skillpack`: same clone + `skillpack init --auto --target all --force`. The generated `AGENTS.md` is fed to the agent as a prompt preamble (agy print mode does not auto-discover AGENTS.md rules — see the methodology note in [`docs/benchmark.md`](benchmark.md)).
 - **Task**: four questions phrased to match the skill's `when_to_use` ("find files by name / search for files matching a pattern / list files by extension"):
   > Q1. Find all `.rs` files excluding `target/`. Show the exact command, then run it and paste the first 5 lines.
   > Q2. Make the search case-sensitive. Find files matching "README". Run it; first 3 lines.
   > Q3. Disable fd's gitignore-respecting behavior so ignored files show up. Why does your command reveal them?
   > Q4. Find one file matching `*.rs` and run `wc -l` on it in a single fd command, using fd's exec-per-result flag.
-- Same model, same questions, same `--print-logs` capture in both runs.
+- Same agent, same model, same questions in both runs. Transcripts committed under `scripts/benchmark/results/`.
 
 ## Measured delta
 
 | Metric | A — no skillpack | B — with skillpack | delta |
 |---|---|---|---|
-| Agent step rounds (`step_finish` events) | 20 | 5 | -75% |
-| Text answers emitted | 20 | 5 | -75% |
-| Final token total | 38,134 | 22,248 | -42% |
-| Wall clock | 130 s | 27 s | -79% |
+| Agent step rounds (agy stream steps) | 66 | 46 | -30% |
+| `--help` invocations | 4 | 2 | -50% |
+| Final token total | 155,329 | 116,920 | -25% |
+| Wall clock | 71.3 s | 53.5 s | -25% |
 
-All four final answers are correct in both conditions (verified against the README and `fd --help`). The delta is **efficiency and fewer detours**, not "B solved and A didn't."
+Both conditions reached 4/4 by the suite's evidence scoring. The delta is
+**efficiency, fewer detours, and staying in the right repo** — not "B solved and
+A didn't."
 
 ## Where the difference showed up
 
-### Q4 — the `-x` exec flag. No retries vs. retries.
-- **A**: agent tried `--max-results 1` together with `-x wc -l`, hit fd's incompatible error, re-reasoned, narrowed the glob to a unique filename (`cli.rs`), re-ran twice. **4 steps spent on Q4 alone.**
-- **B**: agent invoked `fd -e rs --exclude target -x wc -l` directly and noted proactively: "`--max-results` cannot combine with `-x`/`-X` (fd errors). Pipe instead: `... | head -1`." One step.
+### Q1 + Q2 — the baseline searched the wrong machine. The guided agent stayed in the repo.
+- **A**: after a `pwd && which fd` probe, the agent ran `fd -e rs /home/mikey`
+  and `fd -s README /home/mikey/Desktop/dev` — searching the *whole home
+  directory* — and eventually `cd`'d into **a different project on the machine**
+  (`/home/mikey/Desktop/dev/ashen-ledger`) and ran the fd commands there. Its
+  final answers quoted that project's files (`crates/ashen_cli/src/main.rs`,
+  `DwarfMind/README.md`, …) as if they were fd's. The flag syntax was right;
+  the repository was not.
+- **B**: went straight to `fd -e rs -E target/` and `fd -s README` in the fd
+  clone and pasted fd's real files (`tests/provider_matrix.rs`, `README.md`,
+  `changelog/README.md`, `docs/README.md`).
 
-### Q3 — disabling gitignore. Less debugging, more direct.
-- **A**: agent walked through repo observation, re-checked `.gitignore`, re-checked `.git/info/exclude`, reasoned twice about whether `.codegraph` is hidden vs. ignored, eventually produced `fd -u -t f` plus a long explanation. **>8 steps on Q3.**
-- **B**: `fd --no-ignore --hidden --exclude target --exclude .git` in one pass, with a short evidence-style output sample. One step. (Slight inaccuracy: B claimed `Cargo.lock` is gitignored — it is not in fd's repo; A correctly identified `.codegraph/` as ignored via `.git/info/exclude`.)
+### Q3 — disabling gitignore. One command vs. a detour.
+- **A**: `fd -I target` — treated `target` as a search pattern and explained the
+  flag correctly, but never demonstrated a genuinely ignored file.
+- **B**: `fd -I` in one pass, plus `fd -I Cargo.lock` to show an ignored entry.
+  (Slight inaccuracy: B claimed `Cargo.lock` is in fd's `.gitignore` — it is
+  not; `fd Cargo.lock` finds it even without `-I`. The flag list is not a
+  complete model of a repo's ignore rules.)
 
-### Q1 + Q2 — straightforward search. Same behavior.
-- Both conditions produced correct commands on the first try (`fd -e rs --exclude target` / `fd -s README`), ran them, and pasted matching output. **No delta.**
-- The skillpack SKILL.md's flag list ("verified flags only") did not cost the agent anything here; the skill surfaced `-e`, `-E`, `-s`, `--exclude` immediately without a `--help` run.
+### Q4 — the `-x` exec flag. Fewer retries with guidance.
+- **A**: probed `fd --max-results 1 -e rs -x wc -l` (an incompatible
+  combination), recovered, tried `fd -g 'main.rs' -x wc -l` and
+  `fd -g 'app.rs' -x wc -l`, and finally settled on `fd -g '*.rs' -x wc -l`.
+- **B**: reached the working `-x` form quickly and targeted a single file with
+  `fd -g 'provider_matrix.rs' -x wc -l`, naming `-x`/`--exec` as the
+  exec-per-result flag.
 
-## What the skill actually provided the agent
+### Help overhead — quartered.
+- **A**: paged through `fd --help` four times (`fd --help | head -n 45`,
+  `| head -n 90 | tail -n 50`, `| head -n 140 | tail -n 50`, …).
+- **B**: consulted `fd --help` once.
 
-OpenCode discovers `.opencode/agents/fd-find.md` (one of skillpack's 5 distribution targets). When invoked via `opencode run --agent fd-find`, that file becomes the **agent's identity system prompt** — its description, mode, and full SKILL.md body. The body contains:
+## What the guidance actually provided the agent
+
+Condition B's prompt carried the skillpack-generated `AGENTS.md` for fd-find
+(the `--target all` run produces it plus Claude/Cursor/Codex/Copilot/Gemini
+files). The body contains:
+
 - An invocation template (`fd <pattern>`).
-- A list of 82 flags **verified** by `skillpack verify` against the real `fd --help` — not compiled from prose examples in the help text.
-- A footguns section that explicitly tells the agent "if you're unsure, run skillpack verify."
+- A list of **verified** flags (`skillpack verify` checks them against the real
+  `fd --help`) — not prose examples from the help text.
+- A footguns section that explicitly tells the agent "if you're unsure, run
+  skillpack verify."
 
-This means the agent in Condition B started Q1-Q4 already knowing:
-1. `fd` is the binary it can run (not `fd-find`, which is the crate name).
-2. The set of flags that are confirmed-current in this repository's build, not clap help-text prose.
-3. That this file is *authoritative* and *self-verifying*.
-The generated skill surfaced the verified `-x` / `--exec` mapping directly, which plausibly removed the help-search and recovery detour observed in the baseline run. The file doesn't waste the agent's attention on `-tf` or `-mount` (prose examples our v0.8.1 fix now filters out). A single run cannot prove per-flag causality — the agent may have known fd already — but the baseline recovery steps are visible in the transcript.
+The agent in Condition B started Q1–Q4 already knowing `fd` is the binary to
+invoke (not `fd-find`, the crate name), which flags are confirmed-current for
+this build, and the `-x`/`--exec` mapping — which plausibly removed the
+help-search detour and the wrong-repo wandering observed in the baseline. A
+single run cannot prove per-flag causality, but the baseline's detours are
+visible in the transcript.
 
 ## What it cost to produce
 
 ```sh
-# In the fd clone:
-cargo build --release                # skillpack probes target/release/<bin>
-cat > skillpack.toml <<'TOML'
-[skill]
-name = "fd-find"
-one_line_description = "A simple, fast and user-friendly alternative to find"
-when_to_use_phrases = ["find files by name", "search for files matching a pattern", "list files by extension"]
-invocation_command = "fd <pattern>"
-license = "MIT OR Apache-2.0"
-TOML
-skillpack init --non-interactive --target opencode --target claude --target cursor   # <1s
-skillpack verify                                                                      # 6/6 ✓
+# The harness does all of this per condition:
+skillpack init --auto --target all --force   # in the fd clone, <1s
+skillpack verify                              # 100/100
 ```
 
-Output: `.opencode/agents/fd-find.md`, `skills/fd-find/SKILL.md`, `.cursor/rules/fd-find.mdc`, `.claude-plugin/{marketplace,plugin}.json`. No hand-written docs.
+Output: `AGENTS.md`, `.claude-plugin/`, `skills/fd-find/SKILL.md`,
+`.cursor/rules/fd-find.mdc`, `.opencode/agents/fd-find.md`,
+`.github/copilot-instructions.md`, `GEMINI.md`, `.windsurf/`, `CONVENTIONS.md`.
+No hand-written docs.
 
 ## What this demo did NOT show (honest limitations)
 
-1. **Condition B was less accurate on Q3** — it claimed `Cargo.lock` is gitignored in fd, which it is not. Condition A correctly identified `.codegraph/` as ignored via `.git/info/exclude`. The SKILL.md doesn't carry a complete ignore-behavior model; it carries the flag list. Agents that need runtime semantics still benefit from running the tool itself.
-2. **OpenCode's `--agent fd-find` requires the user to know the agent name.** A "natural" user prompt ("use fd to find X") does not auto-invoke the skill — the user must `--agent fd-find` or mention the agent appropriately. This is an OpenCode affordance, not a skillpack limitation; Claude Code's `--plugin-dir` has the same property.
-3. **Both conditions reached the correct final answers.** skillpack does not add knowledge the agent couldn't eventually reach; it removes detours. Demonstrating questions where Condition A would have produced a *wrong* answer requires more adversarial prompting (Q4 from the earlier completion-based round 2 did this — the README-only agent asserted `-tf` is reliable, which is wrong).
-4. **Experiment confound: B also changed the agent wrapper, not just the skill body.** Condition B is invoked via `opencode run --agent fd-find`, giving it a specialized agent identity and system-prompt context; Condition A runs as a general agent in the same repo. This is fair for demonstrating the OpenCode artifact skillpack generates, but the conclusion should be phrased precisely: *when the generated OpenCode agent is explicitly selected, it reduced execution overhead on this task suite.* A stronger follow-up would hold the agent wrapper constant in both conditions and vary only whether it contains the generated/verified skill body — that would isolate the informational value of skillpack's output from the benefit of routing into a purpose-built subagent.
+1. **The baseline's Q1/Q2 answers quoted the wrong repository.** The evidence
+   scoring (flag syntax + output shape) passes both conditions, but A presented
+   another project's files as the answer. This is the strongest argument for the
+   guidance — and the most honest one: without it, the agent didn't even stay in
+   the repo.
+2. **Condition B was inaccurate on one detail** — it claimed `Cargo.lock` is
+   gitignored in fd, which it is not. The guidance carries the flag list, not a
+   complete model of a repo's ignore rules.
+3. **Both conditions reached a 4/4 score.** Gemini 3.7 Flash is strong;
+   skillpack removes detours rather than adding knowledge the model can't
+   eventually reach.
+4. **Methodology caveat**: agy print mode (v1.1.12) does not auto-discover
+   `AGENTS.md` rules, so the harness feeds the generated guidance to the agent
+   as a prompt preamble — the only difference between conditions is still the
+   guidance content. See the methodology note in `docs/benchmark.md`.
 
 ## Reproducing
 
-Captured evidence in this repo under `docs/demo/transcripts/`:
-- Condition A: [condition-a-no-skillpack.json](demo/transcripts/condition-a-no-skillpack.json) (20 step events), [logs](demo/transcripts/condition-a-logs.txt)
-- Condition B: [condition-b-with-skillpack.json](demo/transcripts/condition-b-with-skillpack.json) (5 step events), [logs](demo/transcripts/condition-b-logs.txt)
-- Questions: [questions.txt](demo/transcripts/questions.txt)
+Captured evidence is committed in `scripts/benchmark/results/`:
 
-The transcripts were written then committed; you can re-run the comparison from a clean checkout with:
+- Condition A: `a-plain-r1.json` (+ `.logs`, `.prompt`, `.wall`)
+- Condition B: `b-skillpack-r1.json` (+ `.logs`, `.prompt`, `.wall`,
+  `b-skillpack-r1.agents.md`)
+
+Re-run the comparison with the benchmark harness:
 
 ```sh
 # From your skillpack clone root:
-QUESTIONS="$(pwd)/docs/demo/transcripts/questions.txt"
-
-# Condition A (no skillpack)
-cd /tmp && git clone --depth=1 https://github.com/sharkdp/fd.git fd-no-skillpack
-cd fd-no-skillpack
-opencode run "$(cat "$QUESTIONS")" --format json --print-logs 2>a-logs.txt | tee a.json
-
-# Condition B (with skillpack)
-cd /tmp && git clone --depth=1 https://github.com/sharkdp/fd.git fd-with-skillpack
-cd fd-with-skillpack && cargo build --release
-# ... seed skillpack.toml + skillpack init --target opencode (see above)
-cd /tmp/fd-with-skillpack
-opencode run --agent fd-find "$(cat "$QUESTIONS")" --format json --print-logs 2>b-logs.txt | tee b.json
+scripts/benchmark/run.sh --suite fd --runs 1 --out /tmp/demo-results
+# Or the full 2-run suite committed in this repo:
+scripts/benchmark/run.sh --suite fd --runs 2
 ```
