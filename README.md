@@ -130,19 +130,19 @@ Running `skillpack init --target all` generates a clean, non-intrusive distribut
 We benchmarked autonomous coding agents (Google Antigravity `agy` with Gemini 3.7 Flash) performing complex search and execution tasks on a plain repository clone versus a `skillpack`-guided clone:
 
 ```
-Baseline (Plain Clone):     [Help Grep ×4] ──> [Wandered into other projects] ──> [Success in 60 Rounds] (63s)
-Guided (With skillpack):    [Verified Flags, Anchored in Repo] ───────────────────> [Success in 48 Rounds] (53s)
+Baseline (Plain Clone):     [Help Grep ×4] ──> [Wandered into other projects] ──> [Success in 60 Rounds] (51s)
+Guided (With skillpack):    [Verified Flags, Anchored in Repo] ───────────────────> [Success in 40 Rounds] (35s)
 ```
 
-### Performance Metrics (Google Antigravity / `sharkdp/fd` Benchmark Suite)
+### Performance Metrics (Google Antigravity / `sharkdp/fd` Benchmark Suite, 3 runs per condition)
 
 | Metric | Plain Clone (Baseline) | Clone + skillpack | Improvement |
 |---|---|---|---|
-| **Wall Clock Latency** | 62.6 s | **53.0 s** | **15% Faster** |
-| **Reasoning Rounds** | 60.0 steps | **48.0 steps** | **20% Fewer Steps** |
-| **Help Query Detours** | 4.0 queries | **1.5 queries** | **63% Fewer** |
-| **Token Consumption** | 145.1k tokens | **123.1k tokens** | **15% Fewer** |
-| **Task Accuracy** | 4.0 / 4 (100%) | **4.0 / 4 (100%)** | Tie — both perfect |
+| **Wall Clock Latency** | 50.8 s | **34.5 s** | **32% Faster** |
+| **Reasoning Rounds** | 60.0 steps | **40.0 steps** | **33% Fewer Steps** |
+| **Help Query Detours** | 4.0 queries | **2.0 queries** | **50% Fewer** |
+| **Token Consumption** | 146.1k tokens | **100.5k tokens** | **31% Fewer** |
+| **Task Accuracy** | 4.0 / 4 (median) | **4.0 / 4 (every run)** | Guided perfect in all runs |
 
 > *Full benchmark methodology, repeatable test suites (`fd`, `ripgrep`, `bat`), and replay harness documentation are available in [`docs/benchmark.md`](docs/benchmark.md). Want to see it happen? Read the step-by-step [`docs/agent-demo.md`](docs/agent-demo.md) — or reproduce the A/B run yourself from the committed transcripts.*
 

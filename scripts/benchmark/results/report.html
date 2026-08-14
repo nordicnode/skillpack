@@ -200,7 +200,7 @@
         </div>
       </div>
       <div>
-        <span style="font-size: 0.85rem; color: var(--text-muted);">Total Runs: 4</span>
+        <span style="font-size: 0.85rem; color: var(--text-muted);">Total Runs: 6</span>
       </div>
     </header>
 
@@ -209,26 +209,26 @@
       <div class="kpi-card">
         <div class="kpi-title">Agent Steps / Rounds</div>
         <div class="kpi-value">
-          48.0
-          <span class="kpi-delta delta-negative">-20%</span>
+          40
+          <span class="kpi-delta delta-negative">-33%</span>
         </div>
-        <div class="kpi-sub">Baseline: 60.0 steps</div>
+        <div class="kpi-sub">Baseline: 60 steps</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-title">Wall Clock Time</div>
         <div class="kpi-value">
-          53.05s
-          <span class="kpi-delta delta-negative">-15%</span>
+          34.5s
+          <span class="kpi-delta delta-negative">-32%</span>
         </div>
-        <div class="kpi-sub">Baseline: 62.599999999999994s</div>
+        <div class="kpi-sub">Baseline: 50.8s</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-title">Help Searches Run</div>
         <div class="kpi-value">
-          1.5
-          <span class="kpi-delta delta-negative">-2.5</span>
+          2
+          <span class="kpi-delta delta-negative">-2</span>
         </div>
-        <div class="kpi-sub">Baseline: 4.0 calls</div>
+        <div class="kpi-sub">Baseline: 4 calls</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-title">Evidence Accuracy</div>
@@ -259,22 +259,22 @@
         <tbody>
           <tr>
             <td><strong>⚪ a-plain</strong></td>
+            <td>3</td>
+            <td>60</td>
+            <td>50.8s</td>
+            <td>4</td>
             <td>2</td>
-            <td>60.0</td>
-            <td>62.599999999999994s</td>
-            <td>4.0</td>
-            <td>2.0</td>
-            <td>145081.5</td>
+            <td>146081</td>
             <td><strong>4.0/4</strong></td>
           </tr>
           <tr>
             <td><strong>⚡ b-skillpack</strong></td>
+            <td>3</td>
+            <td>40</td>
+            <td>34.5s</td>
             <td>2</td>
-            <td>48.0</td>
-            <td>53.05s</td>
-            <td>1.5</td>
-            <td>1.5</td>
-            <td>123119.5</td>
+            <td>2</td>
+            <td>100504</td>
             <td><strong>4.0/4</strong></td>
           </tr>
         </tbody>
@@ -302,44 +302,66 @@
           <tr>
             <td class="mono">a-plain-r1</td>
             <td>a-plain</td>
-            <td>66</td>
-            <td>71.3s</td>
+            <td>62</td>
+            <td>56.6s</td>
             <td>4</td>
             <td>2</td>
-            <td>155329</td>
+            <td>146081</td>
             <td>4.0/4</td>
             <td><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span></td>
           </tr>
           <tr>
             <td class="mono">a-plain-r2</td>
             <td>a-plain</td>
-            <td>54</td>
-            <td>53.9s</td>
+            <td>60</td>
+            <td>50.8s</td>
             <td>4</td>
             <td>2</td>
-            <td>134834</td>
+            <td>160147</td>
             <td>4.0/4</td>
             <td><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span></td>
           </tr>
           <tr>
+            <td class="mono">a-plain-r3</td>
+            <td>a-plain</td>
+            <td>30</td>
+            <td>41.7s</td>
+            <td>2</td>
+            <td>2</td>
+            <td>105234</td>
+            <td>3.0/4</td>
+            <td><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='cross-mark'>✗</span><span class='check-mark'>✓</span></td>
+          </tr>
+          <tr>
             <td class="mono">b-skillpack-r1</td>
             <td>b-skillpack</td>
-            <td>46</td>
-            <td>53.5s</td>
+            <td>40</td>
+            <td>34.5s</td>
             <td>2</td>
             <td>2</td>
-            <td>116920</td>
+            <td>100504</td>
             <td>4.0/4</td>
             <td><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span></td>
           </tr>
           <tr>
             <td class="mono">b-skillpack-r2</td>
             <td>b-skillpack</td>
-            <td>50</td>
-            <td>52.6s</td>
+            <td>48</td>
+            <td>86.8s</td>
+            <td>3</td>
+            <td>2</td>
+            <td>121829</td>
+            <td>4.0/4</td>
+            <td><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span></td>
+          </tr>
+          <tr>
+            <td class="mono">b-skillpack-r3</td>
+            <td>b-skillpack</td>
+            <td>28</td>
+            <td>24.4s</td>
             <td>1</td>
             <td>1</td>
-            <td>129319</td>
+            <td>74581</td>
             <td>4.0/4</td>
             <td><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span></td>
           </tr>
@@ -354,10 +376,40 @@
         <div class="diff-col">
           <h4>Baseline (a-plain)</h4>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> pwd &amp;&amp; which fd || which fdfind
+            <span class="step-tag tag-cmd">CMD</span> which fd || which fdfind
           </div>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> fd -e rs /home/mikey | head -n 10
+            <span class="step-tag tag-cmd">CMD</span> pwd; ls -la; ls -la ..
+          </div>
+          <div class="diff-step ">
+            <span class="step-tag tag-cmd">CMD</span> fd -e rs . /home/mikey | head -n 10
+          </div>
+          <div class="diff-step ">
+            <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey/Desktop/dev/ashen-ledger
+          </div>
+          <div class="diff-step ">
+            <span class="step-tag tag-cmd">CMD</span> cat /home/mikey/Desktop/dev/ashen-ledger/.gitignore
+          </div>
+          <div class="diff-step ">
+            <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey/Desktop/dev/ashen-ledger/target
+          </div>
+          <div class="diff-step help">
+            <span class="step-tag tag-help">HELP</span> fd --help
+          </div>
+          <div class="diff-step help">
+            <span class="step-tag tag-help">HELP</span> fd -h
+          </div>
+        </div>
+        <div class="diff-col">
+          <h4>Guided (b-skillpack)</h4>
+          <div class="diff-step ">
+            <span class="step-tag tag-cmd">CMD</span> which fd || which fdfind
+          </div>
+          <div class="diff-step ">
+            <span class="step-tag tag-cmd">CMD</span> pwd; ls -la
+          </div>
+          <div class="diff-step ">
+            <span class="step-tag tag-cmd">CMD</span> fd --version; fd -e rs /home/mikey
           </div>
           <div class="diff-step ">
             <span class="step-tag tag-cmd">CMD</span> fd -e rs . /home/mikey | head -n 20
@@ -366,43 +418,13 @@
             <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey/Desktop/dev/ashen-ledger
           </div>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey/Desktop/dev/ashen-ledger/target
-          </div>
-          <div class="diff-step ">
             <span class="step-tag tag-cmd">CMD</span> cat /home/mikey/Desktop/dev/ashen-ledger/.gitignore
           </div>
-          <div class="diff-step help">
-            <span class="step-tag tag-help">HELP</span> fd --help
-          </div>
-          <div class="diff-step help">
-            <span class="step-tag tag-help">HELP</span> fd --help | head -n 45
-          </div>
-        </div>
-        <div class="diff-col">
-          <h4>Guided (b-skillpack)</h4>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> pwd &amp;&amp; which fd &amp;&amp; fd --version
+            <span class="step-tag tag-cmd">CMD</span> fd -e rs -E target
           </div>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey &amp;&amp; ls -la /home/mikey/.gemini/antigravity-cli/scratch
-          </div>
-          <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> fd -t d --max-depth 3
-          </div>
-          <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> fd -e rs
-          </div>
-          <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey/Desktop/dev/xponent/other-harness-examples/jcode-master
-          </div>
-          <div class="diff-step help">
-            <span class="step-tag tag-help">HELP</span> fd --help
-          </div>
-          <div class="diff-step help">
-            <span class="step-tag tag-help">HELP</span> fd --help | head -n 50
-          </div>
-          <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey/Desktop/dev/xponent/other-harness-examples/jcode-master
+            <span class="step-tag tag-cmd">CMD</span> fd -s README
           </div>
         </div>
       </div>

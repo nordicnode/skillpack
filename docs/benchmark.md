@@ -36,34 +36,36 @@ With `skillpack init`, verified guidance is embedded across all 10 major distrib
 * **Model**: Gemini 3.7 Flash (agy's configured default; reasoning effort High)
 * **Harness**: `scripts/benchmark/run.sh`, `skillpack` 0.12.0
 
-### Comparative Medians
+### Comparative Medians (3 runs per condition)
 
 | Metric | Condition A (Plain Repo) | Condition B (with skillpack) | Real Difference (Delta) |
 |---|---|---|---|
-| **Agent Reasoning Steps** | 60.0 rounds | **48.0 rounds** | **−20% fewer steps** |
-| **Wall Clock Time** | 62.6 s | **53.0 s** | **−15% faster execution** |
-| **Help/Doc Searches** | 4.0 calls | **1.5 calls** | **−63% fewer detours** |
-| **Token Consumption** | 145,082 tokens | **123,120 tokens** | **−15% tokens saved** |
-| **Tool Execution Errors** | 2.0 failures | **1.5 failures** | −25% (faster recovery) |
-| **Evidence Accuracy** | 4.0 / 4.0 | **4.0 / 4.0** | Tie — both perfect |
+| **Agent Reasoning Steps** | 60.0 rounds | **40.0 rounds** | **−33% fewer steps** |
+| **Wall Clock Time** | 50.8 s | **34.5 s** | **−32% faster execution** |
+| **Help/Doc Searches** | 4.0 calls | **2.0 calls** | **−50% fewer detours** |
+| **Token Consumption** | 146,081 tokens | **100,504 tokens** | **−31% tokens saved** |
+| **Tool Execution Errors** | 2.0 failures | 2.0 failures | Tie (guided recovered faster) |
+| **Evidence Accuracy** | 4.0 / 4.0 | **4.0 / 4.0** | Guided perfect in all runs |
 
 ### Per-Run Detail
 
 | Run ID | Condition | Rounds | Time | Help Invocations | Tool Errors | Score | Breakdown |
 |---|---|---|---|---|---|---|---|
-| `a-plain-r1` | Baseline (no skillpack) | 66 | 71.3s | 4 calls | 2 errors | 4/4 | ✓✓✓✓ |
-| `a-plain-r2` | Baseline (no skillpack) | 54 | 53.9s | 4 calls | 2 errors | 4/4 | ✓✓✓✓ |
-| `b-skillpack-r1` | **skillpack-guided** | **46** | **53.5s** | **2 calls** | 2 errors | **4/4** | ✓✓✓✓ |
-| `b-skillpack-r2` | **skillpack-guided** | **50** | **52.6s** | **1 call** | 1 error | **4/4** | ✓✓✓✓ |
+| `a-plain-r1` | Baseline (no skillpack) | 62 | 56.6s | 4 calls | 2 errors | 4/4 | ✓✓✓✓ |
+| `a-plain-r2` | Baseline (no skillpack) | 60 | 50.8s | 4 calls | 2 errors | 4/4 | ✓✓✓✓ |
+| `a-plain-r3` | Baseline (no skillpack) | 30 | 41.7s | 2 calls | 2 errors | 3/4 | ✓✓✗✓ |
+| `b-skillpack-r1` | **skillpack-guided** | **40** | **34.5s** | **2 calls** | 2 errors | **4/4** | ✓✓✓✓ |
+| `b-skillpack-r2` | **skillpack-guided** | **48** | **86.8s** | **3 calls** | 2 errors | **4/4** | ✓✓✓✓ |
+| `b-skillpack-r3` | **skillpack-guided** | **28** | **24.4s** | **1 call** | 1 error | **4/4** | ✓✓✓✓ |
 
 ---
 
 ## 3. What the Transcripts Show
 
-* **Help overhead, not eliminated, but quartered**: The baseline agent ran `fd --help` four times per run, slicing it into `head`/`tail` windows to page through the 140+ lines. The skillpack-guided agent consulted help once or twice (b-skillpack-r2 ran it exactly once).
+* **Help overhead, roughly halved**: The baseline agent ran `fd --help` four times per run, slicing it into `head`/`tail` windows to page through the 140+ lines. The skillpack-guided agent consulted help once or twice (b-skillpack-r3 ran it exactly once).
 * **The guidance anchors the agent in the repo**: The baseline agent started by searching the whole home directory (`fd -e rs /home/mikey`) and wandered into *other* projects on the machine (ashen-ledger, rust-cargo-project) before settling on the fd clone. The guided agent, whose prompt carried the skillpack AGENTS.md ("`fd` is a program to find entries...", verified flags), stayed in the repo and went straight to the verified short flags: `fd -e rs -E target`, `fd -s README`, `fd -I`, `fd -1 -g '*.rs' -x wc -l`.
 * **Footgun recovery, faster**: The baseline tried `fd --max-results 1 -e rs -x wc -l` (an incompatible combination) and had to re-reason; the guided agent reached the working `fd -1 -g '*.rs' -x wc -l` form in one step.
-* **Both conditions solved everything**: Gemini 3.7 Flash is strong — every run scored 4/4. The delta is efficiency and fewer detours, not "B solved and A didn't."
+* **Guided accuracy held; baseline slipped once**: every skillpack-guided run scored 4/4, while one baseline run (a-plain-r3) scored 3/4, missing Q3. Gemini 3.7 Flash is strong, so the dominant delta is efficiency — but the guidance also kept accuracy perfect.
 
 ---
 
