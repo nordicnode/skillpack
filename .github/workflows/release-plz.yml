@@ -8,16 +8,27 @@
 #
 # After merging the release PR, cut the matching tag to ship it:
 #   git tag vX.Y.Z && git push origin vX.Y.Z
-# The CI `version-sync` job (ci.yml) fails the release PR until the
-# `skillpack-version` default in .github/workflows/skillpack.yml is bumped to
-# the same version, so the reusable workflow never drifts out of sync.
 #
-# NOTE: opening the PR uses the GITHUB_TOKEN, which requires the repo setting
-# "Allow GitHub Actions to create and approve pull requests" (Settings >
-# Actions > General > Workflow permissions). Without it, GitHub returns 403
-# and the step degrades gracefully via `continue-on-error` below rather than
-# failing the main branch — the 403 is still visible in the step log. Enable
-# that setting (or swap in a PAT secret) to make the release PR automatic.
+# The version lives in three places that must move together: Cargo.toml's
+# [package].version, the reusable workflow's `skillpack-version` default
+# (.github/workflows/skillpack.yml), and the committed plugin.json manifest.
+# release-plz only bumps Cargo.toml, so a follow-up step below ("Sync version
+# files") bumps the other two on the same release branch; without it the CI
+# `version-sync` job (ci.yml) would fail the release PR.
+#
+# Authentication: prefer a PAT via the RELEASE_PLZ_TOKEN secret. When the
+# release PR is authored by github-actions[bot] (the default GITHUB_TOKEN),
+# GitHub puts the `pull_request`-triggered CI/verify runs into the
+# "action_required" state (awaiting a maintainer's "Approve and run" click)
+# to prevent recursive workflow chains. A PAT makes the PR author the token
+# owner, so those runs start automatically. Without the secret it degrades to
+# GITHUB_TOKEN — the release PR still works, but needs that one approval.
+#   gh secret set RELEASE_PLZ_TOKEN   # a fine-grained PAT with
+#                                     # contents:write + pull-requests:write
+# Opening the PR also requires the repo setting "Allow GitHub Actions to
+# create and approve pull requests" (Settings > Actions > General > Workflow
+# permissions); without it GitHub returns 403 and the step degrades via
+# `continue-on-error` below rather than failing main.
 name: release-plz
 
 permissions:
@@ -32,6 +43,14 @@ jobs:
   release-plz:
     name: Release-plz
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+      # Gate the whole job on the PAT: without it the release PR would be
+      # authored by github-actions[bot] and its CI would sit in the
+      # "action_required" (awaiting approval) state on every push. Skipping
+      # (rather than falling back to GITHUB_TOKEN) keeps main green and quiet
+      # until the secret is added; release PRs become automatic once it is.
+      HAS_PAT: ${{ secrets.RELEASE_PLZ_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -41,11 +60,41 @@ jobs:
         with:
           toolchain: 'stable'
       - name: Run release-plz
+        id: release-plz
+        if: env.HAS_PAT == 'true'
         uses: release-plz/action@v0.5
         with:
           command: release-pr
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The action reads GITHUB_TOKEN for git auth + PR creation; point it
+          # at the PAT when present so the PR author is a user, not a bot.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
         # Best-effort: without the repo setting above this 403s on PR open;
-        # don't let a release-note step gate the main branch.
+        # don't let a release-note step gate the main branch. On 403 the
+        # `prs_created` output is empty and the sync step below is skipped.
         continue-on-error: true
+
+      # release-plz bumps only Cargo.toml/Cargo.lock/CHANGELOG.md. Bump the two
+      # other version locations (plugin.json, skillpack.yml) on the same branch
+      # so the CI `version-sync` + self-dogfood `verify` jobs stay green on the
+      # release PR.
+      - name: Sync version files into the release PR
+        if: steps.release-plz.outputs.prs_created == 'true'
+        run: |
+          set -euo pipefail
+          pr_number=$(gh pr list --label release --state open --limit 1 --json number -q '.[0].number')
+          branch=$(gh pr view "$pr_number" --json headRefName -q '.headRefName')
+          echo "release PR #$pr_number on branch '$branch'"
+          git fetch origin "$branch"
+          git checkout -f -B "$branch" "origin/$branch"
+          ver=$(awk 'BEGIN{in_pkg=0} /^\[package\]/{in_pkg=1; next} /^\[/{in_pkg=0} in_pkg && /^version[[:space:]]*=/{gsub(/[" ]/, "", $3); print $3; exit}' Cargo.toml)
+          echo "syncing version files to $ver"
+          sed -i -E "s/\"version\": \"[0-9]+\.[0-9]+\.[0-9]+\"/\"version\": \"$ver\"/" .claude-plugin/plugin.json
+          sed -i -E "s/(default: ')[0-9]+\.[0-9]+\.[0-9]+(')/\1$ver\2/" .github/workflows/skillpack.yml
+          if git diff --quiet; then
+            echo "version files already in sync; nothing to commit"
+          else
+            git add .claude-plugin/plugin.json .github/workflows/skillpack.yml
+            git commit -m "chore: sync plugin.json and skillpack.yml to $ver"
+            git push origin "$branch"
+          fi
