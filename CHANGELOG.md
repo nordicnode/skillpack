@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.2](https://github.com/nordicnode/skillpack/compare/v0.12.1...v0.12.2) - 2026-08-14
+
+### Fixed
+
+- sync plugin.json version with 0.12.1 release
+
+### Other
+
+- *(deps)* bump the cargo group with 5 updates ([#5](https://github.com/nordicnode/skillpack/pull/5))
+
 ## [0.12.1](https://github.com/nordicnode/skillpack/compare/v0.12.0...v0.12.1) - 2026-08-14
 
 ### Fixed
