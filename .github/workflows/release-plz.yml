@@ -11,6 +11,13 @@
 # The CI `version-sync` job (ci.yml) fails the release PR until the
 # `skillpack-version` default in .github/workflows/skillpack.yml is bumped to
 # the same version, so the reusable workflow never drifts out of sync.
+#
+# NOTE: opening the PR uses the GITHUB_TOKEN, which requires the repo setting
+# "Allow GitHub Actions to create and approve pull requests" (Settings >
+# Actions > General > Workflow permissions). Without it, GitHub returns 403
+# and the step degrades gracefully via `continue-on-error` below rather than
+# failing the main branch — the 403 is still visible in the step log. Enable
+# that setting (or swap in a PAT secret) to make the release PR automatic.
 name: release-plz
 
 permissions:
@@ -39,3 +46,6 @@ jobs:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Best-effort: without the repo setting above this 403s on PR open;
+        # don't let a release-note step gate the main branch.
+        continue-on-error: true
