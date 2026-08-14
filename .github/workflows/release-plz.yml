@@ -1,0 +1,41 @@
+# Keep a "release PR" open that bumps `Cargo.toml`'s version and regenerates
+# CHANGELOG.md from Conventional Commits. This automates the versioning +
+# changelog step; the actual publish + GitHub Release + cross-compiled
+# binaries still run from .github/workflows/release.yml when a `v*` tag is
+# pushed (that pipeline owns cosign signing and the crates.io idempotency
+# guard, so release-plz is scoped to versioning/changelog only — see
+# release-plz.toml).
+#
+# After merging the release PR, cut the matching tag to ship it:
+#   git tag vX.Y.Z && git push origin vX.Y.Z
+# The CI `version-sync` job (ci.yml) fails the release PR until the
+# `skillpack-version` default in .github/workflows/skillpack.yml is bumped to
+# the same version, so the reusable workflow never drifts out of sync.
+name: release-plz
+
+permissions:
+  pull-requests: write
+  contents: write
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release-plz:
+    name: Release-plz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history is required to compute the next version + changelog.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 'stable'
+      - name: Run release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

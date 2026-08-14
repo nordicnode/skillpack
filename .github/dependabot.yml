@@ -1,0 +1,23 @@
+# Keep dependencies fresh automatically. Dependabot opens bump PRs; CI (fmt,
+# clippy, tests, MSRV, audit) gates each one. `cargo audit` alone only catches
+# known vulnerabilities, not stale or yanked versions, so this closes that gap.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Group all Rust bumps into a single PR to keep review noise low.
+    groups:
+      cargo:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"

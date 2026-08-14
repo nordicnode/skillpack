@@ -920,13 +920,6 @@ pub(crate) fn find_skill_files(root: &Path) -> Vec<std::path::PathBuf> {
     out
 }
 
-/// The first skill file found — kept for the invocation stage, which only
-/// spawns one CLI (the documented one). [`find_skill_files`] is the
-/// deterministic plural form used by discovery.
-pub(crate) fn find_skill_file(root: &Path) -> Option<std::path::PathBuf> {
-    find_skill_files(root).into_iter().next()
-}
-
 /// Validate an `allowed-tools` token against the Anthropic grammar:
 /// a bare identifier (`Read`, `Grep`, `mcp__github__create_issue`) or a
 /// namespaced call (`Bash(npm test:*)`, `Edit(*)`). Returns false for empty,

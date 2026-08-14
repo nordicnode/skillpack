@@ -8,6 +8,7 @@ license = "MIT"
 description = "Generate, verify, and maintain AI agent guidance (skills, plugins, AGENTS.md) for Claude Code, Cursor, Codex, Copilot, and 10+ AI coding ecosystems — one command turns any CLI or library into an agent-discoverable skill pack."
 homepage = "https://github.com/nordicnode/skillpack"
 repository = "https://github.com/nordicnode/skillpack"
+documentation = "https://docs.rs/skillpack"
 keywords = ["cli", "claude", "agent", "skills", "ai-agents"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
@@ -30,6 +31,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
+clap_complete = "4"
 dialoguer = { version = "0.11", default-features = false, features = ["fuzzy-select", "editor"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -40,6 +42,13 @@ regex = "1"
 once_cell = "1"
 tempfile = "3"
 notify = "8"
+
+[target.'cfg(unix)'.dependencies]
+# Process-group kill on timeout: `killpg` reaps the whole tree the child
+# spawned (`go run .`, `dotnet run`, `swift run`, etc.) so a hung `--help`
+# probe can't orphan grandchildren. The single `unsafe` use is isolated in
+# `spawn.rs::kill_tree` and audited; everything else stays `unsafe_code = deny`.
+libc = "0.2"
 
 [dev-dependencies]
 proptest = "1"

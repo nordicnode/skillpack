@@ -81,6 +81,7 @@ fn run_inner(cmd: &mut Command, timeout: Duration, stdin_mode: StdinMode) -> Spa
         }
     };
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    isolate_process_group(cmd);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -111,16 +112,14 @@ fn run_inner(cmd: &mut Command, timeout: Duration, stdin_mode: StdinMode) -> Spa
             Err(_) => break false,
         }
         if Instant::now() > deadline {
-            let _ = child.kill();
-            let _ = child.wait(); // reap so drain threads hit EOF
+            kill_tree(&mut child); // reap so drain threads hit EOF
             return SpawnOutcome::TimedOut;
         }
         std::thread::sleep(Duration::from_millis(10));
     };
 
     if !exited {
-        let _ = child.kill();
-        let _ = child.wait();
+        kill_tree(&mut child);
         return SpawnOutcome::TimedOut;
     }
 
@@ -146,6 +145,53 @@ fn run_inner(cmd: &mut Command, timeout: Duration, stdin_mode: StdinMode) -> Spa
         String::from_utf8_lossy(&stderr_buf)
     );
     SpawnOutcome::RanClean(combined)
+}
+
+/// Put the child in its own process group so a timeout can kill the whole
+/// tree (the child plus any grandchildren it spawned, e.g. `go run .` forking
+/// the compiled binary) instead of orphaning descendants.
+#[cfg(unix)]
+fn isolate_process_group(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    cmd.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn isolate_process_group(_cmd: &mut Command) {}
+
+/// Kill the child and everything it spawned, then reap it.
+///
+/// Unix: the child leads its own process group (see `isolate_process_group`),
+/// so `killpg` signals descendants too. Windows: `taskkill /T` walks the tree;
+/// `Child::kill` alone would only terminate the direct child. The `unsafe`
+/// block is the single audited exception to the crate's `unsafe_code = deny`;
+/// `killpg` is safe in practice (an invalid pgid just returns -1, which we
+/// ignore because the following `wait()` still reaps the direct child).
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id();
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+        }
+        let _ = child.wait();
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 /// Spawn `cmd` (already configured by the caller) under a hard `timeout`.

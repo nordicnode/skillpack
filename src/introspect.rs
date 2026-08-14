@@ -29,9 +29,9 @@ mod workspace;
 
 // Re-export the symbols external callers reach by the flat path:
 // `verify::discovery` uses `detect_language` + `project_manifest_version`,
-// and `csharp_cli_candidate` (now in `cli_candidates`) uses `select_csproj`.
+// `verify` uses `which_on_path` for multi-skill CLI probes, and
+// `csharp_cli_candidate` (now in `cli_candidates`) uses `select_csproj`.
 // The re-exports keep those call sites unchanged after the split.
-#[cfg(test)]
 pub(crate) use cli_candidates::which_on_path;
 pub(crate) use manifest::{project_manifest_version, select_csproj};
 pub(crate) use repo::urls_equivalent;

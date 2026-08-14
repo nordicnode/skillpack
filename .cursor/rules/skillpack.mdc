@@ -53,6 +53,7 @@ This CLI uses subcommands. Each one has its own flags (verified by `skillpack ve
 - `doctor` — flags: `--root`, `--format`, `--verbose`, `--debug`
 - `update` — flags: `--root`, `--target`, `--force`, `--template-dir`, `--verbose`, `--debug`
 - `diff` — flags: `--root`, `--target`, `--force`, `--template-dir`, `--verbose`, `--debug`
+- `completions` — flags: `--verbose`, `--debug`
 
 Run `skillpack <subcommand> --help` for a subcommand's full options.
 

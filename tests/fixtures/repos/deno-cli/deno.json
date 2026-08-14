@@ -1,0 +1,7 @@
+{
+  "name": "sample-deno",
+  "version": "0.1.0",
+  "tasks": {
+    "cli": "deno run -A main.ts"
+  }
+}

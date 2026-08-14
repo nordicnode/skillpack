@@ -96,6 +96,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+      # Keyless cosign signing needs an OIDC token to attest the build.
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -122,3 +124,16 @@ jobs:
           bin: skillpack
           target: ${{ matrix.target }}
           token: ${{ secrets.GITHUB_TOKEN }}
+      # Sign the built binary keylessly (GitHub OIDC identity, no keys to
+      # manage) and attach the cosign bundle as a release asset so `cargo
+      # binstall` / `cosign verify-blob` users can verify provenance.
+      - uses: sigstore/cosign-installer@main
+      - name: Sign binary
+        run: |
+          bin="target/${{ matrix.target }}/release/skillpack"
+          [ "${{ matrix.os }}" = "windows-latest" ] && bin="${bin}.exe"
+          cosign sign-blob --yes --bundle "skillpack-${{ matrix.target }}.bundle" "$bin"
+      - name: Upload signature bundle
+        run: gh release upload "${{ github.ref_name }}" "skillpack-${{ matrix.target }}.bundle"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

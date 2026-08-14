@@ -1,0 +1,6 @@
+#!/bin/sh
+case "$1" in
+  --help) echo "Usage: sample-zig [--new <entry>] [--verbose]"; exit 0;;
+  --version) echo "sample-zig 0.1.0"; exit 0;;
+esac
+echo "sample-zig"

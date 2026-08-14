@@ -1875,11 +1875,13 @@ fn reverse_drift_warns_on_success_path_via_verify_run() {
     );
 }
 
-// GAP #2: a plugin shipping >1 skill each documenting a CLI must warn that the
-// invocation drift check only ran against the first — the others were skipped.
-// Previously this was a documented-but-silent cliff.
+// GAP #2 (closed): a plugin shipping >1 skill, each documenting a CLI, runs the
+// invocation drift check against EVERY skill. The primary CLI spawns from the
+// introspected command; a secondary skill whose binary is not on PATH surfaces
+// an honest `invocation.secondary_not_runnable` WARNING instead of being
+// silently skipped (the old code warned but never checked beyond the first).
 #[test]
-fn multi_cli_plugin_warns_invocation_only_checked_first() {
+fn multi_cli_plugin_checks_every_skill_cli() {
     let root = copy_fixture("rust-cli");
     Command::new("cargo")
         .args(["build", "--quiet"])
@@ -1927,8 +1929,15 @@ fn multi_cli_plugin_warns_invocation_only_checked_first() {
         .clone();
     let s = String::from_utf8_lossy(&out);
     assert!(
-        s.contains("invocation.multi_cli") || s.contains("only run against the first"),
-        "expected a multi-CLI invocation warning, got:\n{s}"
+        s.contains("invocation.secondary_not_runnable")
+            || s.contains("secondary skill documents CLI"),
+        "expected a secondary-CLI not-runnable warning, got:\n{s}"
+    );
+    // The primary skill's invocation check must still have actually run (the
+    // whole point of the multi-CLI fix: every skill is checked, not just warned).
+    assert!(
+        s.contains("documented `--help` runs and produces output"),
+        "primary skill's --help check must run, got:\n{s}"
     );
 }
 
@@ -2559,6 +2568,338 @@ fn csharp_cli_init_then_verify_round_trip() {
     let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
     assert_eq!(v["plugins"][0]["source"], "./");
     assert_eq!(v["plugins"][0]["name"], "sample-csharp");
+}
+
+// --- Zig / Swift / C / C++ / Elixir: `#[ignore]`-gated spawn round trips ---
+//
+// These four fixtures ship a pre-built launcher script (a `#!/bin/sh` stand-in
+// for the compiled binary — the same strategy as the JVM installDist fixture)
+// so the round trip exercises detection + candidate resolution + `--help`
+// spawn + verify WITHOUT compiling Zig/Swift/C++/Elixir on CI. The launcher
+// script is Unix-only (no `.bat` sibling), so they are `#[cfg(unix)]` and
+// self-skip if `sh` is somehow absent. The `sh -c 'exit 0'` probe (not
+// `sh --version`) works on both dash (Ubuntu) and bash (macOS).
+
+#[cfg(unix)]
+fn sh_available() -> bool {
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg("exit 0")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "requires `sh` on PATH (fixture ships a pre-built launcher script); runs on CI via --include-ignored"]
+fn zig_cli_init_then_verify_round_trip() {
+    if !sh_available() {
+        eprintln!("skipped: sh not on PATH (needed for the Zig launcher script)");
+        return;
+    }
+    let root = copy_fixture("zig-cli");
+    let toml = "[skill]\n\
+        name = \"sample-zig\"\n\
+        one_line_description = \"Print a journal entry from Zig\"\n\
+        when_to_use_phrases = [\"log a zig entry\", \"record a quick note\"]\n\
+        invocation_command = \"sample-zig --new\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".claude-plugin/plugin.json").exists());
+    assert!(root.join("skills/sample-zig/SKILL.md").exists());
+
+    let skill = fs::read_to_string(root.join("skills/sample-zig/SKILL.md")).unwrap();
+    assert!(skill.contains("## Invocation"));
+    assert!(!skill.contains("## Usage"));
+
+    // verify must pass — the `zig-out/bin/sample-zig` launcher's `--help`
+    // handler produces output for the invocation check.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify OK"))
+        .stdout(predicate::str::contains(
+            "documented `--help` runs and produces output",
+        ))
+        .stdout(predicate::str::contains(
+            "every documented flag exists in `--help`",
+        ));
+
+    let mp = fs::read_to_string(root.join(".claude-plugin/marketplace.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
+    assert_eq!(v["plugins"][0]["source"], "./");
+    assert_eq!(v["plugins"][0]["name"], "sample-zig");
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "requires `sh` on PATH (fixture ships a pre-built launcher script); runs on CI via --include-ignored"]
+fn swift_cli_init_then_verify_round_trip() {
+    if !sh_available() {
+        eprintln!("skipped: sh not on PATH (needed for the Swift launcher script)");
+        return;
+    }
+    let root = copy_fixture("swift-cli");
+    let toml = "[skill]\n\
+        name = \"sample-swift\"\n\
+        one_line_description = \"Print a journal entry from Swift\"\n\
+        when_to_use_phrases = [\"log a swift entry\", \"record a quick note\"]\n\
+        invocation_command = \"sample-swift --new\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".claude-plugin/plugin.json").exists());
+    assert!(root.join("skills/sample-swift/SKILL.md").exists());
+
+    let skill = fs::read_to_string(root.join("skills/sample-swift/SKILL.md")).unwrap();
+    assert!(skill.contains("## Invocation"));
+    assert!(!skill.contains("## Usage"));
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify OK"))
+        .stdout(predicate::str::contains(
+            "documented `--help` runs and produces output",
+        ))
+        .stdout(predicate::str::contains(
+            "every documented flag exists in `--help`",
+        ));
+
+    let mp = fs::read_to_string(root.join(".claude-plugin/marketplace.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
+    assert_eq!(v["plugins"][0]["source"], "./");
+    assert_eq!(v["plugins"][0]["name"], "sample-swift");
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "requires `sh` on PATH (fixture ships a pre-built launcher script); runs on CI via --include-ignored"]
+fn c_cpp_cli_init_then_verify_round_trip() {
+    if !sh_available() {
+        eprintln!("skipped: sh not on PATH (needed for the C/C++ launcher script)");
+        return;
+    }
+    let root = copy_fixture("c-cpp-cli");
+    let toml = "[skill]\n\
+        name = \"sample-cpp\"\n\
+        one_line_description = \"Print a journal entry from C++\"\n\
+        when_to_use_phrases = [\"log a cpp entry\", \"record a quick note\"]\n\
+        invocation_command = \"sample-cpp --new\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".claude-plugin/plugin.json").exists());
+    assert!(root.join("skills/sample-cpp/SKILL.md").exists());
+
+    let skill = fs::read_to_string(root.join("skills/sample-cpp/SKILL.md")).unwrap();
+    assert!(skill.contains("## Invocation"));
+    assert!(!skill.contains("## Usage"));
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify OK"))
+        .stdout(predicate::str::contains(
+            "documented `--help` runs and produces output",
+        ))
+        .stdout(predicate::str::contains(
+            "every documented flag exists in `--help`",
+        ));
+
+    let mp = fs::read_to_string(root.join(".claude-plugin/marketplace.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
+    assert_eq!(v["plugins"][0]["source"], "./");
+    assert_eq!(v["plugins"][0]["name"], "sample-cpp");
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "requires `sh` on PATH (fixture ships a pre-built launcher script); runs on CI via --include-ignored"]
+fn elixir_cli_init_then_verify_round_trip() {
+    if !sh_available() {
+        eprintln!("skipped: sh not on PATH (needed for the Elixir launcher script)");
+        return;
+    }
+    // The Elixir `app: :sample_elixir` atom extracts as `sample_elixir`; the
+    // pack name is `coerce_kebab`-ed to `sample-elixir`. The launcher binary
+    // keeps the snake_case name (that's what `elixir_cli_candidate` resolves
+    // via `_build/dev/rel/<name>/bin/<name>`), so the invocation documents the
+    // snake_case command while the generated artifacts use the kebab name.
+    let root = copy_fixture("elixir-cli");
+    let toml = "[skill]\n\
+        name = \"sample-elixir\"\n\
+        one_line_description = \"Print a journal entry from Elixir\"\n\
+        when_to_use_phrases = [\"log an elixir entry\", \"record a quick note\"]\n\
+        invocation_command = \"sample_elixir --new\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".claude-plugin/plugin.json").exists());
+    assert!(root.join("skills/sample-elixir/SKILL.md").exists());
+
+    let skill = fs::read_to_string(root.join("skills/sample-elixir/SKILL.md")).unwrap();
+    assert!(skill.contains("## Invocation"));
+    assert!(!skill.contains("## Usage"));
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify OK"))
+        .stdout(predicate::str::contains(
+            "documented `--help` runs and produces output",
+        ))
+        .stdout(predicate::str::contains(
+            "every documented flag exists in `--help`",
+        ));
+
+    let mp = fs::read_to_string(root.join(".claude-plugin/marketplace.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
+    assert_eq!(v["plugins"][0]["source"], "./");
+    assert_eq!(v["plugins"][0]["name"], "sample-elixir");
+}
+
+fn deno_available() -> bool {
+    std::process::Command::new("deno")
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[test]
+#[ignore = "requires `deno` on PATH; runs on CI via --include-ignored"]
+fn deno_cli_init_then_verify_round_trip() {
+    if !deno_available() {
+        eprintln!("skipped: deno not on PATH");
+        return;
+    }
+    let root = copy_fixture("deno-cli");
+    let toml = "[skill]\n\
+        name = \"sample-deno\"\n\
+        one_line_description = \"Print a journal entry from Deno\"\n\
+        when_to_use_phrases = [\"log a deno entry\", \"record a quick note\"]\n\
+        invocation_command = \"sample-deno --new\"\n\
+        license = \"MIT\"\n";
+    fs::write(root.join("skillpack.toml"), toml).unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(root.join(".claude-plugin/marketplace.json").exists());
+    assert!(root.join(".claude-plugin/plugin.json").exists());
+    assert!(root.join("skills/sample-deno/SKILL.md").exists());
+
+    let skill = fs::read_to_string(root.join("skills/sample-deno/SKILL.md")).unwrap();
+    assert!(skill.contains("## Invocation"));
+    assert!(!skill.contains("## Usage"));
+
+    // verify must pass — `deno run -A main.ts --help` produces output for
+    // the invocation check.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify OK"))
+        .stdout(predicate::str::contains(
+            "documented `--help` runs and produces output",
+        ))
+        .stdout(predicate::str::contains(
+            "every documented flag exists in `--help`",
+        ));
+
+    let mp = fs::read_to_string(root.join(".claude-plugin/marketplace.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&mp).unwrap();
+    assert_eq!(v["plugins"][0]["source"], "./");
+    assert_eq!(v["plugins"][0]["name"], "sample-deno");
 }
 
 // Subcommand-drift e2e: the subcommand-cli fixture prints a clap-shaped

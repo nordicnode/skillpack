@@ -41,9 +41,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # Runtime prereqs - one setup-* action per language, each works across
-      # all three OSes. The Go, Ruby, PHP, Java, and .NET installs let the
-      # `#[ignore]`-gated round-trip tests actually execute rather than
-      # self-skip.
+      # all three OSes. The Go, Ruby, PHP, Java, .NET, and Deno installs let
+      # the `#[ignore]`-gated round-trip tests actually execute rather than
+      # self-skip. (Zig/Swift/C/C++/Elixir ship a pre-built launcher script
+      # instead of a real toolchain, so they need no runtime here.)
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -66,6 +67,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0'
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 'v2.x'
 
       - name: fmt --check
         run: cargo fmt --check
@@ -73,17 +77,18 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: test
         run: cargo test --all-targets
-      # The `#[ignore]`-gated spawn round trips (go/ruby/php/jvm/csharp) run a
-      # real runtime from a cold cache. Run them AFTER the main suite in their
-      # own step so a cold `go run .` / `dotnet run` never contends with the
-      # self-dogfood release builds - previously a single `--include-ignored`
-      # invocation let a cold compile exceed HELP_TIMEOUT under parallel load
-      # (flaky windows-latest failures). The filter matches all five ignored
-      # tests; the runtimes are installed by the setup-* actions above and each
-      # test self-skips if its runtime is missing anyway. `jvm_cli` is
-      # `#[cfg(unix)]`, so it no-ops on Windows.
+      # The `#[ignore]`-gated spawn round trips run a real runtime from a cold
+      # cache. Run them AFTER the main suite in their own step so a cold
+      # `go run .` / `dotnet run` never contends with the self-dogfood release
+      # builds - previously a single `--include-ignored` invocation let a cold
+      # compile exceed HELP_TIMEOUT under parallel load (flaky windows-latest
+      # failures). The filter matches all ten ignored round trips; the runtimes
+      # are installed by the setup-* actions above and each test self-skips if
+      # its runtime is missing anyway. `jvm_cli`/`zig_cli`/`swift_cli`/
+      # `c_cpp_cli`/`elixir_cli` are `#[cfg(unix)]` (shell-script launchers),
+      # so those five no-op on Windows while the others still match.
       - name: test runtime round trips (isolated)
-        run: cargo test --test integration_end_to_end -- --include-ignored go_cli ruby_cli php_cli jvm_cli csharp_cli
+        run: cargo test --test integration_end_to_end -- --include-ignored go_cli ruby_cli php_cli jvm_cli csharp_cli zig_cli swift_cli c_cpp_cli elixir_cli deno_cli
 
   # MSRV gate: `rust-version` in Cargo.toml (1.85) is a real claim — a
   # `cargo install skillpack` on the MSRV must work. The main matrix builds on
@@ -121,3 +126,79 @@ jobs:
           tool: cargo-audit
       - name: cargo audit
         run: cargo audit
+
+  # License compliance + duplicate-dependency scan (`deny.toml`). `cargo audit`
+  # only checks known vulnerabilities; this catches copyleft licenses that would
+  # change redistribution terms and accidental duplicate crate versions.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: cargo deny check
+        run: cargo deny check
+
+  # Guard the crates.io tarball contents. A past incident shipped `.freebuff/`
+  # private state in the package (cargo package includes untracked, non-ignored
+  # files). This fails on any unexpected path so it can never recur silently.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+      - name: verify package contents
+        run: |
+          cargo package --list --allow-dirty > /tmp/pkg.txt
+          if grep -qE '(^|/)(\.freebuff|\.codegraph|\.omo|target|node_modules|memory:)(/|$)' /tmp/pkg.txt; then
+            echo "::error::forbidden files found in package:"
+            grep -E '(^|/)(\.freebuff|\.codegraph|\.omo|target|node_modules|memory:)(/|$)' /tmp/pkg.txt
+            exit 1
+          fi
+          echo "package contents clean ($(wc -l < /tmp/pkg.txt) files)"
+          cat /tmp/pkg.txt
+
+  # The reusable workflow (.github/workflows/skillpack.yml) pins a
+  # `skillpack-version` default that must track Cargo.toml's version. This
+  # fails the release-plz PR (and any manual bump) until the two are in sync,
+  # so a released tag can never point consumers at a stale crate version.
+  version-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: verify reusable-workflow version matches Cargo.toml
+        run: |
+          cargo_ver=$(awk 'BEGIN{in_pkg=0} /^\[package\]/{in_pkg=1; next} /^\[/{in_pkg=0} in_pkg && /^version[[:space:]]*=/{gsub(/[" ]/, "", $3); print $3; exit}' Cargo.toml)
+          wf_ver=$(grep -oP "default: '\K[0-9]+\.[0-9]+\.[0-9]+" .github/workflows/skillpack.yml | head -1)
+          if [ "$cargo_ver" != "$wf_ver" ]; then
+            echo "::error::Cargo.toml version ($cargo_ver) != skillpack.yml skillpack-version default ($wf_ver)"
+            exit 1
+          fi
+          echo "version sync OK: $cargo_ver"
+
+  # Code coverage via cargo-llvm-cov (prebuilt, faster and less flaky than
+  # tarpaulin) uploaded to Codecov. `fail_ci_if_error: false` keeps a missing
+  # CODECOV_TOKEN or a transient upload failure from blocking a merge.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          components: 'llvm-tools-preview'
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: generate coverage report
+        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+      - name: upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}

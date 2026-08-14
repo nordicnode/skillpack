@@ -197,6 +197,43 @@ pub fn extract_documented_invocation(skill_md: &str) -> Option<String> {
     None
 }
 
+/// Derive a `[<program>, "--help"]` argv from a skill's documented invocation.
+/// Used to spawn a *secondary* skill's CLI in a multi-skill pack, where
+/// introspection only resolved the primary binary. Returns `None` when no
+/// program token can be parsed from the invocation block, so the caller can
+/// surface an honest skip instead of guessing.
+pub fn command_from_documented(skill_md: &str) -> Option<Vec<String>> {
+    let block = extract_documented_invocation(skill_md)?;
+    for line in block.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with("```") {
+            continue;
+        }
+        // Prefer the first backticked token (inline code), else the first
+        // whitespace-delimited token of the line.
+        let candidate = if let Some(inner) = t.split('`').nth(1) {
+            inner.trim()
+        } else {
+            t
+        };
+        let prog = candidate.split_whitespace().next()?.trim();
+        // A program token is a bare command name or a path. Skip markdown,
+        // option flags, angle-bracket placeholders, and prose.
+        if prog.is_empty()
+            || prog.starts_with('#')
+            || prog.starts_with('-')
+            || prog.starts_with('<')
+            || !prog
+                .chars()
+                .all(|c| c.is_alphanumeric() || "_-./".contains(c))
+        {
+            continue;
+        }
+        return Some(vec![prog.to_string(), "--help".to_string()]);
+    }
+    None
+}
+
 /// Collect the body under a `## <heading>` section up to the next `## ` heading.
 /// Stops at any `### ` (deeper) heading too: a subsection under `## Invocation`
 /// (the `### Subcommands` block the CLI template emits) owns its own flags and

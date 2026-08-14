@@ -23,3 +23,8 @@ memory:/
 
 # Freebuff desktop app local state — never commit or publish.
 .freebuff/
+
+# Codegraph IDE cache (symlinked out of the repo) — local-only, never commit
+# or publish. Kept in the committed .gitignore (not just .git/info/exclude) so
+# it is excluded on every machine and by `cargo package`.
+.codegraph/

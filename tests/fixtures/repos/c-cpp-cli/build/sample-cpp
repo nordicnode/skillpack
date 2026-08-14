@@ -1,0 +1,6 @@
+#!/bin/sh
+case "$1" in
+  --help) echo "Usage: sample-cpp [--new <entry>] [--verbose]"; exit 0;;
+  --version) echo "sample-cpp 0.1.0"; exit 0;;
+esac
+echo "sample-cpp"

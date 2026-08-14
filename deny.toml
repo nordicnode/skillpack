@@ -1,0 +1,36 @@
+# `cargo deny` config: license compliance + duplicate-dependency checks on top
+# of `cargo audit`'s vulnerability scan. Run via CI (`cargo deny check`).
+
+[advisories]
+# Fail on any RustSec advisory (matches `cargo audit`) AND on yanked versions.
+yanked = "deny"
+
+[licenses]
+# skillpack is MIT. Allow the permissive licenses its dependency tree actually
+# uses; anything copyleft (GPL/AGPL/LGPL) is refused except the one FFI shim
+# called out below, which would change the crate's redistribution terms.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    "Unicode-3.0",
+    "Unlicense",
+    "CC0-1.0",
+]
+confidence-threshold = 0.8
+
+# r-efi is a UEFI FFI bindings crate, a transitive dependency of `notify` that
+# is only linked on Windows ARM targets. LGPL-2.1 permits static linking when
+# the combined work can be relinked; accepted here as a deliberate, documented
+# exception for an FFI shim rather than widening the global copyleft policy.
+[[licenses.exceptions]]
+name = "r-efi"
+allow = ["LGPL-2.1-or-later"]
+
+[bans]
+# Catch accidental duplicate versions of a crate in the lockfile.
+multiple-versions = "warn"
+
+[sources]
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

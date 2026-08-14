@@ -236,6 +236,15 @@ pub enum Commands {
         #[arg(long, value_name = "DIR")]
         template_dir: Option<PathBuf>,
     },
+    /// Print shell completions to stdout for the given shell, so users can
+    /// tab-complete `skillpack` flags and subcommands. Pipe the output into
+    /// your shell's completion directory, e.g.
+    /// `skillpack completions bash > ~/.local/share/bash-completion/completions/skillpack`.
+    Completions {
+        /// Shell to generate completions for.
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 /// Which agent ecosystem to generate distribution files for.

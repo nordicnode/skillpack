@@ -1,0 +1,25 @@
+# Release automation (see .github/workflows/release-plz.yml).
+#
+# release-plz keeps a "release PR" open that bumps `Cargo.toml`'s version and
+# regenerates CHANGELOG.md from Conventional Commits. It is deliberately
+# scoped to that versioning/changelog step only:
+#
+#   * `git_tag_enable = false` — the `v*` tag is still cut by the maintainer
+#     (`git tag vX.Y.Z && git push origin vX.Y.Z`) after merging the release
+#     PR. That tag is what fires .github/workflows/release.yml.
+#   * `git_release_enable = false` — the GitHub Release is created by
+#     release.yml's `create-gh-release-action` step (it parses CHANGELOG.md).
+#   * `publish = false` — `cargo publish` is owned by release.yml's publish
+#     job, which carries the crates.io idempotency guard and `cargo audit`.
+#
+# Keeping those three false means release-plz never competes with release.yml
+# (no double publish, no double release) and needs no personal-access token:
+# it only opens a PR, which the default GITHUB_TOKEN can do.
+
+[workspace]
+changelog_update = true
+git_tag_enable = false
+git_release_enable = false
+publish = false
+pr_labels = ["release"]
+semver_check = false

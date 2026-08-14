@@ -16,9 +16,7 @@ use anyhow::Result;
 use self::invocation::InvocationInput;
 use self::result::CheckResult;
 
-// Re-export the pieces the rest of the crate touches. `find_skill_file` is
-// crate-visible (the dispatcher in main.rs is the only external caller).
-pub(crate) use self::discovery::find_skill_file;
+// Re-export the pieces the rest of the crate touches.
 pub use self::result::VerifyReport;
 
 /// Where the invocation stage should look for skill text. Passed in so the
@@ -67,60 +65,77 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
         report.push(check);
     }
 
-    // use the FIRST skill's text for the invocation spawn — the documented CLI
-    // belongs to exactly one skill. Discovery above still checks all skills.
-    let skill_path = find_skill_file(root);
-    let skill_md = skill_path
-        .as_ref()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .unwrap_or_default();
-
-    // GAP #2: invocation only spawns the FIRST skill's documented CLI. If more
-    // than one skill documents a CLI invocation, the other CLIs' drift is
-    // silently unchecked — warn so the maintainer knows the check didn't cover
-    // them (the multi-CLI limit is documented, but a silent skip is a cliff).
-    let cli_skills = discovery::find_skill_files(root)
-        .into_iter()
-        .filter(|p| match std::fs::read_to_string(p) {
-            Ok(s) => invocation::extract_documented_invocation(&s).is_some(),
+    // Invocation checks run against EVERY skill that documents a CLI, so a
+    // multi-skill pack can't hide drift in a secondary skill. The primary
+    // (first) CLI spawns from the introspected `cli_command` (which may be a
+    // resolved absolute path); each secondary skill derives its program from
+    // its own documented invocation and must be on PATH to be spawnable.
+    let skill_files = discovery::find_skill_files(root);
+    let mut spawned_primary = false;
+    for skill_path in &skill_files {
+        let skill_md = match std::fs::read_to_string(skill_path) {
+            Ok(s) => s,
             Err(e) => {
                 // Path exists (find_skill_files returned it) — read failure is
                 // non-missing (permissions, non-UTF8, EBUSY). Discovery's
-                // `check_one_skill_md` would `with_context(...)?` and abort
-                // verify on the same file; surface a WARN here instead so the
-                // maintainer sees the read failure rather than the multi-CLI
-                // counter silently dropping the skill (the parallel discovery
-                // check still aborts on the corrupt file independently).
+                // `check_one_skill_md` would abort verify on the same file;
+                // surface a WARN here so the maintainer sees the read failure.
                 report.push(CheckResult::warn(
                     "invocation.read_failed",
                     "skills a verify can spawn should be readable",
-                    format!("{}: read failed ({}); invocation drift check skipped for this skill", discovery::rel_unix(root, p), e),
+                    format!("{}: read failed ({}); invocation drift check skipped for this skill", discovery::rel_unix(root, skill_path), e),
                     "To fix: check file permissions, ensure UTF-8 encoding (no Latin-1), and re-run.",
                 ));
-                false
+                continue;
             }
-        })
-        .count();
-    if cli_skills > 1 {
-        report.push(CheckResult::warn(
-            "invocation.multi_cli",
-            "invocation drift checks cover every documented CLI",
-            format!(
-                "{cli_skills} skills document a CLI invocation, but invocation checks only run against the first; the others were skipped"
-            ),
-            "To fix: verify is single-CLI by default; split multi-CLI plugins into one plugin per CLI, or run verify per-skill manually.",
-        ));
+        };
+        // A pure-library skill (or one with no documented CLI) still goes
+        // through `invocation::run`, which emits its "Skipped: pure-library
+        // project" result — silently `continue`-ing here would drop that
+        // signal from the report.
+        let is_cli = invocation::extract_documented_invocation(&skill_md).is_some();
+        let cmd = if !is_cli {
+            None
+        } else if !spawned_primary {
+            spawned_primary = true;
+            input.cli_command.clone()
+        } else {
+            // Secondary skill: derive the command from its own invocation. If
+            // the binary is not on PATH (expected on many machines, since
+            // introspection only resolved the primary), warn and skip rather
+            // than false-fail a legitimately multi-CLI pack.
+            match invocation::command_from_documented(&skill_md) {
+                Some(c) if crate::introspect::which_on_path(&c[0]).is_some() => Some(c),
+                Some(c) => {
+                    report.push(CheckResult::warn(
+                        "invocation.secondary_not_runnable",
+                        "every documented CLI can be spawned for drift checks",
+                        format!("secondary skill documents CLI `{}`, which is not on PATH; its drift checks were skipped", c[0]),
+                        "To fix: install/build the secondary CLI so it is on PATH, then re-run verify.",
+                    ));
+                    continue;
+                }
+                None => {
+                    report.push(CheckResult::warn(
+                        "invocation.secondary_unparseable",
+                        "every documented CLI can be spawned for drift checks",
+                        format!("could not derive a command from {}'s documented invocation; its drift checks were skipped", discovery::rel_unix(root, skill_path)),
+                        "To fix: document the CLI with a plain command line in the `## Invocation` section.",
+                    ));
+                    continue;
+                }
+            }
+        };
+        let inv = InvocationInput::new(
+            root,
+            &input.spawn_root,
+            &skill_md,
+            cmd.as_deref(),
+            input.debug,
+            input.verify_stdin.as_deref(),
+        );
+        invocation::run(&inv, &mut report)?;
     }
-
-    let inv = InvocationInput::new(
-        root,
-        &input.spawn_root,
-        &skill_md,
-        input.cli_command.as_deref(),
-        input.debug,
-        input.verify_stdin.as_deref(),
-    );
-    invocation::run(&inv, &mut report)?;
 
     Ok(report)
 }

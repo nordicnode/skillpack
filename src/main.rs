@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use clap::{Parser, ValueEnum};
+use clap::{CommandFactory, Parser, ValueEnum};
 
 use skillpack::cli::{resolve_targets, Cli, Commands, Target};
 use skillpack::config::Config;
@@ -102,6 +102,11 @@ fn main() {
             force,
             template_dir.as_deref(),
         ),
+        Commands::Completions { shell } => {
+            let mut cmd = <Cli as CommandFactory>::command();
+            clap_complete::generate(shell, &mut cmd, "skillpack", &mut std::io::stdout());
+            exit::INIT_OK
+        }
     }) {
         code
     } else {
@@ -311,7 +316,7 @@ fn run_init(
         Ok(c) => c,
         Err(e) => {
             eprintln!("fatal: {e:#}");
-            std::process::exit(exit::INIT_FATAL);
+            exit::INIT_FATAL
         }
     }
 }
@@ -540,6 +545,27 @@ fn verify_rendered(
     verify::run(&input)
 }
 
+/// Refuse to write through a symlink. `rel_path` is root-relative and the
+/// write targets `root.join(rel_path)`; if any ancestor directory (or the
+/// target itself, when it already exists) is a symlink, `create_dir_all` +
+/// `write` would follow it and write outside the project root. Returns an
+/// error naming the offending path instead of escaping the repo.
+fn ensure_no_symlink_ancestors(root: &Path, rel_path: &str) -> Result<()> {
+    let mut cur = root.to_path_buf();
+    for comp in Path::new(rel_path).components() {
+        cur.push(comp.as_os_str());
+        if let Ok(meta) = std::fs::symlink_metadata(&cur) {
+            if meta.file_type().is_symlink() {
+                bail!(
+                    "refusing to write through a symlink at {}; remove it or re-run in a non-symlinked checkout",
+                    cur.display()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 fn write_files<'a>(
     root: &Path,
     files: &'a [GeneratedFileOutput],
@@ -549,6 +575,7 @@ fn write_files<'a>(
     let mut skipped = Vec::new();
     for f in files {
         let p = root.join(&f.rel_path);
+        ensure_no_symlink_ancestors(root, &f.rel_path)?;
         // Collision guard: root-level instruction files (AGENTS.md, CLAUDE.md,
         // GEMINI.md, CONVENTIONS.md) live at repo root (not a skillpack-owned
         // directory). If one already exists and --force was not passed, skip it
@@ -757,7 +784,7 @@ fn run_verify(
         Ok(c) => c,
         Err(e) => {
             eprintln!("fatal: {e:#}");
-            std::process::exit(exit::INIT_FATAL);
+            exit::INIT_FATAL
         }
     }
 }
@@ -1007,7 +1034,7 @@ fn run_doctor(root: &Path, verbose: bool, debug: bool, format: crate::verify::Ou
         Ok(c) => c,
         Err(e) => {
             eprintln!("fatal: {e:#}");
-            std::process::exit(exit::INIT_FATAL);
+            exit::INIT_FATAL
         }
     }
 }
@@ -1299,6 +1326,7 @@ fn run_update_inner(
         match r.status {
             CandidateStatus::Missing => {
                 let disk_path = root.join(&r.file.rel_path);
+                ensure_no_symlink_ancestors(root, &r.file.rel_path)?;
                 if let Some(parent) = disk_path.parent() {
                     std::fs::create_dir_all(parent).with_context(|| {
                         format!("creating parent dir for {}", disk_path.display())
@@ -1313,6 +1341,7 @@ fn run_update_inner(
             }
             CandidateStatus::Drifted => {
                 let disk_path = root.join(&r.file.rel_path);
+                ensure_no_symlink_ancestors(root, &r.file.rel_path)?;
                 std::fs::write(&disk_path, &r.candidate)
                     .with_context(|| format!("writing {}", disk_path.display()))?;
                 written.push(r.file);
