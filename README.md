@@ -28,10 +28,10 @@
 <h2 align="center">Built with Freebuff</h2>
 
 <div align="center">
-  <p><strong>This project was made possible by <a href="https://freebuff.com">Freebuff</a> — the free AI coding agent.</strong><br/>
+  <p><strong>This project was made possible by <a href="https://freebuff.com">Freebuff</a>, the free AI coding agent.</strong><br/>
   No subscription, credits, or API key required.</p>
   <p>
-    <a href="https://freebuff.com"><img src="https://img.shields.io/badge/Try%20Freebuff-ff5c1c?style=for-the-badge" alt="Try Freebuff — the free AI coding agent"></a>
+    <a href="https://freebuff.com"><img src="https://img.shields.io/badge/Try%20Freebuff-ff5c1c?style=for-the-badge" alt="Try Freebuff, the free AI coding agent"></a>
     <a href="https://github.com/CodebuffAI/freebuff"><img src="https://img.shields.io/badge/Freebuff%20on%20GitHub-2f353b?style=for-the-badge" alt="Freebuff on GitHub"></a>
   </p>
 </div>
@@ -69,7 +69,7 @@ Without an agent guidance layer, AI coding agents frequently:
 ### 1. Installation
 
 ```bash
-# Prebuilt binaries — fastest, no Rust toolchain needed
+# Prebuilt binaries (fastest, no Rust toolchain needed)
 cargo install cargo-binstall && cargo binstall skillpack
 
 # Or build from source
@@ -144,7 +144,7 @@ Guided (With skillpack):    [Verified Flags, Anchored in Repo] ─────�
 | **Token Consumption** | 146.1k tokens | **100.5k tokens** | **31% Fewer** |
 | **Task Accuracy** | 4.0 / 4 (median) | **4.0 / 4 (every run)** | Guided perfect in all runs |
 
-> *Full benchmark methodology, repeatable test suites (`fd`, `ripgrep`, `bat`), and replay harness documentation are available in [`docs/benchmark.md`](docs/benchmark.md). Want to see it happen? Read the step-by-step [`docs/agent-demo.md`](docs/agent-demo.md) — or reproduce the A/B run yourself from the committed transcripts.*
+> *Full benchmark methodology, repeatable test suites (`fd`, `ripgrep`, `bat`), and replay harness documentation are available in [`docs/benchmark.md`](docs/benchmark.md). Want to see it happen? Read the step-by-step [`docs/agent-demo.md`](docs/agent-demo.md), or reproduce the A/B run yourself from the committed transcripts.*
 
 ---
 
