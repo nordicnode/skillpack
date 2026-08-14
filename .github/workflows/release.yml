@@ -75,7 +75,18 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      # Idempotency guard: re-pointing a tag to re-run the binaries (e.g.
+      # after a signing fix) must not fail on "release already exists".
+      - name: Check release not already created
+        run: |
+          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            echo "release ${{ github.ref_name }} already exists; skipping create"
+            echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Create GitHub Release
+        if: env.SKIP_RELEASE != 'true'
         uses: taiki-e/create-gh-release-action@v1
         with:
           changelog: CHANGELOG.md
@@ -129,11 +140,16 @@ jobs:
       # binstall` / `cosign verify-blob` users can verify provenance.
       - uses: sigstore/cosign-installer@main
       - name: Sign binary
+        # `shell: bash` is required: Windows defaults to PowerShell, which
+        # would fail to parse the `[ ... ] && ...` / `${bin}` syntax below.
+        # Git Bash is preinstalled on windows-latest runners.
+        shell: bash
         run: |
           bin="target/${{ matrix.target }}/release/skillpack"
           [ "${{ matrix.os }}" = "windows-latest" ] && bin="${bin}.exe"
           cosign sign-blob --yes --bundle "skillpack-${{ matrix.target }}.bundle" "$bin"
       - name: Upload signature bundle
+        shell: bash
         run: gh release upload "${{ github.ref_name }}" "skillpack-${{ matrix.target }}.bundle"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
