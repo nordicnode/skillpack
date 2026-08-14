@@ -19,7 +19,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Match the pinned toolchain in rust-toolchain.toml so the published
       # crate is built with the same rustc we tested under.
       - uses: dtolnay/rust-toolchain@master
@@ -74,7 +74,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Idempotency guard: re-pointing a tag to re-run the binaries (e.g.
       # after a signing fix) must not fail on "release already exists".
       - name: Check release not already created
@@ -124,7 +124,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: '1.95.0'
