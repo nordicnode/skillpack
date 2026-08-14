@@ -166,7 +166,7 @@ jobs:
   # (.github/workflows/skillpack.yml), and the committed plugin.json manifest.
   # release-plz bumps only Cargo.toml, so this fails its PR (and any manual
   # bump) until the other two are synced — the drift that broke the
-  # self-dogfood `--min-score 100` verify on the 0.12.1 release.
+  # self-dogfood `--min-score 100` verify on the 0.13.0 release.
   version-sync:
     runs-on: ubuntu-latest
     steps:

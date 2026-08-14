@@ -4,7 +4,26 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0](https://github.com/nordicnode/skillpack/compare/v0.12.1...v0.13.0) - 2026-08-14
+
+### Added
+
+- Recursive subcommand capture: `init` walks nested subcommands (`git remote add`)
+  and renders them as indented `### Subcommands` bullets; `verify` recursively
+  drift-checks every documented subcommand path.
+- Structured logging: `--log-level` (off/error/warn/info/debug/trace) and
+  `--log-format` (human/json) route spawn calls and introspection traces through
+  `tracing`; `--debug` is now an alias for `--log-level debug`.
+
+### Changed
+
+- `ProjectProfile.cli_subcommand_help` is replaced by the recursive
+  `cli_subcommand_tree: Vec<SubcommandNode>` (breaking for library and
+  `doctor --format json` consumers).
+- `VerifyInput.debug` / `InvocationInput.debug` removed; spawn logging now flows
+  through the structured logger (breaking for library consumers).
+- `verify::invocation::extract_documented_subcommands` returns `Vec<Vec<String>>`
+  subcommand paths instead of `Vec<String>` (breaking for library consumers).
 
 ## [0.12.1](https://github.com/nordicnode/skillpack/compare/v0.12.0...v0.12.1) - 2026-08-14
 
@@ -22,8 +41,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - switch benchmark to Google Antigravity (agy) + Gemini 3.7 Flash
 - drop duplicate skillpack h1 from hero (wordmark is in the logo)
 - add Freebuff CTA banner and drop emoji from section headers
-
-_No unreleased changes yet._
 
 ## [0.12.0] - 2026-08-14
 

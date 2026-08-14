@@ -178,7 +178,7 @@ on:
 
 jobs:
   verify:
-    uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.12.1
+    uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.13.0
 ```
 
 For a stricter gate that fails on *any* warning (not just critical failures),
@@ -192,7 +192,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/nordicnode/skillpack
-    rev: v0.12.1
+    rev: v0.13.0
     hooks:
       - id: skillpack-verify
 ```

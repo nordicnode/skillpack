@@ -34,7 +34,7 @@ on:
         required: false
         type: string
         # Keep in sync with the latest published release - bump on every tag.
-        default: '0.12.1'
+        default: '0.13.0'
 
 jobs:
   verify:
