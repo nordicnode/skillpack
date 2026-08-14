@@ -32,8 +32,10 @@ pub const HELP_TIMEOUT: Duration = Duration::from_secs(30);
 pub enum SpawnOutcome {
     /// Exited 0; stdout+stderr captured (concatenated).
     RanClean(String),
-    /// Exited non-zero; output not consumed (callers only act on `RanClean`).
-    RanNonZero,
+    /// Exited non-zero; stdout+stderr still captured (concatenated) so callers
+    /// can inspect what a CLI printed even when it exits 1 (e.g. a `--version`
+    /// line on stdout/stderr with a non-zero exit).
+    RanNonZero(String),
     /// Did not finish within the timeout (killed).
     TimedOut,
     /// Binary not found on PATH.
@@ -129,22 +131,20 @@ fn run_inner(cmd: &mut Command, timeout: Duration, stdin_mode: StdinMode) -> Spa
     let stdout_buf = stdout_rx.and_then(|rx| rx.recv().ok()).unwrap_or_default();
     let stderr_buf = stderr_rx.and_then(|rx| rx.recv().ok()).unwrap_or_default();
 
-    // try_wait consumed the exit status; wait() reaps cleanly (cached in std).
-    let status = match child.wait() {
-        Ok(s) => s,
-        Err(_) => return SpawnOutcome::RanNonZero,
-    };
-
-    if !status.success() {
-        return SpawnOutcome::RanNonZero;
-    }
-
     let combined = format!(
         "{}{}",
         String::from_utf8_lossy(&stdout_buf),
         String::from_utf8_lossy(&stderr_buf)
     );
-    SpawnOutcome::RanClean(combined)
+
+    // try_wait consumed the exit status; wait() reaps cleanly (cached in std).
+    // A reaped-but-failed child still surfaces its captured output so callers
+    // can distinguish "printed version/help then exited 1" from a hard
+    // failure (a wait() error also lands here, with whatever the readers got).
+    match child.wait() {
+        Ok(s) if s.success() => SpawnOutcome::RanClean(combined),
+        _ => SpawnOutcome::RanNonZero(combined),
+    }
 }
 
 /// Put the child in its own process group so a timeout can kill the whole
@@ -253,7 +253,7 @@ mod tests {
         // `false` exits 1; we shouldn't crash, just report non-zero.
         let mut cmd = Command::new("false");
         let out = run(&mut cmd, Duration::from_secs(5));
-        assert_eq!(out, SpawnOutcome::RanNonZero);
+        assert!(matches!(out, SpawnOutcome::RanNonZero(_)));
     }
 
     /// Regression: a CLI that writes MORE than the 64KB pipe buffer must not

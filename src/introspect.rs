@@ -34,7 +34,7 @@ mod workspace;
 // The re-exports keep those call sites unchanged after the split.
 pub(crate) use cli_candidates::which_on_path;
 pub(crate) use manifest::{project_manifest_version, select_csproj};
-pub(crate) use repo::urls_equivalent;
+pub(crate) use repo::{normalize_git_url, urls_equivalent};
 #[cfg(test)]
 use std::path::PathBuf;
 pub(crate) use workspace::{
@@ -163,6 +163,14 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
         || root.join("meson.build").exists()
         || root.join("Makefile").exists()
     {
+        if !root.join("CMakeLists.txt").exists() && !root.join("meson.build").exists() {
+            diag.push(
+                "detect_language.c_cpp",
+                "Makefile found with no CMakeLists.txt/meson.build; assuming C/C++ \
+                 (a weak signal — a Makefile-only project may be another language). \
+                 Run `skillpack doctor` to confirm.",
+            );
+        }
         Language::CCpp
     } else if root.join("mix.exs").exists() {
         Language::Elixir

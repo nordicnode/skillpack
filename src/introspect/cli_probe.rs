@@ -333,7 +333,7 @@ fn spawn_candidate(candidate: &CliCandidate, diag: &mut DiagTrace) -> DetectCli 
                 subcommand_help: subs,
             }
         }
-        SpawnOutcome::RanNonZero => {
+        SpawnOutcome::RanNonZero(_) => {
             diag.push(
                 "detect_cli",
                 format!(

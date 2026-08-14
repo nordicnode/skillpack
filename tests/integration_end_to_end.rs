@@ -4694,6 +4694,130 @@ license = \"MIT\"
     );
 }
 
+// Regression: re-running `init` on a multi-skill pack must NOT collapse it to
+// the primary skill. The old `init` read only `to_intent()` (the first skill)
+// and saved `Config::from_intent` (single-skill), silently dropping every
+// `[[skills]]` entry and orphaning their skill dirs. `init` must preserve the
+// full skill list like `update` does.
+#[test]
+fn init_preserves_multi_skill_pack() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Bootstrap a single-skill pack.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+            "--description",
+            "Main skill",
+            "--trigger",
+            "main task",
+            "--author",
+            "Me",
+            "--invocation",
+            "sample-rust --new \"entry\"",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Hand-add a second skill, then re-run `init` (NOT `update`) on it.
+    fs::write(
+        root.join("skillpack.toml"),
+        format!(
+            "{}\n[[skills]]\nname = \"sidekick\"\none_line_description = \"Side skill for aux tasks\"\nwhen_to_use_phrases = [\"aux task\"]\ninvocation_command = \"sample-rust side\"\nlicense = \"MIT\"\n",
+            fs::read_to_string(root.join("skillpack.toml")).unwrap()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+            "--target",
+            "all",
+            "--force",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Both skills survive: the config normalizes to two [[skills]] entries and
+    // the secondary skill's files are still rendered (not orphaned).
+    let toml = fs::read_to_string(root.join("skillpack.toml")).unwrap();
+    assert!(
+        toml.matches("[[skills]]").count() == 2,
+        "re-init must preserve both skills, got:\n{toml}"
+    );
+    assert!(
+        root.join("skills/sidekick/SKILL.md").exists(),
+        "sidekick SKILL.md must be rendered by re-init"
+    );
+    let side = fs::read_to_string(root.join("skills/sidekick/SKILL.md")).unwrap();
+    assert!(side.contains("name: sidekick"));
+    assert!(side.contains("Side skill for aux tasks"));
+}
+
+// `init --dry-run` renders + verifies + previews, but writes nothing — no
+// distribution files and no skillpack.toml.
+#[test]
+fn init_dry_run_writes_nothing() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+            "--dry-run",
+            "--description",
+            "Main skill",
+            "--trigger",
+            "main task",
+            "--author",
+            "Me",
+            "--invocation",
+            "sample-rust --new \"entry\"",
+            "--target",
+            "all",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&out.get_output().stdout);
+    assert!(
+        stdout.contains("dry run"),
+        "dry-run must announce itself, got:\n{stdout}"
+    );
+    assert!(!root.join(".claude-plugin/plugin.json").exists());
+    assert!(!root.join("skills/sample-rust/SKILL.md").exists());
+    assert!(!root.join("AGENTS.md").exists());
+    assert!(!root.join("skillpack.toml").exists());
+}
+
 #[test]
 fn diff_exits_zero_on_clean_repo() {
     let root = copy_fixture("rust-cli");

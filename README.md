@@ -56,7 +56,7 @@ Without an agent guidance layer, AI coding agents frequently:
 
 ## Key Features
 
-* **Universal Multi-Ecosystem Generation**: Generates native guidance files for **10 agent formats** simultaneously (`AGENTS.md`, Claude Code, Cursor `.mdc`, OpenCode, Copilot, Codex, Windsurf, Freebuff, Gemini, and Aider).
+* **Universal Multi-Ecosystem Generation**: Generates native guidance files for **10 agent formats** simultaneously (`AGENTS.md`, Claude Code, Cursor `.mdc`, Codex, OpenCode, Copilot, `CLAUDE.md`, `GEMINI.md`, Windsurf, and Aider). Freebuff and other AGENTS.md-native agents read the generated `AGENTS.md`.
 * **Zero-Drift Verification**: Simulates agent invocations against your live CLI to verify that every documented flag and subcommand actually exists.
 * **Pre-Commit Safe**: `skillpack init` validates the complete surface before writing a single file to disk.
 * **Non-Destructive Updates**: `skillpack update` refreshes flags and versions while preserving your hand-written descriptions and notes.
@@ -114,11 +114,13 @@ Running `skillpack init --target all` generates a clean, non-intrusive distribut
 | Target / Ecosystem | Generated File(s) | Description |
 |---|---|---|
 | **AGENTS.md** | `AGENTS.md` | Standard instructions file read natively by **Freebuff**, Zed, Cursor, Windsurf, and 60k+ repos. |
-| **Claude Code** | `.claude-plugin/` & `skills/<tool>/SKILL.md` | Plugin manifest and skill specification for Claude Code and Codex. |
+| **Claude Code** | `.claude-plugin/` & `skills/<tool>/SKILL.md` | Plugin manifest and skill specification for Claude Code. |
+| **Codex** | `.codex/skills/<tool>/SKILL.md` | Skill specification for the OpenAI Codex CLI (same `SKILL.md` shape as Claude Code). |
 | **Cursor** | `.cursor/rules/<tool>.mdc` | Context-aware rule file with automated file-glob matching. |
 | **OpenCode** | `.opencode/agents/<tool>.md` | Agent definition for OpenCode AI coding environments. |
 | **GitHub Copilot** | `.github/copilot-instructions.md` | Custom repository instructions for GitHub Copilot. |
 | **Gemini CLI** | `GEMINI.md` | Native repository instruction layer for Google Gemini CLI. |
+| **CLAUDE.md** | `CLAUDE.md` | Root instructions file read by Claude Code, Cline, and Roo Code. |
 | **Windsurf** | `.windsurf/rules/<tool>.md` | Cascade IDE rule file. |
 | **Aider** | `CONVENTIONS.md` | Codebase convention guidelines for Aider. |
 | **Deterministic Config** | `skillpack.toml` | Committed configuration making future updates and CI checks deterministic. |
@@ -162,7 +164,8 @@ Guided (With skillpack):    [Verified Flags, Anchored in Repo] ─────�
 
 ### GitHub Actions Workflow
 
-Add `.github/workflows/skillpack.yml` to prevent documentation drift in PRs:
+Use the reusable workflow to prevent documentation drift in PRs (it installs a
+pinned `skillpack` and runs `verify` across the OS matrix):
 
 ```yaml
 name: Verify Agent Guidance
@@ -175,15 +178,12 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install skillpack
-        run: cargo install skillpack --locked
-      - name: Verify Guidance Layer
-        run: skillpack verify --min-score 100
+    uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.12.1
 ```
+
+For a stricter gate that fails on *any* warning (not just critical failures),
+call `skillpack verify --min-score 100` directly — that is the bar skillpack
+holds itself to in its own CI.
 
 ### Pre-Commit Hook
 
@@ -192,7 +192,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/nordicnode/skillpack
-    rev: v0.12.0
+    rev: v0.12.1
     hooks:
       - id: skillpack-verify
 ```

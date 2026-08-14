@@ -3,7 +3,7 @@
   "owner": {
     "name": {{ author | default(value="Unspecified") | json_encode | safe }},
     "type": "individual",
-    "url": {{ repo_url | default(value="") | json_encode | safe }}
+    "url": {{ homepage | default(value="") | json_encode | safe }}
   },
   "plugins": [
     {

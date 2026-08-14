@@ -325,11 +325,17 @@ fn run_help(
             ));
             Ok(String::new())
         }
-        crate::spawn::SpawnOutcome::RanNonZero => {
+        crate::spawn::SpawnOutcome::RanNonZero(output) => {
+            let mut msg = format!("`{program}` returned non-zero on `--help`");
+            if !output.trim().is_empty() {
+                msg.push_str(" (captured: ");
+                msg.push_str(&snippet(&output, 160));
+                msg.push(')');
+            }
             report.push(CheckResult::fail(
                 "invocation.help_present",
                 "documented `--help` exits cleanly",
-                format!("`{program}` returned non-zero on `--help`"),
+                msg,
                 "To fix: make `--help` exit 0, or correct the command in skillpack.toml.",
             ));
             Ok(String::new())
@@ -353,6 +359,18 @@ fn run_help(
             Ok(output)
         }
     }
+}
+
+/// Truncate captured subprocess output for a human message: flatten whitespace
+/// and cap to the first `max` chars so a huge `--help`/`--version` body can't
+/// flood the verify report.
+fn snippet(s: &str, max: usize) -> String {
+    let flat: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out: String = flat.chars().take(max).collect();
+    if flat.chars().count() > max {
+        out.push('…');
+    }
+    out
 }
 
 /// Compare documented flags in SKILL.md against those advertised in `--help`,
@@ -578,6 +596,9 @@ fn spawn_capture(
     c.current_dir(root);
     match crate::spawn::run_with_stdin(&mut c, timeout, stdin.map(|s| s.as_bytes())) {
         crate::spawn::SpawnOutcome::RanClean(out) => Some(out),
+        // Tolerate non-zero exit: some CLIs print `--version` to stdout/stderr
+        // but exit 1, and version-drift checking wants that output.
+        crate::spawn::SpawnOutcome::RanNonZero(out) => Some(out),
         _ => None,
     }
 }
@@ -730,7 +751,7 @@ fn check_version_drift(
         report.push(CheckResult::skipped(
             "invocation.version_drift",
             "CLI --version matches plugin.json version",
-            "Skipped: `--version` did not exit 0 or produced no output (some CLIs lack --version)",
+            "Skipped: `--version` could not be spawned or produced no output (some CLIs lack --version)",
         ));
         return;
     };

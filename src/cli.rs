@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand, ValueEnum};
     name = "skillpack",
     bin_name = "skillpack",
     version,
-    about = "Generate and verify the agent-distribution layer for any OSS project (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, AGENTS.md)."
+    about = "Generate and verify the agent-distribution layer for any OSS project (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, AGENTS.md, CLAUDE.md, GEMINI.md, Windsurf, Aider)."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -104,6 +104,13 @@ pub enum Commands {
         /// effect on other targets — their paths are always skillpack-owned.
         #[arg(long)]
         force: bool,
+
+        /// Render + verify but do not write any files (or skillpack.toml).
+        /// Prints the pre-commit verification report and the file preview,
+        /// then exits 0. Useful for previewing what `init` would generate
+        /// before committing to it.
+        #[arg(long)]
+        dry_run: bool,
 
         /// Override one or more Tera templates from a directory of `.tera`
         /// files. Missing templates fall back to embedded defaults — override

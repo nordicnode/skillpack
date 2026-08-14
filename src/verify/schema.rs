@@ -50,9 +50,10 @@ pub const RESERVED_NAMES: &[&str] = &[
     "anthropic-plugins",
     "anthropic",
     "claude",
+    // `agent-skills` is the AgentSkills.io open-standard namespace; flag it so
+    // a plugin doesn't squat the standard's name. Generic words like
+    // `skills`/`official` are deliberately NOT listed (too common to warn on).
     "agent-skills",
-    "skills",
-    "official",
 ];
 
 /// `plugin.json` MUST live at `.claude-plugin/plugin.json`. Source:

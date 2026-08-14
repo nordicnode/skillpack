@@ -17,7 +17,7 @@ use clap::{CommandFactory, Parser, ValueEnum};
 use skillpack::cli::{resolve_targets, Cli, Commands, Target};
 use skillpack::config::Config;
 use skillpack::exit;
-use skillpack::generate::{coerce_kebab, render_all, render_targets, GeneratedFileOutput};
+use skillpack::generate::{coerce_kebab, render_all, GeneratedFileOutput};
 use skillpack::interview;
 use skillpack::introspect;
 use skillpack::types;
@@ -35,6 +35,7 @@ fn main() {
             license,
             target,
             force,
+            dry_run,
             template_dir,
             description,
             trigger,
@@ -51,6 +52,7 @@ fn main() {
             license,
             target,
             force,
+            dry_run,
             template_dir.as_deref(),
             description,
             trigger,
@@ -289,6 +291,7 @@ fn run_init(
     license_override: Option<String>,
     raw_targets: Vec<String>,
     force: bool,
+    dry_run: bool,
     template_dir: Option<&Path>,
     description: Option<String>,
     triggers: Vec<String>,
@@ -306,6 +309,7 @@ fn run_init(
         license_override,
         raw_targets,
         force,
+        dry_run,
         template_dir,
         description,
         triggers,
@@ -332,6 +336,7 @@ fn run_init_inner(
     license_override: Option<String>,
     raw_targets: Vec<String>,
     force: bool,
+    dry_run: bool,
     template_dir: Option<&Path>,
     description: Option<String>,
     triggers: Vec<String>,
@@ -376,25 +381,43 @@ fn run_init_inner(
     // stay deterministic); without a config, `--auto` derives everything from
     // the repo and `--non-interactive` bootstraps from the explicit flags.
     let existing_cfg = Config::load(root)?;
-    let intent = if auto || non_interactive {
-        match &existing_cfg {
-            Some(cfg) => match cfg.to_intent() {
-                Some(i) => i,
-                None => bail!(
+
+    // Determine the full skill list. A committed config is authoritative: its
+    // `[skill]` or `[[skills]]` entries are used as-is, so re-running `init`
+    // preserves a hand-authored multi-skill pack instead of collapsing it to
+    // the primary skill and silently rewriting skillpack.toml. Fresh scaffolds
+    // (interview / `--auto` / `--non-interactive` bootstrap) produce a single
+    // skill named after the project.
+    let mut skills: Vec<(String, types::Intent)> = if let Some(cfg) = &existing_cfg {
+        let s = cfg.to_intents();
+        if s.is_empty() {
+            if auto || non_interactive {
+                bail!(
                     "skillpack.toml at {} is missing its [skill] table.\n\
                      To fix: re-run `skillpack init` interactively.",
                     Config::path(root).display()
-                ),
-            },
-            // No committed config: --auto derives the intent from the repo
-            // (description from the README hint, author from git config,
-            // license from the LICENSE file, invocation from the detected
-            // CLI) so a fresh checkout inits with ZERO flags and zero prompts.
-            None if auto => auto_intent(&profile, &triggers, import.as_deref())?,
-            // Plain --non-interactive without a config: the intent comes from
-            // the bootstrap flags (description/trigger/author + invocation or
-            // import), each validated to be present.
-            None => bootstrap_intent(
+                );
+            }
+            vec![(coerce_kebab(&profile.name), interview_run(&profile)?)]
+        } else {
+            s
+        }
+    } else if auto {
+        // No committed config: --auto derives the intent from the repo
+        // (description from the README hint, author from git config,
+        // license from the LICENSE file, invocation from the detected
+        // CLI) so a fresh checkout inits with ZERO flags and zero prompts.
+        vec![(
+            coerce_kebab(&profile.name),
+            auto_intent(&profile, &triggers, import.as_deref())?,
+        )]
+    } else if non_interactive {
+        // Plain --non-interactive without a config: the intent comes from
+        // the bootstrap flags (description/trigger/author + invocation or
+        // import), each validated to be present.
+        vec![(
+            coerce_kebab(&profile.name),
+            bootstrap_intent(
                 &profile,
                 description.as_deref(),
                 &triggers,
@@ -402,28 +425,31 @@ fn run_init_inner(
                 invocation.as_deref(),
                 import.as_deref(),
             )?,
-        }
-    } else if let Some(cfg) = &existing_cfg {
-        if let Some(i) = cfg.to_intent() {
-            i
-        } else {
-            interview_run(&profile)?
-        }
+        )]
     } else {
-        interview_run(&profile)?
+        vec![(coerce_kebab(&profile.name), interview_run(&profile)?)]
     };
 
-    let mut intent = intent;
+    // `--license` overrides the pack license. Applied to the primary skill —
+    // `Config::from_intents` seeds `defaults.license` from it, so the override
+    // cascades to any secondary skills that don't pin their own license.
     if let Some(ref lic) = license_override {
-        intent.license = Some(lic.clone());
+        if let Some((_, intent)) = skills.first_mut() {
+            intent.license = Some(lic.clone());
+        }
     }
 
-    // Step 3 — render in memory.
-    let files = render_targets(&profile, &intent, &targets, template_dir)
+    // Step 3 — render in memory. `render_all` handles both single-skill and
+    // multi-skill packs (a one-skill list renders byte-identically to
+    // `render_targets`), so one code path covers re-init on either shape.
+    let files = render_all(&profile, &skills, &targets, template_dir)
         .context("rendering distribution files")?;
 
     // Step 4 — pre-commit verify against the rendered output (design §5.3).
-    let report = verify_rendered(&files, &profile, root, debug, intent.verify_stdin.clone())?;
+    // The primary skill's verify_stdin drives the CLI spawn — the pre-commit
+    // gate uses one stdin mode, matching `verify`'s own single-stdin behavior.
+    let verify_stdin = skills.first().and_then(|(_, i)| i.verify_stdin.clone());
+    let report = verify_rendered(&files, &profile, root, debug, verify_stdin)?;
 
     if report.has_critical_failure() {
         eprintln!("\n❌ pre-commit verification FAILED. skillpack will NOT write files.");
@@ -474,9 +500,19 @@ fn run_init_inner(
     print_diff_preview(root, &files);
 
     // Step 5 — write files + save config.
+    if dry_run {
+        println!(
+            "dry run: would write {} file(s) under {} (no changes made):",
+            files.len(),
+            root.display()
+        );
+        for f in &files {
+            println!("   - {}", f.rel_path);
+        }
+        return Ok(exit::INIT_OK);
+    }
     let (written, skipped) = write_files(root, &files, force)?;
-    let name = coerce_kebab(&profile.name);
-    Config::from_intent(&name, &intent).save(root)?;
+    Config::from_intents(&skills).save_if_changed(root)?;
     println!(
         "✓ wrote {} file(s) under {}:",
         written.len(),
@@ -980,8 +1016,12 @@ fn run_verify_watch(
                 if let Some(t) = last_event {
                     if t.elapsed() >= debounce {
                         last_event = None;
-                        // Clear screen for a clean re-render.
-                        print!("\x1b[2J\x1b[H");
+                        // Clear screen for a clean re-render (only when
+                        // stdout is a real terminal — never emit ANSI to a
+                        // pipe or captured log).
+                        if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+                            print!("\x1b[2J\x1b[H");
+                        }
                         let _ = run_verify_single(
                             root,
                             verbose,
@@ -1133,6 +1173,11 @@ fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool, debug: bo
     } else {
         println!("  invocation.*: N/A (no CLI detected; checks will be skipped)");
     }
+
+    println!();
+    println!(
+        "next step: `skillpack init --target all --auto` to scaffold guidance for every ecosystem."
+    );
 }
 
 /// `skillpack update` — incrementally regenerate distribution files from an

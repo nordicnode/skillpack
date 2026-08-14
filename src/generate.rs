@@ -136,6 +136,16 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
     // triggers). An empty `when_to_use:` keeps the verifier honest.
     let when_concat = intent.when_to_use_phrases.join(", ");
 
+    // `homepage` is the human-facing URL (`.git` suffix stripped, SSH
+    // normalized to https); `repo_url` stays the raw git-clone URL for the
+    // `repository` field. The URL-drift check compares both against the git
+    // origin via `urls_equivalent` (which normalizes), so they stay in sync.
+    let homepage = profile
+        .repo_url
+        .as_deref()
+        .map(crate::introspect::normalize_git_url)
+        .unwrap_or_default();
+
     tera::Context::from_serialize(serde_json::json!({
         "name": name,
         "display_name": display_name,
@@ -146,6 +156,7 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         "author": intent.author.as_deref().or(profile.authors.as_deref()),
         "license": intent.license,
         "repo_url": profile.repo_url,
+        "homepage": homepage,
         "keywords": keywords,
         "version": profile.version.as_deref().unwrap_or_default(),
         "has_cli": has_cli,
