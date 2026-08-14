@@ -6,6 +6,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.1](https://github.com/nordicnode/skillpack/compare/v0.12.0...v0.12.1) - 2026-08-14
+
+### Fixed
+
+- address review findings across CI, docs, and source
+
+### Other
+
+- production-readiness pass from the second review
+- remove em dashes from README
+- center the Built with Freebuff heading
+- rerun benchmark with 3 runs per condition
+- rewrite agent-demo for Google Antigravity (agy) + Gemini 3.7 Flash
+- switch benchmark to Google Antigravity (agy) + Gemini 3.7 Flash
+- drop duplicate skillpack h1 from hero (wordmark is in the logo)
+- add Freebuff CTA banner and drop emoji from section headers
+
 _No unreleased changes yet._
 
 ## [0.12.0] - 2026-08-14
