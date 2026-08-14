@@ -26,6 +26,19 @@
 
 ---
 
+## Built with Freebuff
+
+<div align="center">
+  <p><strong>This project was made possible by <a href="https://freebuff.com">Freebuff</a> — the free AI coding agent.</strong><br/>
+  No subscription, credits, or API key required.</p>
+  <p>
+    <a href="https://freebuff.com"><img src="https://img.shields.io/badge/Try%20Freebuff-ff5c1c?style=for-the-badge" alt="Try Freebuff — the free AI coding agent"></a>
+    <a href="https://github.com/CodebuffAI/freebuff"><img src="https://img.shields.io/badge/Freebuff%20on%20GitHub-2f353b?style=for-the-badge" alt="Freebuff on GitHub"></a>
+  </p>
+</div>
+
+---
+
 ## Why skillpack?
 
 AI coding assistants (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, Freebuff) interact with software differently than humans:
@@ -42,7 +55,7 @@ Without an agent guidance layer, AI coding agents frequently:
 
 ---
 
-## ⚡ Key Features
+## Key Features
 
 * **Universal Multi-Ecosystem Generation**: Generates native guidance files for **10 agent formats** simultaneously (`AGENTS.md`, Claude Code, Cursor `.mdc`, OpenCode, Copilot, Codex, Windsurf, Freebuff, Gemini, and Aider).
 * **Zero-Drift Verification**: Simulates agent invocations against your live CLI to verify that every documented flag and subcommand actually exists.
@@ -52,7 +65,7 @@ Without an agent guidance layer, AI coding agents frequently:
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Installation
 
@@ -95,7 +108,7 @@ skillpack verify
 
 ---
 
-## 📦 What skillpack Generates
+## What skillpack Generates
 
 Running `skillpack init --target all` generates a clean, non-intrusive distribution layer:
 
@@ -113,7 +126,7 @@ Running `skillpack init --target all` generates a clean, non-intrusive distribut
 
 ---
 
-## 📊 Measured Benchmark: The skillpack Impact
+## Measured Benchmark: The skillpack Impact
 
 We benchmarked autonomous coding agents performing complex search and execution tasks on a plain repository clone versus a `skillpack`-guided clone:
 
@@ -135,7 +148,7 @@ Guided (With skillpack):    [Direct Execution with Verified Flags] ────�
 
 ---
 
-## 🛠️ Command-Line Reference
+## Command-Line Reference
 
 * **`skillpack init`**: Scaffold agent distribution files (interactive, `--auto`, or `--non-interactive`).
 * **`skillpack verify`**: Check guidance files against agent schemas and live `--help` flag surfaces (supports `--min-score <N>`, `--fix`, and `--format {human,json,sarif}`).
@@ -145,7 +158,7 @@ Guided (With skillpack):    [Direct Execution with Verified Flags] ────�
 
 ---
 
-## 🔄 CI/CD & Pre-Commit Integration
+## CI/CD & Pre-Commit Integration
 
 ### GitHub Actions Workflow
 
@@ -186,7 +199,7 @@ repos:
 
 ---
 
-## 🌐 Supported Language Ecosystems
+## Supported Language Ecosystems
 
 `skillpack` automatically detects CLI binaries and library entrypoints across:
 
@@ -206,7 +219,7 @@ repos:
 
 ---
 
-## 📄 License & Community
+## License & Community
 
 `skillpack` is open-source software licensed under the **[MIT License](LICENSE)**.
 
