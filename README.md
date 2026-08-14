@@ -25,7 +25,7 @@
 
 ---
 
-## Built with Freebuff
+<h2 align="center">Built with Freebuff</h2>
 
 <div align="center">
   <p><strong>This project was made possible by <a href="https://freebuff.com">Freebuff</a> — the free AI coding agent.</strong><br/>
