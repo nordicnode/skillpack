@@ -29,7 +29,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Install the exact toolchain pinned in rust-toolchain.toml so CI's
       # fmt/clippy are byte-identical to local — a newer stable's fmt collapse
       # rule can't pass one place and fail the other. `rust-toolchain.toml` is
@@ -45,13 +45,13 @@ jobs:
       # the `#[ignore]`-gated round-trip tests actually execute rather than
       # self-skip. (Zig/Swift/C/C++/Elixir ship a pre-built launcher script
       # instead of a real toolchain, so they need no runtime here.)
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.22'
       - uses: ruby/setup-ruby@v1
@@ -60,11 +60,11 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0'
       - uses: denoland/setup-deno@v2
@@ -104,7 +104,7 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: '1.85.0'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: '1.85.0'
@@ -118,7 +118,7 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Install a prebuilt `cargo-audit` binary instead of `cargo install`
       # (which compiles the tool from source on every run, ~1-2 min cold).
       - uses: taiki-e/install-action@v2
@@ -133,7 +133,7 @@ jobs:
   deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
@@ -146,7 +146,7 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: '1.95.0'
@@ -170,7 +170,7 @@ jobs:
   version-sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: verify version is synced across Cargo.toml, skillpack.yml, plugin.json
         run: |
           cargo_ver=$(awk 'BEGIN{in_pkg=0} /^\[package\]/{in_pkg=1; next} /^\[/{in_pkg=0} in_pkg && /^version[[:space:]]*=/{gsub(/[" ]/, "", $3); print $3; exit}' Cargo.toml)
@@ -194,7 +194,7 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: '1.95.0'
@@ -206,7 +206,7 @@ jobs:
       - name: generate coverage report
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
       - name: upload to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           fail_ci_if_error: false
