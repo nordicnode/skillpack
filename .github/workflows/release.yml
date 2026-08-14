@@ -58,16 +58,33 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
+  # Create the GitHub Release with notes parsed from the CHANGELOG entry for
+  # this version. The upload action below only uploads assets to an existing
+  # release, so this must finish before the matrix starts.
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        uses: taiki-e/create-gh-release-action@v1
+        with:
+          changelog: CHANGELOG.md
+
   # Build prebuilt binaries for common platforms and attach them to the GitHub
   # Release. This is what makes `cargo binstall skillpack` work and lets users
-  # without a Rust toolchain install instantly. Runs on the same tag push; the
-  # action creates the GitHub Release if it doesn't exist yet.
+  # without a Rust toolchain install instantly.
   #
   # The upload action accepts exactly ONE target per invocation, so a matrix
-  # runs it once per platform: linux x86_64/arm64 and both macOS archs build
-  # on ubuntu via `cross` (docker/osxcross); windows builds natively on
-  # windows-latest because MSVC cannot be cross-compiled from Linux.
+  # runs it once per platform. Linux arm64 builds on ubuntu via `cross`
+  # (docker image exists); both macOS archs build on macos-latest — the
+  # action switches to plain cargo with `rustup target add` for apple targets
+  # on a macOS host, and cross-compiling x86_64 from the arm64 runner works
+  # because the Xcode SDK is universal (macos-13, the last Intel runner, was
+  # retired Dec 2025). Windows builds natively (MSVC can't be built elsewhere).
   binaries:
+    needs: create-release
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -79,9 +96,9 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-          - os: ubuntu-latest
+          - os: macos-latest
             target: x86_64-apple-darwin
-          - os: ubuntu-latest
+          - os: macos-latest
             target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
