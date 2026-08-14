@@ -7,8 +7,20 @@
   <p>
     <a href="https://github.com/nordicnode/skillpack/actions/workflows/ci.yml"><img src="https://github.com/nordicnode/skillpack/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
     <a href="https://crates.io/crates/skillpack"><img src="https://img.shields.io/crates/v/skillpack.svg" alt="crates.io version"></a>
+    <a href="https://crates.io/crates/skillpack"><img src="https://img.shields.io/crates/d/skillpack.svg" alt="crates.io downloads"></a>
+    <a href="https://docs.rs/skillpack"><img src="https://docs.rs/skillpack/badge.svg" alt="docs.rs"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
     <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust 1.85+"></a>
+  </p>
+
+  <p>
+    <a href="#quick-start">Quick Start</a> ·
+    <a href="#key-features">Features</a> ·
+    <a href="#what-skillpack-generates">What You Get</a> ·
+    <a href="#command-line-reference">CLI Reference</a> ·
+    <a href="docs/reference.md">Docs</a> ·
+    <a href="CHANGELOG.md">Changelog</a> ·
+    <a href="CONTRIBUTING.md">Contributing</a>
   </p>
 </div>
 
@@ -44,9 +56,11 @@ Without an agent guidance layer, AI coding agents frequently:
 
 ### 1. Installation
 
-Install `skillpack` via Cargo:
-
 ```bash
+# Prebuilt binaries — fastest, no Rust toolchain needed
+cargo install cargo-binstall && cargo binstall skillpack
+
+# Or build from source
 cargo install skillpack --locked
 ```
 
@@ -117,7 +131,7 @@ Guided (With skillpack):    [Direct Execution with Verified Flags] ────�
 | **Help Query Detours** | 4 – 5 queries | **0 queries** | **100% Elimination** |
 | **Task Accuracy** | 3.5 / 4 (87.5%) | **4.0 / 4 (100%)** | **+14% Accuracy** |
 
-> *Full benchmark methodology, repeatable test suites (`fd`, `ripgrep`, `bat`), and replay harness documentation are available in [`docs/benchmark.md`](docs/benchmark.md).*
+> *Full benchmark methodology, repeatable test suites (`fd`, `ripgrep`, `bat`), and replay harness documentation are available in [`docs/benchmark.md`](docs/benchmark.md). Want to see it happen? Read the step-by-step [`docs/agent-demo.md`](docs/agent-demo.md) — or reproduce the A/B run yourself from the committed transcripts.*
 
 ---
 
@@ -165,7 +179,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/nordicnode/skillpack
-    rev: v0.11.3
+    rev: v0.12.0
     hooks:
       - id: skillpack-verify
 ```

@@ -1,14 +1,14 @@
 [package]
 name = "skillpack"
-version = "0.11.3"
+version = "0.12.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["nordicnode <128633122+nordicnode@users.noreply.github.com>"]
 license = "MIT"
-description = "Generate and verify the agent-distribution layer for any OSS project (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, AGENTS.md)."
+description = "Generate, verify, and maintain AI agent guidance (skills, plugins, AGENTS.md) for Claude Code, Cursor, Codex, Copilot, and 10+ AI coding ecosystems — one command turns any CLI or library into an agent-discoverable skill pack."
 homepage = "https://github.com/nordicnode/skillpack"
 repository = "https://github.com/nordicnode/skillpack"
-keywords = ["cli", "claude", "agent", "skills", "distribution"]
+keywords = ["cli", "claude", "agent", "skills", "ai-agents"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
 exclude = [

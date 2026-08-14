@@ -46,3 +46,29 @@ jobs:
         run: cargo publish --locked --token "$CARGO_REGISTRY_TOKEN"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # Build prebuilt binaries for common platforms and attach them to the GitHub
+  # Release. This is what makes `cargo binstall skillpack` work and lets users
+  # without a Rust toolchain install instantly. Runs on the same tag push; the
+  # action creates the GitHub Release if it doesn't exist yet.
+  binaries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and upload release binaries
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: skillpack
+          target: |
+            x86_64-unknown-linux-gnu
+            aarch64-unknown-linux-gnu
+            x86_64-apple-darwin
+            aarch64-apple-darwin
+            x86_64-pc-windows-msvc
+          token: ${{ secrets.GITHUB_TOKEN }}

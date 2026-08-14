@@ -8,6 +8,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+_No unreleased changes yet._
+
+## [0.12.0] - 2026-08-14
+
 ### Added
 
 - Repeatable OpenCode benchmark harness (`scripts/benchmark/`): `run.sh`
@@ -88,7 +92,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `release.yml` now runs `cargo audit` before `cargo publish`, so a
   vulnerability disclosed after the last `main` CI run blocks publishing.
 
-## [0.11.3] - 2026-08-13
+### Added
+
+- Language support expanded to five more ecosystems — **Zig**
+  (`build.zig`/`build.zig.zon` + `zig-out/bin/`), **Swift** (`Package.swift`
+  + `.build/{debug,release}/` artifacts or `swift run`), **C / C++**
+  (`CMakeLists.txt`, `meson.build`, `Makefile` and `build/` / `bin/`
+  binaries), **Elixir** (`mix.exs` + `_build/{dev,prod}/rel/` releases or
+  `mix escript`), and **Deno** (`deno.json` / `deno.jsonc` + `deno run`
+  entrypoints) — bringing the supported language count to thirteen.
+  Detection, manifest parsing, CLI candidates, Cursor globs, and snapshot
+  coverage all extended.
+
+### Fixed
+
+- `detect_repo_url` now preserves the raw `git remote get-url origin`
+  string (what lands in `plugin.json` `homepage` / `repository`) while
+  `urls_equivalent` still compares normalized forms — so a trailing-slash
+  or `.git`-suffix difference no longer causes false URL drift, and the
+  committed plugin.json keeps the exact origin URL.
+- The Go CLI candidate test compares the binary file stem
+  case-insensitively (matching the Node test pattern) — fixes a
+  windows-latest-only failure where PATHEXT resolves `go` to a path ending
+  in `go.EXE`.
 
 ### Changed
 
