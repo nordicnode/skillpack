@@ -1703,12 +1703,12 @@ fn verify_verbose_json_stdout_is_pure_json_introspection_on_stderr() {
     );
     assert_eq!(v["ok"], serde_json::Value::Bool(true));
     assert!(
-        !stdout.contains("— introspection —"),
+        !stdout.contains("introspection"),
         "introspection block must not leak to stdout in JSON mode: {stdout}"
     );
     let stderr = String::from_utf8_lossy(&out_json.stderr);
     assert!(
-        stderr.contains("— introspection —"),
+        stderr.contains("introspection"),
         "introspection block must be visible on stderr in JSON mode: {stderr}"
     );
 
@@ -1722,7 +1722,7 @@ fn verify_verbose_json_stdout_is_pure_json_introspection_on_stderr() {
     assert!(out_human.status.success(), "verify must exit 0");
     let human_stdout = String::from_utf8_lossy(&out_human.stdout);
     assert!(
-        human_stdout.contains("— introspection —"),
+        human_stdout.contains("introspection"),
         "introspection block must stay on stdout in human mode: {human_stdout}"
     );
 }
@@ -2423,10 +2423,10 @@ fn jvm_available() -> bool {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "requires `sh` on PATH; runs on CI via --include-ignored"]
+#[ignore = "requires `sh` on PATH (JVM fixture ships an installDist launcher script); runs on CI via --include-ignored"]
 fn jvm_cli_init_then_verify_round_trip() {
     if !jvm_available() {
-        eprintln!("skipped: sh not on PATH");
+        eprintln!("skipped: sh not on PATH (needed for the JVM installDist launcher)");
         return;
     }
     let root = copy_fixture("jvm-cli");

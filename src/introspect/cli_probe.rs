@@ -46,7 +46,7 @@ pub(crate) fn walk_cargo_workspace(
     diag.push(
         "detect_cli.rust.workspace",
         format!(
-            "Cargo workspace root — {} member(s) to probe",
+            "Cargo workspace root: {} member(s) to probe",
             expanded.len()
         ),
     );
@@ -55,7 +55,7 @@ pub(crate) fn walk_cargo_workspace(
         if !member_root.join("Cargo.toml").is_file() {
             diag.push(
                 "detect_cli.rust.workspace",
-                format!("member `{member_rel}` has no Cargo.toml — skipped"),
+                format!("member `{member_rel}` has no Cargo.toml, skipped"),
             );
             continue;
         }
@@ -99,7 +99,7 @@ pub(crate) fn walk_cargo_workspace(
     }
     diag.push(
         "detect_cli.rust.workspace",
-        "no workspace member yielded a runnable CLI — has_cli=false \
+        "no workspace member yielded a runnable CLI; has_cli=false \
          (run `skillpack init` inside the member crate that ships the binary)"
             .to_string(),
     );
@@ -129,7 +129,7 @@ pub(crate) fn walk_npm_workspace(
     let expanded = expand_workspace_members(root, &paths);
     diag.push(
         "detect_cli.node.workspace",
-        format!("npm workspace root — {} member(s) to probe", expanded.len()),
+        format!("npm workspace root: {} member(s) to probe", expanded.len()),
     );
     for member_rel in expanded {
         let member_root = root.join(&member_rel);
@@ -137,7 +137,7 @@ pub(crate) fn walk_npm_workspace(
         if !pkg_json.is_file() {
             diag.push(
                 "detect_cli.node.workspace",
-                format!("member `{member_rel}` has no package.json — skipped"),
+                format!("member `{member_rel}` has no package.json, skipped"),
             );
             continue;
         }
@@ -166,7 +166,7 @@ pub(crate) fn walk_npm_workspace(
         if mv.get("bin").is_none() {
             diag.push(
                 "detect_cli.node.workspace",
-                format!("member `{member_rel}` (`{member_name}`): no `bin` field — skipped"),
+                format!("member `{member_rel}` (`{member_name}`): no `bin` field, skipped"),
             );
             continue;
         }
@@ -189,7 +189,7 @@ pub(crate) fn walk_npm_workspace(
     }
     diag.push(
         "detect_cli.node.workspace",
-        "no workspace member yielded a runnable CLI — has_cli=false \
+        "no workspace member yielded a runnable CLI; has_cli=false \
          (run `skillpack init` inside the member package that ships the bin)"
             .to_string(),
     );
@@ -268,7 +268,7 @@ pub(crate) fn detect_cli(
         diag.push(
             "detect_cli",
             format!(
-                "primary_cli_candidate for language `{}` returned None — \
+                "primary_cli_candidate for language `{}` returned None; \
                  runtime may be missing, no build artifact present, or no bin \
                  entry point. Run `skillpack doctor --verbose` to see the raw \
                  profile; if this is a monorepo member, try running \
@@ -285,7 +285,7 @@ pub(crate) fn detect_cli(
             diag.push(
                 "detect_cli.python",
                 "uv/poetry workspace detected; member walking not yet \
-                 implemented — run `skillpack init` in the member package dir"
+                 implemented; run `skillpack init` in the member package dir"
                     .to_string(),
             );
         }
@@ -367,7 +367,7 @@ fn spawn_candidate(candidate: &CliCandidate, diag: &mut DiagTrace) -> DetectCli 
             diag.push(
                 "detect_cli",
                 format!(
-                    "spawn failed — `{}` binary not found on PATH",
+                    "spawn failed: `{}` binary not found on PATH",
                     command.first().unwrap_or(&candidate.argv[0])
                 ),
             );

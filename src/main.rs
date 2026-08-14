@@ -175,7 +175,7 @@ fn auto_intent(
         match import.map(str::trim).filter(|s| !s.is_empty()) {
             Some(p) => (None, Some(p.to_string())),
             None => bail!(
-                "--auto: no CLI detected, so this looks like a library — pass \
+                "--auto: no CLI detected, so this looks like a library; pass \
                  --import <PATTERN> so the skill can document how an agent \
                  consumes it"
             ),
@@ -498,7 +498,7 @@ fn run_init_inner(
 }
 
 fn interview_run(profile: &types::ProjectProfile) -> Result<types::Intent> {
-    println!("\nNo skillpack.toml found — a few quick questions to scaffold your skill pack.\n");
+    println!("\nNo skillpack.toml found. A few quick questions to scaffold your skill pack.\n");
     let prompter = interview::DialoguerPrompter;
     let intent = interview::run(profile, &prompter).context("during interview")?;
     Ok(intent)
@@ -711,7 +711,7 @@ fn print_profile(profile: &types::ProjectProfile, to_stderr: bool) {
             }
         };
     }
-    emit!("— introspection —");
+    emit!("introspection");
     emit!("  name:        {}", profile.name);
     emit!("  language:    {}", profile.language.as_str());
     emit!("  has_cli:     {}", profile.has_cli);
@@ -1060,7 +1060,7 @@ fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool, debug: bo
     if verbose {
         print_profile(profile, false);
     } else {
-        println!("— skillpack doctor —");
+        println!("skillpack doctor");
         println!("  name:     {}", profile.name);
         println!("  language: {}", profile.language.as_str());
         println!("  has_cli:  {}", profile.has_cli);
@@ -1072,9 +1072,9 @@ fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool, debug: bo
     println!();
     if profile.diag.0.is_empty() {
         if profile.has_cli {
-            println!("decision trace: (empty — CLI detected cleanly, no falsy branches fired)");
+            println!("decision trace: (empty; CLI detected cleanly, no falsy branches fired)");
         } else {
-            println!("decision trace: (empty — no candidate notes were pushed)");
+            println!("decision trace: (empty; no candidate notes were pushed)");
             println!();
             println!("hint: candidate fns only push notes on falsy branches, so an empty trace");
             println!("      means either detection succeeded silently or this language has no");
@@ -1097,14 +1097,14 @@ fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool, debug: bo
     // check-id namespaces so the user knows what to expect after `init`.
     println!();
     println!("verify category preview (run `skillpack verify` after `init` for the real score):");
-    println!("  discovery.*     — structural validation of generated files per ecosystem");
+    println!("  discovery.*: structural validation of generated files per ecosystem");
     println!("    (marketplace.json, plugin.json, SKILL.md frontmatter, .mdc, AGENTS.md");
     println!("     presence, copilot-instructions.md)");
     if profile.has_cli {
-        println!("  invocation.*    — runs the CLI: --help, flag drift, subcommand drift");
+        println!("  invocation.*: runs the CLI: --help, flag drift, subcommand drift");
         println!("    --version drift (advisory)");
     } else {
-        println!("  invocation.*    — N/A (no CLI detected; checks will be skipped)");
+        println!("  invocation.*: N/A (no CLI detected; checks will be skipped)");
     }
 }
 
@@ -1242,7 +1242,7 @@ fn render_from_config(
     let profile = introspect::introspect(root).context("introspecting repo")?;
     let existing_cfg = Config::load(root)?.ok_or_else(|| {
         anyhow::anyhow!(
-            "no skillpack.toml at {} — a committed config is required.\n\
+            "no skillpack.toml at {}: a committed config is required.\n\
              To fix: run `skillpack init` first to seed it.",
             Config::path(root).display()
         )
@@ -1432,7 +1432,7 @@ fn run_diff_inner(
         Ok(exit::INIT_OK)
     } else {
         eprintln!(
-            "\n✗ {drifted} drifted, {missing} missing, {unchanged} up-to-date{} — \
+            "\n✗ {drifted} drifted, {missing} missing, {unchanged} up-to-date{}: \
              run `skillpack update{}` to fix.",
             if held > 0 {
                 format!(", {held} held")

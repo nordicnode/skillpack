@@ -42,7 +42,7 @@ pub fn run(profile: &ProjectProfile, prompter: &dyn Prompter) -> Result<Intent> 
         .clone()
         .unwrap_or_else(|| "No description yet".to_string());
     let q1 = prompter.text(
-        "What does your tool do? (one sentence — describe the task, not the tool)",
+        "What does your tool do? (one sentence; describe the task, not the tool)",
         &desc_default,
     )?;
     let one_line_description = q1.trim().to_string();

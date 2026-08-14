@@ -4,8 +4,6 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-
-
 ## [Unreleased]
 
 _No unreleased changes yet._
@@ -24,21 +22,6 @@ _No unreleased changes yet._
   `analyze.py` evidence-scores each question and reports per-condition
   medians across `--runs N`; `agy`'s configured model is used by default
   (Gemini 3.7 Flash); pin with `--model`.
-
-### Fixed
-
-- `init --auto` README hint no longer leaks badge/markup rows (shields.io,
-  CI status, language links) into the derived description — `read_readme_hint`
-  now skips lines that are markup-only, so a repo like fd whose README leads
-  with a badge banner gets the real tagline (previously the description
-  became a badge URL and the generated pack failed verify at 93/100).
-- `verify`'s `description_action_verb` check accepts descriptions that open
-  with a code-formatted name (`` `fd` is a program to ... ``) — the leading
-  backtick pair is stripped before the alpha-word heuristic. Markup/badge
-  leakage still fails.
-
-### Added
-
 - `init --auto`: zero-flag, zero-prompt init. The intent is derived entirely
   from the repo — description from the README hint, author from the manifest
   or `git config user.name`, license from the LICENSE file (or `--license`),
@@ -54,9 +37,6 @@ _No unreleased changes yet._
   check (now a single shared implementation); Windsurf reuses the Cursor
   rule check with its own check_id prefix. AGENTS.md coverage is documented
   for Freebuff and 60k+ projects' agents.
-
-### Added
-
 - Multi-skill packs (the documented future direction, now shipped): a
   `[[skills]]` array in `skillpack.toml` renders one per-skill file per
   ecosystem (`skills/<name>/SKILL.md`, `.codex/skills/<name>/SKILL.md`,
@@ -70,9 +50,6 @@ _No unreleased changes yet._
   preserving every body. The config normalizes to a `[[skills]]` array on
   first `update`. Author the array by hand; `init` still writes single-skill
   packs. Docs: `docs/reference.md` "Multi-skill packs" section.
-
-### Added
-
 - `init --non-interactive` can now bootstrap the FIRST pack from flags
   (`--description`, `--trigger`, `--author`, `--invocation` or `--import`)
   when no `skillpack.toml` exists — previously a chicken-and-egg: CI needed a
@@ -82,20 +59,6 @@ _No unreleased changes yet._
   fail with an actionable message naming the flag; passing both
   `--invocation` and `--import` is rejected. With a committed config the
   flags are ignored (config wins), so re-runs stay deterministic.
-
-### Fixed
-
-- `.gitignore` now excludes `.freebuff/` — the desktop-app local database was
-  being swept into the crates.io tarball (`cargo package` includes untracked,
-  non-ignored files). Private local data would have shipped with the crate.
-- All 11 rustdoc warnings eliminated (stale `GeneratedFile` links, links to
-  private items, an unclosed HTML tag, a redundant link target) — `cargo doc`
-  is now warning-free.
-- `release.yml` now runs `cargo audit` before `cargo publish`, so a
-  vulnerability disclosed after the last `main` CI run blocks publishing.
-
-### Added
-
 - Language support expanded to five more ecosystems — **Zig**
   (`build.zig`/`build.zig.zon` + `zig-out/bin/`), **Swift** (`Package.swift`
   + `.build/{debug,release}/` artifacts or `swift run`), **C / C++**
@@ -105,36 +68,6 @@ _No unreleased changes yet._
   entrypoints) — bringing the supported language count to thirteen.
   Detection, manifest parsing, CLI candidates, Cursor globs, and snapshot
   coverage all extended.
-
-### Fixed
-
-- `detect_repo_url` now preserves the raw `git remote get-url origin`
-  string (what lands in `plugin.json` `homepage` / `repository`) while
-  `urls_equivalent` still compares normalized forms — so a trailing-slash
-  or `.git`-suffix difference no longer causes false URL drift, and the
-  committed plugin.json keeps the exact origin URL.
-- The Go CLI candidate test compares the binary file stem
-  case-insensitively (matching the Node test pattern) — fixes a
-  windows-latest-only failure where PATHEXT resolves `go` to a path ending
-  in `go.EXE`.
-
-### Changed
-
-- README rewritten to be user-facing: plain-language quick start, "what you
-  get" per ecosystem, and a measured-results section up front. The full
-  check list, every CLI flag, and the platform notes moved to the new
-  `docs/reference.md`, which the README links to.
-- Declared MSRV raised to Rust 1.85 (`rust-version` in `Cargo.toml`), matching
-  what the locked `clap`/`tera` actually require — `cargo install` on Rust
-  1.74–1.84 previously failed with a hard toolchain error. README badge and
-  toolchain comment updated; CI gains an MSRV job that checks lib + bins at
-  1.85.0 so the floor can't drift again.
-- Removed three unused direct dependencies (`thiserror`, `walkdir`,
-  `indexmap`) — they had zero references in `src/` and only bloated compile
-  time and the lockfile.
-
-### Added
-
 - New `verify` discovery checks: an unterminated `---` frontmatter block in a
   `SKILL.md` / cursor `.mdc` / opencode agent file now FAILs (`*.frontmatter_unclosed`)
   instead of being silently parsed as valid frontmatter with the body swallowed;
@@ -153,8 +86,49 @@ _No unreleased changes yet._
   old `^version` grep would break if a workspace-level `version` line ever
   appeared.
 
+### Changed
+
+- README rewritten to be user-facing: plain-language quick start, "what you
+  get" per ecosystem, and a measured-results section up front. The full
+  check list, every CLI flag, and the platform notes moved to the new
+  `docs/reference.md`, which the README links to.
+- Declared MSRV raised to Rust 1.85 (`rust-version` in `Cargo.toml`), matching
+  what the locked `clap`/`tera` actually require — `cargo install` on Rust
+  1.74–1.84 previously failed with a hard toolchain error. README badge and
+  toolchain comment updated; CI gains an MSRV job that checks lib + bins at
+  1.85.0 so the floor can't drift again.
+- Removed three unused direct dependencies (`thiserror`, `walkdir`,
+  `indexmap`) — they had zero references in `src/` and only bloated compile
+  time and the lockfile.
+
 ### Fixed
 
+- `init --auto` README hint no longer leaks badge/markup rows (shields.io,
+  CI status, language links) into the derived description — `read_readme_hint`
+  now skips lines that are markup-only, so a repo like fd whose README leads
+  with a badge banner gets the real tagline (previously the description
+  became a badge URL and the generated pack failed verify at 93/100).
+- `verify`'s `description_action_verb` check accepts descriptions that open
+  with a code-formatted name (`` `fd` is a program to ... ``) — the leading
+  backtick pair is stripped before the alpha-word heuristic. Markup/badge
+  leakage still fails.
+- `.gitignore` now excludes `.freebuff/` — the desktop-app local database was
+  being swept into the crates.io tarball (`cargo package` includes untracked,
+  non-ignored files). Private local data would have shipped with the crate.
+- All 11 rustdoc warnings eliminated (stale `GeneratedFile` links, links to
+  private items, an unclosed HTML tag, a redundant link target) — `cargo doc`
+  is now warning-free.
+- `release.yml` now runs `cargo audit` before `cargo publish`, so a
+  vulnerability disclosed after the last `main` CI run blocks publishing.
+- `detect_repo_url` now preserves the raw `git remote get-url origin`
+  string (what lands in `plugin.json` `homepage` / `repository`) while
+  `urls_equivalent` still compares normalized forms — so a trailing-slash
+  or `.git`-suffix difference no longer causes false URL drift, and the
+  committed plugin.json keeps the exact origin URL.
+- The Go CLI candidate test compares the binary file stem
+  case-insensitively (matching the Node test pattern) — fixes a
+  windows-latest-only failure where PATHEXT resolves `go` to a path ending
+  in `go.EXE`.
 - `HELP_TIMEOUT` raised 15s → 30s: the Windows CI `go run .` round trip timed
   out again under parallel-test load (the same flake that raised it 8s → 15s
   previously). The go round-trip test now also pre-warms the build cache

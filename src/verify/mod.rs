@@ -106,7 +106,7 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
             "invocation.multi_cli",
             "invocation drift checks cover every documented CLI",
             format!(
-                "{cli_skills} skills document a CLI invocation, but invocation checks only run against the first — the others were skipped"
+                "{cli_skills} skills document a CLI invocation, but invocation checks only run against the first; the others were skipped"
             ),
             "To fix: verify is single-CLI by default; split multi-CLI plugins into one plugin per CLI, or run verify per-skill manually.",
         ));
@@ -149,7 +149,7 @@ pub fn render(report: &VerifyReport) -> String {
             Severity::Skipped => "·",
         };
         out.push_str(&format!(
-            "{} {} — {}\n",
+            "{} {}: {}\n",
             glyph,
             r.severity.as_str(),
             r.check_name
@@ -163,13 +163,13 @@ pub fn render(report: &VerifyReport) -> String {
     }
 
     out.push_str(&format!(
-        "\n{pass} passed, {warn} warning(s), {fail} failed — discoverability score {}/100",
+        "\n{pass} passed, {warn} warning(s), {fail} failed, discoverability score {}/100",
         report.discoverability_score()
     ));
     out.push_str(if fail > 0 {
-        " — verify FAILED\n"
+        ": verify FAILED\n"
     } else {
-        " — verify OK\n"
+        ": verify OK\n"
     });
     out
 }

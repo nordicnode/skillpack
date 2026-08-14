@@ -17,7 +17,9 @@ pub struct ProjectProfile {
     /// Best-effort tool name, derived from the project manifest or repo dir.
     /// Always coerced to kebab-case before it reaches a generated file.
     pub name: String,
-    /// One of: `rust`, `node`, `python`, `go`, `ruby`, `unknown`.
+    /// Detected ecosystem: one of `rust`, `node`, `python`, `go`, `ruby`,
+    /// `php`, `csharp`, `jvm`, `zig`, `swift`, `c_cpp`, `elixir`, `deno`,
+    /// or `unknown`.
     pub language: Language,
     /// True iff introspect detected an invokable CLI binary. The branching
     /// point for the pure-library path.

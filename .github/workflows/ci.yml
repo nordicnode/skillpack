@@ -40,9 +40,10 @@ jobs:
           components: 'rustfmt,clippy'
       - uses: Swatinem/rust-cache@v2
 
-      # Runtime prereqs — one setup-* action per language, each works across
-      # all three OSes. The Go + Ruby installs let the `#[ignore]`-gated
-      # round-trip tests actually execute rather than self-skip.
+      # Runtime prereqs - one setup-* action per language, each works across
+      # all three OSes. The Go, Ruby, PHP, Java, and .NET installs let the
+      # `#[ignore]`-gated round-trip tests actually execute rather than
+      # self-skip.
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -72,16 +73,17 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: test
         run: cargo test --all-targets
-      # The `#[ignore]`-gated spawn round trips (go/ruby/php) compile and run a
+      # The `#[ignore]`-gated spawn round trips (go/ruby/php/jvm/csharp) run a
       # real runtime from a cold cache. Run them AFTER the main suite in their
       # own step so a cold `go run .` / `dotnet run` never contends with the
-      # self-dogfood release builds — previously a single `--include-ignored`
+      # self-dogfood release builds - previously a single `--include-ignored`
       # invocation let a cold compile exceed HELP_TIMEOUT under parallel load
-      # (flaky windows-latest failures). The filter matches exactly the three
-      # ignored tests; the runtimes are installed by the setup-* actions above
-      # and each test self-skips if its runtime is missing anyway.
+      # (flaky windows-latest failures). The filter matches all five ignored
+      # tests; the runtimes are installed by the setup-* actions above and each
+      # test self-skips if its runtime is missing anyway. `jvm_cli` is
+      # `#[cfg(unix)]`, so it no-ops on Windows.
       - name: test runtime round trips (isolated)
-        run: cargo test --test integration_end_to_end -- --include-ignored go_cli ruby_cli php_cli
+        run: cargo test --test integration_end_to_end -- --include-ignored go_cli ruby_cli php_cli jvm_cli csharp_cli
 
   # MSRV gate: `rust-version` in Cargo.toml (1.85) is a real claim — a
   # `cargo install skillpack` on the MSRV must work. The main matrix builds on
@@ -112,8 +114,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      # Install a prebuilt `cargo-audit` binary instead of `cargo install`
+      # (which compiles the tool from source on every run, ~1-2 min cold).
+      - uses: taiki-e/install-action@v2
         with:
-          toolchain: 'stable'
+          tool: cargo-audit
       - name: cargo audit
-        run: cargo install cargo-audit --locked && cargo audit
+        run: cargo audit

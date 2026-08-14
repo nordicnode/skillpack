@@ -104,14 +104,14 @@ fn apply_regen_plugin_json(root: &Path, template_dir: Option<&Path>) -> Result<F
     let profile = introspect::introspect(root).context("introspecting repo for --fix")?;
     let Some(cfg) = Config::load(root)? else {
         bail!(
-            "no skillpack.toml at {} — `--fix` can only repair init-managed\n\
+            "no skillpack.toml at {}: `--fix` can only repair init-managed\n\
              distribution files; run `skillpack init` to seed it first.",
             root.display()
         );
     };
     let Some(intent): Option<Intent> = cfg.to_intent() else {
         bail!(
-            "skillpack.toml at {} has no `[skill]` block — cannot recover intent for --fix",
+            "skillpack.toml at {} has no `[skill]` block: cannot recover intent for --fix",
             root.display()
         );
     };
@@ -127,7 +127,7 @@ fn apply_regen_plugin_json(root: &Path, template_dir: Option<&Path>) -> Result<F
         .cloned()
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "claude target render produced no plugin.json — fix prerequisites not met"
+                "claude target render produced no plugin.json: fix prerequisites not met"
             )
         })?;
     write_one(root, &plugin_json)?;
@@ -156,7 +156,7 @@ fn apply_regen_skill_md_frontmatter(
     let profile = introspect::introspect(root).context("introspecting repo for --fix")?;
     let Some(cfg) = Config::load(root)? else {
         bail!(
-            "no skillpack.toml at {} — `--fix` can only repair init-managed\n\
+            "no skillpack.toml at {}: `--fix` can only repair init-managed\n\
              distribution files; run `skillpack init` to seed it first.",
             root.display()
         );
@@ -164,7 +164,7 @@ fn apply_regen_skill_md_frontmatter(
     let skills = cfg.to_intents();
     if skills.is_empty() {
         bail!(
-            "skillpack.toml at {} has no skill block — cannot recover intent for --fix",
+            "skillpack.toml at {} has no skill block: cannot recover intent for --fix",
             root.display()
         );
     };
@@ -195,7 +195,7 @@ fn apply_regen_skill_md_frontmatter(
         .find(|f| f.rel_path == loc)
         .cloned()
         .ok_or_else(|| {
-            anyhow::anyhow!("rendered no skill at `{loc}` — fix prerequisites not met")
+            anyhow::anyhow!("rendered no skill at `{loc}`: fix prerequisites not met")
         })?;
 
     // Slice the fresh frontmatter: everything from the opening `---` through

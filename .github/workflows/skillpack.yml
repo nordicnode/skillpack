@@ -15,12 +15,15 @@
 # itself uses in its own `.github/workflows/ci.yml`.
 #
 # `verify` needs the real CLI on PATH (it spawns the documented `--help`), so
-# the matrix + runtime-setup block mirrors skillpack's own CI verbatim — a
+# the matrix + runtime-setup block mirrors skillpack's own CI verbatim - a
 # consumer repo gets identical cross-OS coverage without hand-rolling setup-*
 # actions for each language runtime. Consumers whose project has no language
 # runtime on the matrix (a pure-library pack) can drop unused setup-* steps
-# from a forked copy; this workflow keeps the full set so the default covers
-# the eight language ecosystems skillpack supports.
+# from a forked copy; this workflow installs the runtimes skillpack's own
+# round-trip tests exercise (node, python, go, ruby, php, java, dotnet).
+# Runtimes for the newer detected ecosystems (zig, swift, c/c++, elixir,
+# deno) are NOT installed here - add the matching setup-* action to a forked
+# copy if the consumer's documented CLI is in one of those languages.
 name: skillpack verify
 
 on:
@@ -30,6 +33,7 @@ on:
         description: 'crate version to install from crates.io (e.g. "0.12.0")'
         required: false
         type: string
+        # Keep in sync with the latest published release - bump on every tag.
         default: '0.12.0'
 
 jobs:
@@ -42,10 +46,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Runtime prereqs — one setup-* action per language, lifted verbatim from
+      # Runtime prereqs - one setup-* action per language, lifted verbatim from
       # skillpack/.github/workflows/ci.yml so consumers get identical coverage.
-      # The Go + Ruby installs let the `#[ignore]`-gated round-trip tests run
-      # in skillpack's own CI; for a consumer repo they only matter if the
+      # These installs let the `#[ignore]`-gated round-trip tests run in
+      # skillpack's own CI; for a consumer repo they only matter if the
       # consumer's documented CLI is in one of those languages.
       - uses: actions/setup-node@v4
         with:

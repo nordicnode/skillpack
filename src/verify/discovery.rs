@@ -265,7 +265,7 @@ fn check_marketplace(root: &Path) -> Result<CheckResult> {
                 "discovery.marketplace.missing",
                 "marketplace.json exists and is valid JSON",
                 format!(
-                    "{} not found — re-run `skillpack init` or check the path",
+                    "{} not found: re-run `skillpack init` or check the path",
                     schema::MARKETPLACE_JSON_PATH
                 ),
                 format!(
@@ -707,8 +707,8 @@ fn check_one_skill_md(
         return Ok(CheckResult::fail(
             &format!("{prefix}.description"),
             "SKILL.md `description` is non-empty",
-            format!("{rel}: `description` is empty (it may be missing, or the line `description:` has no value on the same line — e.g. a nested map)"),
-            "To fix: write one sentence describing the skill on the SAME line as `description:` — e.g. `description: Generate an agent skill pack`. Avoid indented YAML blocks under `description:`.",
+            format!("{rel}: `description` is empty (it may be missing, or the line `description:` has no value on the same line, e.g. a nested map)"),
+            "To fix: write one sentence describing the skill on the SAME line as `description:`, e.g. `description: Generate an agent skill pack`. Avoid indented YAML blocks under `description:`.",
         ));
     }
 
@@ -808,7 +808,7 @@ fn check_one_skill_md(
                     &format!("{prefix}.dir_name_mismatch"),
                     "skill directory name matches its frontmatter `name`",
                     format!("{rel}: directory `{dir}` != frontmatter `name: {fm_name}`"),
-                    "To fix: rename the skill directory (or the frontmatter `name`) so they match — agents load skills by directory.",
+                    "To fix: rename the skill directory (or the frontmatter `name`) so they match; agents load skills by directory.",
                 );
                 r.location = Some((rel.clone(), None));
                 return Ok(r);

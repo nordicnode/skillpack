@@ -40,15 +40,23 @@ jobs:
       # A vulnerability disclosed AFTER the last `main` CI run (which audits
       # on every push/PR) must still block publishing. Cheap relative to the
       # publish itself; fails the job on any advisory in the locked tree.
+      # Install a prebuilt binary instead of compiling from source.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
       - name: cargo audit
-        run: cargo install cargo-audit --locked && cargo audit
+        run: cargo audit
       # Idempotency guard: if this version already made it to crates.io (e.g.
       # a tag was moved to re-run the binaries job), skip the publish instead
       # of failing on "crate version already uploaded".
       - name: Check version not already on crates.io
         run: |
           cargo_ver=$(awk 'BEGIN{in_pkg=0} /^\[package\]/{in_pkg=1; next} /^\[/{in_pkg=0} in_pkg && /^version[[:space:]]*=/{gsub(/[" ]/, "", $3); print $3; exit}' Cargo.toml)
-          if curl -fsSL https://index.crates.io/sk/il/skillpack | grep -q "\"vers\":\"${cargo_ver}\""; then
+          # `-sSL` (no `-f`) so a 404 (brand-new crate with no index entry yet)
+          # or an empty index still greps cleanly instead of curl exiting
+          # non-zero. The `if` guards the grep match; publish only skips when
+          # the version string is actually present in the index.
+          if curl -sSL https://index.crates.io/sk/il/skillpack | grep -q "\"vers\":\"${cargo_ver}\""; then
             echo "Version ${cargo_ver} already published; skipping cargo publish"
             echo "SKIP_PUBLISH=true" >> "$GITHUB_ENV"
           fi

@@ -111,7 +111,7 @@ pub(crate) fn first_cargo_member_name(root: &Path, diag: &mut DiagTrace) -> Opti
     }
     diag.push(
         "detect_language.rust.workspace",
-        "no workspace member has a [package].name — name fell back to dir tail".to_string(),
+        "no workspace member has a [package].name; name fell back to dir tail".to_string(),
     );
     None
 }
@@ -148,7 +148,7 @@ pub(crate) fn first_npm_member_name(root: &Path, diag: &mut DiagTrace) -> Option
     }
     diag.push(
         "detect_language.node.workspace",
-        "no workspace member has a package.json `name` — name fell back to dir tail".to_string(),
+        "no workspace member has a package.json `name`; name fell back to dir tail".to_string(),
     );
     None
 }

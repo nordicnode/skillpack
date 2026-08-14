@@ -65,7 +65,7 @@ With `skillpack init`, verified guidance is embedded across all 10 major distrib
 * **Help overhead, roughly halved**: The baseline agent ran `fd --help` four times per run, slicing it into `head`/`tail` windows to page through the 140+ lines. The skillpack-guided agent consulted help once or twice (b-skillpack-r3 ran it exactly once).
 * **The guidance anchors the agent in the repo**: The baseline agent started by searching the whole home directory (`fd -e rs /home/mikey`) and wandered into *other* projects on the machine (ashen-ledger, rust-cargo-project) before settling on the fd clone. The guided agent, whose prompt carried the skillpack AGENTS.md ("`fd` is a program to find entries...", verified flags), stayed in the repo and went straight to the verified short flags: `fd -e rs -E target`, `fd -s README`, `fd -I`, `fd -1 -g '*.rs' -x wc -l`.
 * **Footgun recovery, faster**: The baseline tried `fd --max-results 1 -e rs -x wc -l` (an incompatible combination) and had to re-reason; the guided agent reached the working `fd -1 -g '*.rs' -x wc -l` form in one step.
-* **Guided accuracy held; baseline slipped once**: every skillpack-guided run scored 4/4, while one baseline run (a-plain-r3) scored 3/4, missing Q3. Gemini 3.7 Flash is strong, so the dominant delta is efficiency — but the guidance also kept accuracy perfect.
+* **Guided accuracy held; baseline slipped once**: every skillpack-guided run scored 4/4, while one baseline run (a-plain-r3) scored 3/4, missing Q3. Gemini 3.7 Flash is strong, so the dominant delta is efficiency, but the guidance also kept accuracy perfect.
 
 ---
 
@@ -102,8 +102,8 @@ scripts/benchmark/run.sh \
 The harness clones the target repo once, builds it, then for each run creates two
 condition dirs from that cache:
 
-* **Condition A (plain)** — fresh clone, questions only.
-* **Condition B (skillpack)** — same clone + `skillpack init --auto --target all --force`,
+* **Condition A (plain)**: fresh clone, questions only.
+* **Condition B (skillpack)**: same clone + `skillpack init --auto --target all --force`,
   with the generated `AGENTS.md` fed to the agent as a prompt preamble.
 
 Both conditions are driven by `agy -p <prompt> --dangerously-skip-permissions
@@ -113,7 +113,7 @@ to each agent is committed next to the transcript (`<condition>.prompt`).
 
 **Methodology note**: agy print mode (v1.1.12) does not auto-discover `AGENTS.md`
 workspace rules, so condition B passes the skillpack-generated guidance to the
-agent explicitly as a prompt preamble — the *only* difference between the two
+agent explicitly as a prompt preamble; the *only* difference between the two
 conditions is the guidance content. The agent wrapper, model, and questions are
 identical. agy's stream-json output does not expose command exit codes, so tool
 failures are inferred from error-shaped tool output (documented in `analyze.py`).
@@ -126,7 +126,7 @@ failures are inferred from error-shaped tool output (documented in `analyze.py`)
 | `--runs N` | `SKILLPACK_BENCH_RUNS` | `1` | Runs per condition |
 | `--model M` | `SKILLPACK_BENCH_MODEL` | agy default | Specific model identifier to pin (passed to `agy --model`) |
 | `--format FMT` | `SKILLPACK_BENCH_FORMAT` | `table` | Output format: `table`, `markdown`, `json`, `csv`, `html` |
-| `--html` | — | `false` | Automatically generate interactive `report.html` |
+| `--html` | (none) | `false` | Automatically generate interactive `report.html` |
 | `--timeout S` | `SKILLPACK_BENCH_TIMEOUT` | `900` | Timeout per run in seconds |
-| `--dry-run` | — | `false` | Validate environment and exit without calling LLM |
-| `--fresh` | — | `false` | Re-clone and re-compile target repository |
+| `--dry-run` | (none) | `false` | Validate environment and exit without calling LLM |
+| `--fresh` | (none) | `false` | Re-clone and re-compile target repository |
