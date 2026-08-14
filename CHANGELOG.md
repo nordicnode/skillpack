@@ -14,14 +14,16 @@ _No unreleased changes yet._
 
 ### Added
 
-- Repeatable OpenCode benchmark harness (`scripts/benchmark/`): `run.sh`
-  runs an A/B of a plain repo clone vs `init --auto --target all` output
-  through OpenCode — same repo, same default agent, same model, same
-  questions (the old demo's `--agent` confound is gone). `analyze.py`
-  evidence-scores each question and reports per-condition medians across
-  `--runs N`. Uses opencode's configured model by default; pin with
-  `--model`. First committed results (fd, glm-5.2, 2 runs/condition):
-  −32% agent steps, −44% wall clock, −6% tokens, 3.5/4 → 4/4 correct.
+- Repeatable Google Antigravity benchmark harness (`scripts/benchmark/`):
+  `run.sh` runs an A/B of a plain repo clone vs `init --auto --target all`
+  output through the `agy` CLI (Antigravity) — same repo, same default
+  agent, same model, same questions (the old demo's `--agent` confound is
+  gone). agy print mode does not auto-discover AGENTS.md rules, so condition
+  B feeds the skillpack-generated AGENTS.md to the agent as a prompt
+  preamble — the only difference between conditions is the guidance.
+  `analyze.py` evidence-scores each question and reports per-condition
+  medians across `--runs N`; `agy`'s configured model is used by default
+  (Gemini 3.7 Flash); pin with `--model`.
 
 ### Fixed
 

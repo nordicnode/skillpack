@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Analyze skillpack x OpenCode benchmark transcripts.
+"""Analyze skillpack x Google Antigravity (agy) benchmark transcripts.
 
 Usage:
   analyze.py <results-dir> [--format {table,markdown,json,csv,html}]
                            [--suite <suite.json|name>] [--out <file>]
 
-Reads the JSONL event streams opencode `run --format json` writes
+Reads the JSONL event streams `agy -p --output-format stream-json` writes
 (`<condition>-r<N>.json`, or `<condition>.json` for a single run) plus
 `<condition>.wall` (wall-clock seconds written by run.sh), and evaluates:
+(legacy opencode `run --format json` transcripts are still supported).
 
   * Quantitative efficiency: agent rounds, total tokens, cost, wall-clock time
   * Behavioral overhead: help commands run, failed tool attempts, first-shot accuracy
@@ -127,9 +128,121 @@ def load_meta(meta_path):
 
 
 HELP_PATTERN = re.compile(r"(--help|-h\b|\bman\s|grep.*help|help.*grep)", re.I)
+# agy stream-json does not expose command exit codes, so failures are inferred
+# from error-shaped tool output.
+AGY_ERROR_PATTERN = re.compile(
+    r"(error:|No such file or directory|command not found|permission denied|\bnot found\b|\bdenied\b|\bfailed\b|\bcannot\b|could not)",
+    re.I,
+)
+
+
+def is_agy_events(events):
+    """agy stream-json events carry an `event` discriminator (init/step_update/result)."""
+    return any(isinstance(e, dict) and "event" in e for e in events)
 
 
 def extract_telemetry(events, wall_file=None):
+    if is_agy_events(events):
+        return extract_telemetry_agy(events, wall_file)
+    return extract_telemetry_opencode(events, wall_file)
+
+
+def extract_telemetry_agy(events, wall_file=None):
+    """Parse agy `--output-format stream-json` transcripts (Google Antigravity)."""
+    su_events = [e for e in events if e.get("event") == "step_update"]
+    results = [e for e in events if e.get("event") == "result"]
+    result = results[0].get("result", {}) if results else {}
+
+    # rounds: distinct completed step indexes (user_input, agent_response,
+    # tool, checkpoint …) — the agy analog of opencode's step_finish count.
+    done_indexes = {
+        s["step_update"].get("step_index") for s in su_events
+        if s["step_update"].get("state") == "DONE"
+    }
+    rounds = len(done_indexes) or len(su_events)
+
+    usage = result.get("usage", {}) or {}
+    tokens = usage.get("total_tokens", 0)
+    input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+    cache_read = usage.get("cache_read_tokens", 0)
+    if not tokens:
+        tokens = sum(
+            (s["step_update"].get("usage") or {}).get("total_tokens", 0)
+            for s in su_events
+        )
+
+    wall = float(result.get("duration_seconds", 0) or 0)
+    if not wall and wall_file and os.path.exists(wall_file):
+        try:
+            wall = float(open(wall_file).read().strip())
+        except Exception:
+            pass
+    if not wall:
+        ts = [e.get("timestamp", 0) for e in events if e.get("timestamp")]
+        if ts:
+            wall = (max(ts) - min(ts)) / 1000.0
+
+    texts = 0
+    commands = []
+    tool_failures = 0
+    help_calls = 0
+    trajectories = []
+    text_acc = {}  # step_index -> accumulated agent_response text
+    for s in su_events:
+        su = s["step_update"]
+        st = su.get("step_type")
+        if st == "agent_response":
+            delta = su.get("text_delta")
+            if delta:
+                texts += 1
+                idx = su.get("step_index")
+                text_acc[idx] = text_acc.get(idx, "") + delta
+        elif st == "tool" and su.get("state") == "DONE":
+            # ACTIVE and DONE events for the same tool both carry the params;
+            # only the DONE one has output (and counts once).
+            ti = su.get("tool_info") or {}
+            tname = su.get("tool_name") or ti.get("name")
+            params = ti.get("parameters") or {}
+            cmd = params.get("CommandLine") if isinstance(params, dict) else None
+            out_str = str(ti.get("output", ""))
+            if tname == "run_command" and cmd:
+                commands.append(cmd)
+                is_help = bool(HELP_PATTERN.search(cmd))
+                if is_help:
+                    help_calls += 1
+                is_fail = bool(AGY_ERROR_PATTERN.search(out_str)) if out_str.strip() else False
+                if is_fail:
+                    tool_failures += 1
+                trajectories.append({
+                    "type": "command",
+                    "command": cmd,
+                    "exit": None,  # agy stream-json has no exit code
+                    "output_preview": out_str.strip()[:200] if out_str else "",
+                    "is_help": is_help,
+                    "is_error": is_fail,
+                })
+    for idx in sorted(text_acc):
+        trajectories.append({"type": "text", "text": text_acc[idx][:300]})
+
+    return {
+        "rounds": rounds,
+        "texts": texts,
+        "tokens": tokens,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read": cache_read,
+        "cost": 0.0,
+        "wall_s": round(wall, 1),
+        "commands_count": len(commands),
+        "help_invocations": help_calls,
+        "tool_failures": tool_failures,
+        "commands": commands,
+        "trajectories": trajectories,
+    }
+
+
+def extract_telemetry_opencode(events, wall_file=None):
     steps = [e for e in events if e.get("type") == "step_finish"]
     texts = [e for e in events if e.get("type") == "text"]
     tokens, cost = 0, 0.0
@@ -212,6 +325,43 @@ def extract_telemetry(events, wall_file=None):
 
 
 def score_questions(events, checks):
+    if is_agy_events(events):
+        return score_questions_agy(events, checks)
+    return score_questions_opencode(events, checks)
+
+
+def score_questions_agy(events, checks):
+    """Evidence-scored correctness for agy stream-json transcripts."""
+    commands = []
+    output_text = []
+    for e in events:
+        if e.get("event") != "step_update":
+            continue
+        su = e["step_update"]
+        st = su.get("step_type")
+        if st == "tool" and su.get("state") == "DONE":
+            ti = su.get("tool_info") or {}
+            params = ti.get("parameters") or {}
+            cmd = params.get("CommandLine") if isinstance(params, dict) else None
+            if cmd:
+                commands.append(cmd)
+            if ti.get("output"):
+                output_text.append(str(ti["output"]))
+        elif st == "agent_response" and su.get("text_delta"):
+            output_text.append(str(su["text_delta"]))
+
+    joined = "\n".join(output_text)
+    scores = []
+    for item in checks:
+        cmd_re = re.compile(item["command_regex"], re.S)
+        out_re = re.compile(item["output_regex"], re.S | re.I)
+        cmd_ok = any(cmd_re.search(c) for c in commands)
+        out_ok = bool(out_re.search(joined))
+        scores.append(1.0 if cmd_ok and out_ok else 0.0)
+    return scores
+
+
+def score_questions_opencode(events, checks):
     commands = []
     output_text = []
     for e in events:
@@ -481,7 +631,7 @@ def generate_html_report(out_dir, meta, groups, base, suite, report_data):
         <h1>skillpack Benchmark Report <span class="badge">{html.escape(suite_name)}</span></h1>
         <div class="meta-bar">
           Target: <strong>{html.escape(meta.get('target repo', 'unknown'))}</strong> |
-          Model: <strong>{html.escape(meta.get('model', 'opencode default'))}</strong> |
+          Model: <strong>{html.escape(meta.get('model') or 'agy default: Gemini 3.7 Flash')}</strong> |
           Skillpack: <strong>{html.escape(meta.get('skillpack', '0.11.3'))}</strong>
         </div>
       </div>
@@ -644,7 +794,7 @@ def generate_html_report(out_dir, meta, groups, base, suite, report_data):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Analyze skillpack x OpenCode benchmark transcripts.")
+    parser = argparse.ArgumentParser(description="Analyze skillpack x Google Antigravity (agy) benchmark transcripts.")
     parser.add_argument("results_dir", help="Directory containing benchmark results (*.json, *.wall, meta.txt)")
     parser.add_argument(
         "--format", "-f",

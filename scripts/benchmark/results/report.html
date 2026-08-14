@@ -195,8 +195,8 @@
         <h1>skillpack Benchmark Report <span class="badge">FD</span></h1>
         <div class="meta-bar">
           Target: <strong>https://github.com/sharkdp/fd.git @ ee20f42</strong> |
-          Model: <strong></strong> |
-          Skillpack: <strong>skillpack 0.11.3</strong>
+          Model: <strong>agy default: Gemini 3.7 Flash</strong> |
+          Skillpack: <strong>skillpack 0.12.0</strong>
         </div>
       </div>
       <div>
@@ -209,34 +209,34 @@
       <div class="kpi-card">
         <div class="kpi-title">Agent Steps / Rounds</div>
         <div class="kpi-value">
-          8.5
-          <span class="kpi-delta delta-negative">-32%</span>
+          48.0
+          <span class="kpi-delta delta-negative">-20%</span>
         </div>
-        <div class="kpi-sub">Baseline: 12.5 steps</div>
+        <div class="kpi-sub">Baseline: 60.0 steps</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-title">Wall Clock Time</div>
         <div class="kpi-value">
-          87.8s
-          <span class="kpi-delta delta-negative">-44%</span>
+          53.05s
+          <span class="kpi-delta delta-negative">-15%</span>
         </div>
-        <div class="kpi-sub">Baseline: 157.8s</div>
+        <div class="kpi-sub">Baseline: 62.599999999999994s</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-title">Help Searches Run</div>
         <div class="kpi-value">
-          0.0
-          <span class="kpi-delta delta-negative">-2</span>
+          1.5
+          <span class="kpi-delta delta-negative">-2.5</span>
         </div>
-        <div class="kpi-sub">Baseline: 2.0 calls</div>
+        <div class="kpi-sub">Baseline: 4.0 calls</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-title">Evidence Accuracy</div>
         <div class="kpi-value">
           4.0/4
-          <span class="kpi-delta delta-positive">+14%</span>
+          <span class="kpi-delta delta-positive">+0%</span>
         </div>
-        <div class="kpi-sub">Baseline: 3.5/4</div>
+        <div class="kpi-sub">Baseline: 4.0/4</div>
       </div>
     </div>
 
@@ -260,21 +260,21 @@
           <tr>
             <td><strong>⚪ a-plain</strong></td>
             <td>2</td>
-            <td>12.5</td>
-            <td>157.8s</td>
+            <td>60.0</td>
+            <td>62.599999999999994s</td>
+            <td>4.0</td>
             <td>2.0</td>
-            <td>1.0</td>
-            <td>11874.5</td>
-            <td><strong>3.5/4</strong></td>
+            <td>145081.5</td>
+            <td><strong>4.0/4</strong></td>
           </tr>
           <tr>
             <td><strong>⚡ b-skillpack</strong></td>
             <td>2</td>
-            <td>8.5</td>
-            <td>87.8s</td>
-            <td>0.0</td>
-            <td>1.0</td>
-            <td>11198.0</td>
+            <td>48.0</td>
+            <td>53.05s</td>
+            <td>1.5</td>
+            <td>1.5</td>
+            <td>123119.5</td>
             <td><strong>4.0/4</strong></td>
           </tr>
         </tbody>
@@ -302,44 +302,44 @@
           <tr>
             <td class="mono">a-plain-r1</td>
             <td>a-plain</td>
-            <td>10</td>
-            <td>136.6s</td>
-            <td>3</td>
-            <td>1</td>
-            <td>11410</td>
-            <td>3.0/4</td>
-            <td><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='cross-mark'>✗</span><span class='check-mark'>✓</span></td>
+            <td>66</td>
+            <td>71.3s</td>
+            <td>4</td>
+            <td>2</td>
+            <td>155329</td>
+            <td>4.0/4</td>
+            <td><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span></td>
           </tr>
           <tr>
             <td class="mono">a-plain-r2</td>
             <td>a-plain</td>
-            <td>15</td>
-            <td>179.0s</td>
-            <td>1</td>
-            <td>1</td>
-            <td>12339</td>
+            <td>54</td>
+            <td>53.9s</td>
+            <td>4</td>
+            <td>2</td>
+            <td>134834</td>
             <td>4.0/4</td>
             <td><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span></td>
           </tr>
           <tr>
             <td class="mono">b-skillpack-r1</td>
             <td>b-skillpack</td>
-            <td>9</td>
-            <td>82.5s</td>
-            <td>0</td>
-            <td>1</td>
-            <td>11095</td>
+            <td>46</td>
+            <td>53.5s</td>
+            <td>2</td>
+            <td>2</td>
+            <td>116920</td>
             <td>4.0/4</td>
             <td><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span></td>
           </tr>
           <tr>
             <td class="mono">b-skillpack-r2</td>
             <td>b-skillpack</td>
-            <td>8</td>
-            <td>93.1s</td>
-            <td>0</td>
+            <td>50</td>
+            <td>52.6s</td>
             <td>1</td>
-            <td>11301</td>
+            <td>1</td>
+            <td>129319</td>
             <td>4.0/4</td>
             <td><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span><span class='check-mark'>✓</span></td>
           </tr>
@@ -353,56 +353,56 @@
       <div class="diff-grid">
         <div class="diff-col">
           <h4>Baseline (a-plain)</h4>
-          <div class="diff-step" style="opacity: 0.75; font-style: italic;">
-            💬 Q1. Find all `.rs` files excluding `target/`.  Command: ``` fd -e rs --exclude target ```...
+          <div class="diff-step ">
+            <span class="step-tag tag-cmd">CMD</span> pwd &amp;&amp; which fd || which fdfind
           </div>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> fd -e rs --exclude target | head -5
-          </div>
-          <div class="diff-step" style="opacity: 0.75; font-style: italic;">
-            💬 First 5 lines: ``` src/cli.rs src/config.rs src/dir_entry.rs src/error.rs src/exec/command.rs ```  Q...
+            <span class="step-tag tag-cmd">CMD</span> fd -e rs /home/mikey | head -n 10
           </div>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> fd --case-sensitive README | head -3
-          </div>
-          <div class="diff-step" style="opacity: 0.75; font-style: italic;">
-            💬 First 3 lines (only 1 match exists): ``` README.md ```  Q4. Find one file matching `*.rs` and run `w...
-          </div>
-          <div class="diff-step error">
-            <span class="step-tag tag-err">ERR</span> fd -e rs --exclude target --max-results 1 --exec wc -l
+            <span class="step-tag tag-cmd">CMD</span> fd -e rs . /home/mikey | head -n 20
           </div>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> fd -e rs --exclude target --max-results 1 | wc -l
+            <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey/Desktop/dev/ashen-ledger
+          </div>
+          <div class="diff-step ">
+            <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey/Desktop/dev/ashen-ledger/target
+          </div>
+          <div class="diff-step ">
+            <span class="step-tag tag-cmd">CMD</span> cat /home/mikey/Desktop/dev/ashen-ledger/.gitignore
           </div>
           <div class="diff-step help">
-            <span class="step-tag tag-help">HELP</span> fd --help 2&gt;&amp;1 | grep -i -- &quot;-1\|max-results\|first&quot; ; fd --version
+            <span class="step-tag tag-help">HELP</span> fd --help
+          </div>
+          <div class="diff-step help">
+            <span class="step-tag tag-help">HELP</span> fd --help | head -n 45
           </div>
         </div>
         <div class="diff-col">
           <h4>Guided (b-skillpack)</h4>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> fd --version
-          </div>
-          <div class="diff-step" style="opacity: 0.75; font-style: italic;">
-            💬 fd installed. Start tasks in order.  ## Q1...
+            <span class="step-tag tag-cmd">CMD</span> pwd &amp;&amp; which fd &amp;&amp; fd --version
           </div>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> fd -e rs -E target | head -5
-          </div>
-          <div class="diff-step" style="opacity: 0.75; font-style: italic;">
-            💬 Command: `fd -e rs -E target`  First 5 lines: ``` src/cli.rs src/config.rs src/dir_entry.rs src/erro...
+            <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey &amp;&amp; ls -la /home/mikey/.gemini/antigravity-cli/scratch
           </div>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> fd -s README | head -3
-          </div>
-          <div class="diff-step" style="opacity: 0.75; font-style: italic;">
-            💬 Command: `fd -s README`  Output: ``` README.md ```  Only one match (case-sensitive: no `readme`/`Rea...
+            <span class="step-tag tag-cmd">CMD</span> fd -t d --max-depth 3
           </div>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> fd --no-ignore-vcs -e rs --max-results 3
+            <span class="step-tag tag-cmd">CMD</span> fd -e rs
           </div>
           <div class="diff-step ">
-            <span class="step-tag tag-cmd">CMD</span> echo &quot;default: $(fd -e rs | wc -l)&quot;; echo &quot;no-ignore-vcs: $(fd --no-ignore-vcs -e rs | wc -l)&quot;
+            <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey/Desktop/dev/xponent/other-harness-examples/jcode-master
+          </div>
+          <div class="diff-step help">
+            <span class="step-tag tag-help">HELP</span> fd --help
+          </div>
+          <div class="diff-step help">
+            <span class="step-tag tag-help">HELP</span> fd --help | head -n 50
+          </div>
+          <div class="diff-step ">
+            <span class="step-tag tag-cmd">CMD</span> ls -la /home/mikey/Desktop/dev/xponent/other-harness-examples/jcode-master
           </div>
         </div>
       </div>

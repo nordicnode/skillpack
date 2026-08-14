@@ -1,9 +1,11 @@
-created: 2026-08-13T18:51:18Z
+created: 2026-08-14T17:33:37Z
+suite: fd
 model: 
 runs: 2
-opencode: 1.18.18
-skillpack: skillpack 0.11.3
+agy: 1.1.13
+skillpack: skillpack 0.12.0
 target repo: https://github.com/sharkdp/fd.git @ ee20f42
 target build: fd 10.4.2
-questions: /home/mikey/Desktop/dev/skillpack/scripts/benchmark/questions.txt
-confound control: same default agent in both conditions (no --agent)
+questions: /tmp/skillpack-bench/questions_fd.txt
+confound control: same default agent (agy) in both conditions; condition B
+feeds the generated AGENTS.md into the prompt (agy print mode does not auto-load rules)

@@ -1,5 +1,10 @@
 # skillpack demo: real-world agent delta (measured)
 
+> **Note**: this page documents the original 2026-07 demo (OpenCode runtime).
+> The current benchmark runs on **Google Antigravity (`agy`)** with Gemini 3.7
+> Flash — see [`docs/benchmark.md`](benchmark.md) and the committed transcripts
+> in `scripts/benchmark/results/`.
+
 > How we showed, not asserted, the difference skillpack makes to a real AI agent.
 
 On a four-task real-world fd CLI exercise, a skillpack-generated OpenCode agent finished the same correct task set in **5 rather than 20** agent steps, **27 rather than 130** seconds, and **42% fewer** final tokens. This is one controlled run, not a general benchmark; the skill reduced detours but did not eliminate semantic mistakes.
