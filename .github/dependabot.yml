@@ -7,6 +7,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Only update Cargo.lock within the existing Cargo.toml requirements.
+    # Major version bumps (e.g. tera 1 -> 2) change APIs and the MSRV, so they
+    # need a deliberate migration rather than an auto-merge PR.
+    versioning-strategy: lockfile-only
     # Group all Rust bumps into a single PR to keep review noise low.
     groups:
       cargo:
