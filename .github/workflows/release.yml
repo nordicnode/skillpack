@@ -42,7 +42,18 @@ jobs:
       # publish itself; fails the job on any advisory in the locked tree.
       - name: cargo audit
         run: cargo install cargo-audit --locked && cargo audit
+      # Idempotency guard: if this version already made it to crates.io (e.g.
+      # a tag was moved to re-run the binaries job), skip the publish instead
+      # of failing on "crate version already uploaded".
+      - name: Check version not already on crates.io
+        run: |
+          cargo_ver=$(awk 'BEGIN{in_pkg=0} /^\[package\]/{in_pkg=1; next} /^\[/{in_pkg=0} in_pkg && /^version[[:space:]]*=/{gsub(/[" ]/, "", $3); print $3; exit}' Cargo.toml)
+          if curl -fsSL https://index.crates.io/sk/il/skillpack | grep -q "\"vers\":\"${cargo_ver}\""; then
+            echo "Version ${cargo_ver} already published; skipping cargo publish"
+            echo "SKIP_PUBLISH=true" >> "$GITHUB_ENV"
+          fi
       - name: cargo publish
+        if: env.SKIP_PUBLISH != 'true'
         run: cargo publish --locked --token "$CARGO_REGISTRY_TOKEN"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -51,10 +62,29 @@ jobs:
   # Release. This is what makes `cargo binstall skillpack` work and lets users
   # without a Rust toolchain install instantly. Runs on the same tag push; the
   # action creates the GitHub Release if it doesn't exist yet.
+  #
+  # The upload action accepts exactly ONE target per invocation, so a matrix
+  # runs it once per platform: linux x86_64/arm64 and both macOS archs build
+  # on ubuntu via `cross` (docker/osxcross); windows builds natively on
+  # windows-latest because MSVC cannot be cross-compiled from Linux.
   binaries:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -65,10 +95,5 @@ jobs:
         uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: skillpack
-          target: |
-            x86_64-unknown-linux-gnu
-            aarch64-unknown-linux-gnu
-            x86_64-apple-darwin
-            aarch64-apple-darwin
-            x86_64-pc-windows-msvc
+          target: ${{ matrix.target }}
           token: ${{ secrets.GITHUB_TOKEN }}
