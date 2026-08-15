@@ -24,7 +24,7 @@ pub(crate) fn run_remove(
     template_dir: Option<&Path>,
     format: verify::OutputFormat,
 ) -> i32 {
-    if let Some(code) = handle_list_request(&raw_targets) {
+    if let Some(code) = handle_list_request("remove", &raw_targets, format) {
         return code;
     }
     match run_remove_inner(

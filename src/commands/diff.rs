@@ -19,7 +19,7 @@ pub(crate) fn run_diff(
     template_dir: Option<&Path>,
     format: verify::OutputFormat,
 ) -> i32 {
-    if let Some(code) = handle_list_request(&raw_targets) {
+    if let Some(code) = handle_list_request("diff", &raw_targets, format) {
         return code;
     }
     match run_diff_inner(root, verbose, &raw_targets, force, template_dir, format) {
@@ -119,22 +119,69 @@ fn run_diff_inner(
 }
 
 /// Return the first line that differs between `committed` and `candidate`
-/// (with `-`/`+` prefix). For `diff`'s CI gate output — avoids pulling a
-/// diff crate for what a char scan suffices.
+/// (with `-`/`+` prefix), or a trailing-newline note when the only difference
+/// is line-level-invisible (a missing/added final `\n`). For `diff`'s CI gate
+/// output — avoids pulling a diff crate for what a char scan suffices. Must
+/// never print "(no lines differ)" for content that actually differs:
+/// `str::lines()` normalizes away a trailing newline, so `"a\n"` vs `"a"`
+/// would otherwise report a drift with no visible diff.
 fn first_differing_line(committed: &str, candidate: &str) -> String {
-    for (c, n) in committed.lines().zip(candidate.lines()) {
+    for (lineno, (c, n)) in (1usize..).zip(committed.lines().zip(candidate.lines())) {
         if c != n {
-            return format!("- {c}\n+ {n}");
+            return format!("- {c}\n+ {n} (line {lineno})");
         }
     }
-    let extra = if committed.lines().count() > candidate.lines().count() {
-        committed
-    } else {
-        candidate
-    };
-    extra
-        .lines()
-        .nth(committed.lines().count().min(candidate.lines().count()))
-        .map(|l| format!("± {l}"))
-        .unwrap_or_else(|| "(no lines differ)".into())
+    let cl = committed.lines().count();
+    let nl = candidate.lines().count();
+    if cl > nl {
+        if let Some(extra) = committed.lines().nth(nl) {
+            return format!("± {extra} (line {})", nl + 1);
+        }
+    } else if nl > cl {
+        if let Some(extra) = candidate.lines().nth(cl) {
+            return format!("+ {extra} (line {})", cl + 1);
+        }
+    }
+    match (committed.ends_with('\n'), candidate.ends_with('\n')) {
+        (true, false) => "± candidate is missing the trailing newline".to_string(),
+        (false, true) => "± candidate adds a trailing newline".to_string(),
+        _ => "± bytes differ only in line endings".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod first_diff_tests {
+    use super::first_differing_line;
+
+    #[test]
+    fn differing_middle_line_reports_both_sides() {
+        assert_eq!(
+            first_differing_line("a\nb\nc", "a\nB\nc"),
+            "- b\n+ B (line 2)"
+        );
+    }
+
+    #[test]
+    fn candidate_has_extra_trailing_lines() {
+        assert_eq!(first_differing_line("a\nb", "a\nb\nc"), "+ c (line 3)");
+    }
+
+    #[test]
+    fn committed_has_extra_trailing_lines() {
+        assert_eq!(first_differing_line("a\nb\nc", "a\nb"), "± c (line 3)");
+    }
+
+    #[test]
+    fn trailing_newline_only_diff_is_reported() {
+        // `lines()` sees both as ["a"]; the raw bytes differ. Must not say
+        // "(no lines differ)".
+        assert_eq!(
+            first_differing_line("a\n", "a"),
+            "± candidate is missing the trailing newline"
+        );
+        assert_eq!(
+            first_differing_line("a", "a\n"),
+            "± candidate adds a trailing newline"
+        );
+    }
 }

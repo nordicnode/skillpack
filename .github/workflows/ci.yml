@@ -153,9 +153,9 @@ jobs:
       - name: verify package contents
         run: |
           cargo package --list --allow-dirty > /tmp/pkg.txt
-          if grep -qE '(^|/)(\.freebuff|\.codegraph|\.omo|target|node_modules|memory:)(/|$)' /tmp/pkg.txt; then
+          if grep -qE '(^|/)(\.freebuff|\.codegraph|\.omo|target|node_modules|memory:|=|scripts/benchmark/results)(/|$)' /tmp/pkg.txt; then
             echo "::error::forbidden files found in package:"
-            grep -E '(^|/)(\.freebuff|\.codegraph|\.omo|target|node_modules|memory:)(/|$)' /tmp/pkg.txt
+            grep -E '(^|/)(\.freebuff|\.codegraph|\.omo|target|node_modules|memory:|=|scripts/benchmark/results)(/|$)' /tmp/pkg.txt
             exit 1
           fi
           echo "package contents clean ($(wc -l < /tmp/pkg.txt) files)"

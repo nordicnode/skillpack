@@ -291,7 +291,10 @@ pub(crate) fn check_one_skill_md(
             &format!("{prefix}.when_to_use"),
             "SKILL.md has non-empty `when_to_use` trigger phrases",
             format!("{rel}: `when_to_use` is missing or empty"),
-            "To fix: list 2-5 trigger verbs/scenarios, e.g. \"Use when: the user asks to ...\".",
+            "To fix: add 2-5 trigger verbs/scenarios to `when_to_use_phrases` in \
+             skillpack.toml (or re-run `skillpack init`), then run `skillpack \
+             verify --fix` — the fix regenerates the frontmatter FROM the \
+             config, so the config must carry the phrases first.",
         );
         r.location = Some((rel.clone(), None));
         return Ok(r);
@@ -321,8 +324,11 @@ pub(crate) fn check_one_skill_md(
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
-                "To fix: each comma-separated token must be a bare identifier \
-                 (e.g. `Read`) or a namespaced call (e.g. `Bash(npm test:*)`).",
+                "To fix: set `allowed_tools` in skillpack.toml to a valid value \
+                 (e.g. `Read, Bash` — each comma-separated token must be a bare \
+                 identifier like `Read` or a namespaced call like \
+                 `Bash(npm test:*)`), then run `skillpack verify --fix`; the fix \
+                 regenerates the frontmatter FROM the config.",
             );
             r.location = Some((rel.clone(), None));
             return Ok(r);
