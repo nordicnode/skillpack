@@ -60,6 +60,11 @@ jobs:
         with:
           # Full history is required to compute the next version + changelog.
           fetch-depth: 0
+          # Authenticate git operations (fetch/push of the release branch,
+          # including .github/workflows/skillpack.yml) with the PAT. The
+          # default GITHUB_TOKEN can never gain the `workflows` scope, so the
+          # sync step's push of a workflow file would always be rejected.
+          token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 'stable'
