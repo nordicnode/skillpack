@@ -9,11 +9,12 @@
 # After merging the release PR, cut the matching tag to ship it:
 #   git tag vX.Y.Z && git push origin vX.Y.Z
 #
-# The version lives in three places that must move together: Cargo.toml's
+# The version lives in several places that must move together: Cargo.toml's
 # [package].version, the reusable workflow's `skillpack-version` default
-# (.github/workflows/skillpack.yml), and the committed plugin.json manifest.
+# (.github/workflows/skillpack.yml), the committed plugin.json manifest, and
+# the Homebrew formula's version + URLs (homebrew/skillpack.rb).
 # release-plz only bumps Cargo.toml, so a follow-up step below ("Sync version
-# files") bumps the other two on the same release branch; without it the CI
+# files") bumps the others on the same release branch; without it the CI
 # `version-sync` job (ci.yml) would fail the release PR.
 #
 # Authentication: prefer a PAT via the RELEASE_PLZ_TOKEN secret. When the
@@ -83,10 +84,10 @@ jobs:
         # `prs_created` output is empty and the sync step below is skipped.
         continue-on-error: true
 
-      # release-plz bumps only Cargo.toml/Cargo.lock/CHANGELOG.md. Bump the two
-      # other version locations (plugin.json, skillpack.yml) on the same branch
-      # so the CI `version-sync` + self-dogfood `verify` jobs stay green on the
-      # release PR.
+      # release-plz bumps only Cargo.toml/Cargo.lock/CHANGELOG.md. Bump the
+      # other version locations (plugin.json, skillpack.yml, and the Homebrew
+      # formula) on the same branch so the CI `version-sync` + self-dogfood
+      # `verify` jobs stay green on the release PR.
       - name: Sync version files into the release PR
         if: steps.release-plz.outputs.prs_created == 'true'
         run: |
@@ -116,10 +117,18 @@ jobs:
           echo "syncing version files to $ver"
           sed -i -E "s/\"version\": \"[0-9]+\.[0-9]+\.[0-9]+\"/\"version\": \"$ver\"/" .claude-plugin/plugin.json
           sed -i -E "s/(default: ')[0-9]+\.[0-9]+\.[0-9]+(')/\1$ver\2/" .github/workflows/skillpack.yml
+          # Homebrew formula: the `version "X.Y.Z"` line plus the four
+          # release-download URLs it pins.
+          sed -i -E "s/version \"[0-9]+\.[0-9]+\.[0-9]+\"/version \"$ver\"/" homebrew/skillpack.rb
+          sed -i -E "s#/v[0-9]+\.[0-9]+\.[0-9]+/#/v$ver/#g" homebrew/skillpack.rb
+          # README's pin examples (`@vX.Y.Z` workflow pin + `rev: vX.Y.Z`
+          # pre-commit pin) should track the latest release too.
+          sed -i -E "s/@v[0-9]+\.[0-9]+\.[0-9]+/@v$ver/g" README.md
+          sed -i -E "s/rev: v[0-9]+\.[0-9]+\.[0-9]+/rev: v$ver/g" README.md
           if git diff --quiet; then
             echo "version files already in sync; nothing to commit"
           else
-            git add .claude-plugin/plugin.json .github/workflows/skillpack.yml
-            git commit -m "chore: sync plugin.json and skillpack.yml to $ver"
+            git add .claude-plugin/plugin.json .github/workflows/skillpack.yml homebrew/skillpack.rb README.md
+            git commit -m "chore: sync plugin.json, skillpack.yml, homebrew formula and README pins to $ver"
             git push origin "$branch"
           fi

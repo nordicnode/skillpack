@@ -37,12 +37,12 @@
     "SkillConfig": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "one_line_description"],
+      "required": ["name", "one_line_description", "when_to_use_phrases"],
       "properties": {
         "name": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$",
-          "description": "Kebab-case plugin/skill name (lowercase letters, digits, single hyphens)."
+          "pattern": "^[a-z]([a-z0-9]|-[a-z0-9])*$",
+          "description": "Kebab-case plugin/skill name (lowercase letters, digits, single hyphens; no consecutive hyphens, no leading/trailing hyphen)."
         },
         "one_line_description": {
           "type": "string",
@@ -82,6 +82,32 @@
             "type": "string"
           },
           "description": "Project-specific gotchas to document for agents."
+        },
+        "allowed_tools": {
+          "type": "string",
+          "description": "Override the language-derived `allowed-tools` frontmatter value (e.g. `Read, Bash`). An empty string suppresses the field."
+        },
+        "globs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Override the language-derived Cursor/Windsurf auto-attach `globs`."
+        },
+        "category": {
+          "type": "string",
+          "description": "Override the language-derived `category` prose (e.g. \"the Rust tooling\")."
+        },
+        "opencode_mode": {
+          "type": "string",
+          "description": "Override the language-derived OpenCode `mode` (`primary`/`subagent`)."
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Override the derived marketplace `keywords` list."
         }
       }
     }

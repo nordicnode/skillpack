@@ -1472,6 +1472,52 @@ fn compute_candidates<'f>(
     Ok(results)
 }
 
+/// The targets whose distribution files are already present on disk, in
+/// canonical [`Target`] declaration order. Used as the default for
+/// `update`/`diff` when no `--target` is given, so those commands refresh or
+/// check the whole existing distribution instead of silently limiting
+/// themselves to the Claude target (the old default) and leaving every other
+/// ecosystem stale.
+///
+/// Only UNAMBIGUOUS skillpack-owned markers are probed: the per-ecosystem
+/// directories. The collision-guarded single files (AGENTS.md, CLAUDE.md,
+/// GEMINI.md, CONVENTIONS.md, .goose/instructions.md, and Copilot's
+/// `.github/copilot-instructions.md`) are deliberately EXCLUDED — they are
+/// commonly hand-written, and `update`/`diff` hold them without `--force`
+/// anyway, so probing them would only add "held" noise to the default run.
+fn detect_present_targets(root: &Path) -> Vec<Target> {
+    let mut present = Vec::new();
+    for (target, marker) in [
+        (Target::Claude, ".claude-plugin"),
+        (Target::Cursor, ".cursor/rules"),
+        (Target::Codex, ".codex/skills"),
+        (Target::OpenCode, ".opencode/agents"),
+        (Target::Windsurf, ".windsurf/rules"),
+        (Target::Cline, ".clinerules"),
+        (Target::Roo, ".roo/rules"),
+        (Target::Kilo, ".kilocode/rules"),
+    ] {
+        if root.join(marker).exists() {
+            present.push(target);
+        }
+    }
+    present
+}
+
+/// Resolve the default target set for `update`/`diff` (and `add`, which
+/// delegates to `update`). Prefers the targets already present on disk; when
+/// none are detected (a committed config with no generated files yet), falls
+/// back to `all` so a refresh regenerates the full distribution rather than
+/// silently limiting itself to Claude.
+fn default_refresh_targets(root: &Path) -> Result<Vec<Target>> {
+    let present = detect_present_targets(root);
+    if present.is_empty() {
+        resolve_targets(&["all".to_string()])
+    } else {
+        Ok(present)
+    }
+}
+
 /// Shared preamble: introspect, load config, resolve targets, render.
 /// Returns the profile, the full skill list (one entry for single-skill
 /// packs, one per `[[skills]]` entry for multi-skill packs), and every
@@ -1504,7 +1550,7 @@ fn render_from_config(
         );
     }
     let targets = if raw_targets.is_empty() {
-        vec![Target::Claude]
+        default_refresh_targets(root)?
     } else {
         resolve_targets(raw_targets)?
     };
@@ -1761,8 +1807,11 @@ fn is_frontmatter_target(rel_path: &str) -> bool {
             && !rel_path.ends_with("instructions.md"))
 }
 
-/// True if the given rel-path is a root-level plain instructions file
-/// that should be protected by the collision guard when --force is omitted.
+/// True if the given rel-path is a plain instructions file that agents
+/// commonly hand-write, which should be protected by the collision guard when
+/// --force is omitted. Copilot instructions live under `.github/` rather than
+/// the repo root, but are equally likely to be hand-authored (they are a
+/// well-known `docs.github.com/copilot` convention), so they are guarded too.
 fn is_collision_guarded(rel_path: &str) -> bool {
     matches!(
         rel_path,
@@ -1771,6 +1820,7 @@ fn is_collision_guarded(rel_path: &str) -> bool {
             | crate::verify::schema::GEMINI_MD_PATH
             | crate::verify::schema::CONVENTIONS_MD_PATH
             | crate::verify::schema::GOOSE_INSTRUCTIONS_PATH
+            | crate::verify::schema::COPILOT_INSTRUCTIONS_PATH
     )
 }
 
@@ -2061,5 +2111,53 @@ mod confirm_tests {
         assert_eq!(panic_message(&*s), "boom");
         let s: Box<dyn std::any::Any + Send> = Box::new("boom".to_string());
         assert_eq!(panic_message(&*s), "boom");
+    }
+
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "skillpack-targets-{tag}-{}-{n}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    // `update`/`diff` default to the ecosystems already generated, not just
+    // Claude. Directory markers are detected; the collision-guarded root files
+    // (here a hand-written AGENTS.md) must NOT be probed as "present".
+    #[test]
+    fn detect_present_targets_finds_generated_ecosystems_only() {
+        let root = scratch_dir("present");
+        for d in [".claude-plugin", ".cursor/rules", ".codex/skills"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        std::fs::write(root.join("AGENTS.md"), "# hand-written").unwrap();
+
+        let present = detect_present_targets(&root);
+        assert!(present.contains(&Target::Claude));
+        assert!(present.contains(&Target::Cursor));
+        assert!(present.contains(&Target::Codex));
+        assert!(
+            !present.contains(&Target::AgentsMd),
+            "collision-guarded AGENTS.md must not be probed as present"
+        );
+        assert!(!present.contains(&Target::Copilot));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // When nothing has been generated yet (config committed, files absent),
+    // the default falls back to `all` so `update`/`diff` cover the full
+    // distribution instead of silently limiting themselves to Claude.
+    #[test]
+    fn default_refresh_targets_falls_back_to_all_when_nothing_present() {
+        let root = scratch_dir("empty");
+        let targets = default_refresh_targets(&root).unwrap();
+        assert_eq!(targets.len(), 14, "fallback must be the full target set");
+        assert!(targets.contains(&Target::Claude));
+        assert!(targets.contains(&Target::Goose));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

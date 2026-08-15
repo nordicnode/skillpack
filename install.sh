@@ -35,7 +35,10 @@ os="$(uname -s)"
 arch="$(uname -m)"
 case "${os}-${arch}" in
   Linux-x86_64)    target="x86_64-unknown-linux-musl" ;;
-  Linux-aarch64|Linux-arm64) target="aarch64-unknown-linux-musl" ;;
+  # The Release workflow builds Linux arm64 with glibc (`cross` docker), not
+  # musl — only x86_64 has a static musl binary. Point at the gnu build that
+  # actually exists in the release assets.
+  Linux-aarch64|Linux-arm64) target="aarch64-unknown-linux-gnu" ;;
   Darwin-x86_64)   target="x86_64-apple-darwin" ;;
   Darwin-arm64)    target="aarch64-apple-darwin" ;;
   *) echo "error: unsupported platform ${os}-${arch} (try cargo install skillpack)" >&2; exit 1 ;;

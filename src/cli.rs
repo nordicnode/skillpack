@@ -266,8 +266,10 @@ pub enum Commands {
         #[arg(long, value_name = "DIR", default_value = ".")]
         root: PathBuf,
 
-        /// Agent ecosystem(s) to regenerate for. Defaults to `claude`
-        /// only. Pass `all` to refresh every supported target. Repeats.
+        /// Agent ecosystem(s) to regenerate for. Defaults to every target
+        /// whose files are already present in the repo (falling back to `all`
+        /// when none are found). Pass `all` or specific names to override.
+        /// Repeats.
         #[arg(long, num_args = 1.., value_name = "ECOSYSTEM")]
         target: Vec<String>,
 
@@ -301,8 +303,9 @@ pub enum Commands {
         #[arg(long, value_name = "DIR", default_value = ".")]
         root: PathBuf,
 
-        /// Agent ecosystem(s) to check. Defaults to `claude` only.
-        /// Pass `all` to check every target. Repeats.
+        /// Agent ecosystem(s) to check. Defaults to every target whose files
+        /// are already present in the repo (falling back to `all` when none
+        /// are found). Pass `all` or specific names to override. Repeats.
         #[arg(long, num_args = 1.., value_name = "ECOSYSTEM")]
         target: Vec<String>,
 

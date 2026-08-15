@@ -128,12 +128,12 @@ No-op when there's no fixable drift.
 | `init --force` | overwrite an existing `AGENTS.md` at repo root (skip+warn otherwise). Has no effect on other targets, which write to skillpack-owned paths. |
 | `init --template-dir <DIR>` | overlay custom `.tera` templates from a dir; missing files fall back to embedded defaults |
 | `update` | incrementally refresh distribution files from an existing `skillpack.toml` — no interview, no verify gate. Writes only changed files; preserves body prose by splicing fresh frontmatter. |
-| `update --target <ecosystem>` | same target syntax as `init --target` (default: `claude`). Pass `all` to refresh all 14. |
+| `update --target <ecosystem>` | same target syntax as `init --target`. Default: every target whose files are already present in the repo (falls back to `all` when none are found). Pass `all` or specific names to override. |
 | `update --format human\|json` | human summary (default) or a machine-readable JSON object |
 | `update --force` | overwrite an existing `AGENTS.md` (same collision guard as `init --force`). |
 | `update --template-dir <DIR>` | same template override semantics as `init --template-dir` |
 | `diff` | check whether distribution files are stale; exit 1 if any differs, 0 if all clean (CI gate). Same body-preservation semantics as `update`. |
-| `diff --target <ecosystem>` | same target syntax as `update --target` (default: `claude`). Pass `all` to check all 14. |
+| `diff --target <ecosystem>` | same target syntax as `update --target`. Default: every target whose files are already present in the repo (falls back to `all` when none are found). |
 | `diff --format human\|json` | human summary (default) or a machine-readable JSON object (`clean`/`drifted`/`missing` counts) |
 | `diff --force` | check `AGENTS.md` too (same collision guard as `update --force`). |
 | `diff --template-dir <DIR>` | same override semantics — use when checking a pack generated with custom templates (avoids spurious drift) |

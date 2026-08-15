@@ -4,9 +4,9 @@
 #
 #   jobs:
 #     skillpack:
-#       uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.12.0
+#       uses: nordicnode/skillpack/.github/workflows/skillpack.yml@v0.13.0
 #
-# Pin to a released tag (e.g. `@v0.12.0`) — bump the pin to pick up new
+# Pin to a released tag (e.g. `@v0.13.0`) — bump the pin to pick up new
 # features.
 #
 # The job installs `skillpack` from crates.io, then runs `skillpack verify` in
@@ -30,7 +30,7 @@ on:
   workflow_call:
     inputs:
       skillpack-version:
-        description: 'crate version to install from crates.io (e.g. "0.12.0")'
+        description: 'crate version to install from crates.io (e.g. "0.13.0")'
         required: false
         type: string
         # Keep in sync with the latest published release - bump on every tag.
@@ -75,9 +75,9 @@ jobs:
           dotnet-version: '8.0'
 
       # Install skillpack from crates.io (pinned by version input). `cargo
-      # install` requires a Rust toolchain; rely on the runner's default
-      # stable toolchain rather than pinning one — `verify` doesn't compile
-      # skillpack, it just runs the published binary.
+      # install` compiles from source (a ~1-2 min cold build), so rely on the
+      # runner's default stable toolchain rather than pinning one — the
+      # consumer runs the freshly built binary, not a prebuilt artifact.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 'stable'
