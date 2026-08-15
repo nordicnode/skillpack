@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.3](https://github.com/nordicnode/skillpack/compare/v0.13.2...v0.13.3) - 2026-08-15
+
+### Added
+
+- add 8 languages, remove command, and 4 rules-directory targets
+
+### Fixed
+
+- *(ci)* make multi-skill test git-identity-independent and unblock release PR
+- honor intent-driven CLI rendering, multi-skill/update artifacts, distribution hardening
+
+### Other
+
+- list Qoder, Continue, Augment, and Amazon Q as supported agents
+
 ### Added
 
 - Eight new language ecosystems: **Lua** (`*.rockspec`), **Julia**
