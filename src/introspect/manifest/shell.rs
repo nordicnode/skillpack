@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use super::LanguageSpec;
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Shell;
 
@@ -57,6 +58,30 @@ impl LanguageSpec for Shell {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("source ./{name}.sh")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // `bash <script>` against a conventional entry point, so a `--help`
+        // probe works even when the script isn't marked executable. Requires
+        // `bash` on PATH (present on unix + Git Bash on Windows); honest
+        // `None` otherwise.
+        let bash = which_on_path("bash")?.to_string_lossy().to_string();
+        for script in &[
+            format!("bin/{name}.sh"),
+            format!("bin/{name}"),
+            format!("scripts/{name}.sh"),
+            format!("src/{name}.sh"),
+            format!("{name}.sh"),
+            "main.sh".to_string(),
+            "cli.sh".to_string(),
+        ] {
+            if root.join(script).is_file() {
+                return Some(CliCandidate {
+                    argv: vec![bash, script.clone()],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+        None
     }
 }
 

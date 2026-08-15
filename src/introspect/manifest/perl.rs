@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::LanguageSpec;
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Perl;
 
@@ -83,6 +84,26 @@ impl LanguageSpec for Perl {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("use {name};")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // `perl <script>` against a conventional entry point. Requires `perl`
+        // on PATH; honest `None` otherwise.
+        let perl = which_on_path("perl")?.to_string_lossy().to_string();
+        for script in &[
+            format!("bin/{name}"),
+            format!("bin/{name}.pl"),
+            "script/main.pl".to_string(),
+            "script/cli.pl".to_string(),
+            format!("{name}.pl"),
+        ] {
+            if root.join(script).is_file() {
+                return Some(CliCandidate {
+                    argv: vec![perl, script.clone()],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+        None
     }
 }
 

@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{pascal_name, LanguageSpec};
+use crate::introspect::cli_candidates::{canonicalize_for_argv, which_on_path, CliCandidate};
 
 pub(crate) struct Elixir;
 
@@ -40,6 +41,22 @@ impl LanguageSpec for Elixir {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("import {mod}", mod = pascal_name(name))
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        for dir in &["_build/dev/rel", "_build/prod/rel"] {
+            let bin = root.join(dir).join(name).join("bin").join(name);
+            if bin.is_file() {
+                let canon = canonicalize_for_argv(&bin);
+                return Some(CliCandidate {
+                    argv: vec![canon],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+        which_on_path(name).map(|p| CliCandidate {
+            argv: vec![p.to_string_lossy().to_string()],
+            spawn_cwd: root.to_path_buf(),
+        })
     }
 }
 

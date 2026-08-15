@@ -30,16 +30,15 @@ mod workspace;
 
 // Re-export the symbols external callers reach by the flat path:
 // `verify::discovery` uses `detect_language` + `project_manifest_version`,
-// `verify` uses `which_on_path` for multi-skill CLI probes, and
-// `csharp_cli_candidate` (now in `cli_candidates`) uses `select_csproj`.
-// The re-exports keep those call sites unchanged after the split.
+// `verify` uses `which_on_path` for multi-skill CLI probes. The re-exports
+// keep those call sites unchanged after the split.
 pub(crate) use cli_candidates::which_on_path;
 // `project_manifest_name` is re-exported `pub` (not `pub(crate)`) because the
 // bin target (`main.rs`) derives per-secondary-language import patterns from
 // each secondary manifest — a `pub(crate)` re-export is invisible to the bin
 // crate. The other two stay internal to the lib.
+pub(crate) use manifest::project_manifest_version;
 pub use manifest::{language_spec, project_manifest_name};
-pub(crate) use manifest::{project_manifest_version, select_csproj};
 pub(crate) use repo::{normalize_git_url, urls_equivalent};
 pub(crate) use workspace::{
     first_cargo_member_name, first_npm_member_name, is_cargo_workspace_only, is_npm_workspace_only,

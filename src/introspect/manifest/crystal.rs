@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{extract_yaml_scalar, LanguageSpec};
+use crate::introspect::cli_candidates::{canonicalize_for_argv, which_on_path, CliCandidate};
 
 pub(crate) struct Crystal;
 
@@ -47,6 +48,37 @@ impl LanguageSpec for Crystal {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("require \"./{name}\"")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // A pre-built `bin/<name>` (from `shards build`), else
+        // `crystal run src/<name>.cr`. Requires the runtime or artifact; honest
+        // `None` otherwise.
+        let suffix = if cfg!(windows) { ".exe" } else { "" };
+        let bin = root.join("bin").join(format!("{name}{suffix}"));
+        if bin.is_file() {
+            return Some(CliCandidate {
+                argv: vec![canonicalize_for_argv(&bin)],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+        if let Some(crystal) = which_on_path("crystal") {
+            for script in &[format!("src/{name}.cr"), "src/main.cr".to_string()] {
+                if root.join(script).is_file() {
+                    return Some(CliCandidate {
+                        argv: vec![
+                            crystal.to_string_lossy().to_string(),
+                            "run".to_string(),
+                            script.clone(),
+                        ],
+                        spawn_cwd: root.to_path_buf(),
+                    });
+                }
+            }
+        }
+        which_on_path(name).map(|p| CliCandidate {
+            argv: vec![p.to_string_lossy().to_string()],
+            spawn_cwd: root.to_path_buf(),
+        })
     }
 }
 

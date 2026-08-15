@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::LanguageSpec;
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Clojure;
 
@@ -38,6 +39,34 @@ impl LanguageSpec for Clojure {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("(require '[{name} :refer :all])")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // `lein run` (Leiningen `project.clj`), else `clojure -M -m <name>`
+        // (deps.edn). The deps.edn form assumes the main namespace matches the
+        // detected name — a reasonable default for the common single-namespace
+        // CLI. Requires the runtime on PATH; honest `None` otherwise.
+        if root.join("project.clj").is_file() {
+            if let Some(lein) = which_on_path("lein") {
+                return Some(CliCandidate {
+                    argv: vec![lein.to_string_lossy().to_string(), "run".to_string()],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+        if root.join("deps.edn").is_file() {
+            if let Some(clj) = which_on_path("clojure") {
+                return Some(CliCandidate {
+                    argv: vec![
+                        clj.to_string_lossy().to_string(),
+                        "-M".to_string(),
+                        "-m".to_string(),
+                        name.to_string(),
+                    ],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+        None
     }
 }
 

@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::LanguageSpec;
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Deno;
 
@@ -39,6 +40,34 @@ impl LanguageSpec for Deno {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("import {{ … }} from \"{name}\"")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        if which_on_path("deno").is_some() {
+            for script in &[
+                "main.ts",
+                "cli.ts",
+                "index.ts",
+                "mod.ts",
+                "src/main.ts",
+                "src/cli.ts",
+            ] {
+                if root.join(script).is_file() {
+                    return Some(CliCandidate {
+                        argv: vec![
+                            "deno".to_string(),
+                            "run".to_string(),
+                            "-A".to_string(),
+                            script.to_string(),
+                        ],
+                        spawn_cwd: root.to_path_buf(),
+                    });
+                }
+            }
+        }
+        which_on_path(name).map(|p| CliCandidate {
+            argv: vec![p.to_string_lossy().to_string()],
+            spawn_cwd: root.to_path_buf(),
+        })
     }
 }
 

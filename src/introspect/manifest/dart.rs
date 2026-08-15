@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{extract_yaml_scalar, LanguageSpec};
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Dart;
 
@@ -41,6 +42,30 @@ impl LanguageSpec for Dart {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("import 'package:{name}/{name}.dart';")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // `dart run <entry>` from the project root (the canonical uninstalled
+        // invocation). Prefers a concrete `bin/<name>.dart` / `bin/main.dart` /
+        // `bin/cli.dart` entry point, then falls back to `dart run <name>`
+        // (resolves a `pubspec.yaml` `executables` entry or the default
+        // executable). Requires `dart` on PATH (honest `None` otherwise).
+        which_on_path("dart")?;
+        for script in &[
+            format!("bin/{name}.dart"),
+            "bin/main.dart".to_string(),
+            "bin/cli.dart".to_string(),
+        ] {
+            if root.join(script).is_file() {
+                return Some(CliCandidate {
+                    argv: vec!["dart".to_string(), "run".to_string(), script.clone()],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+        Some(CliCandidate {
+            argv: vec!["dart".to_string(), "run".to_string(), name.to_string()],
+            spawn_cwd: root.to_path_buf(),
+        })
     }
 }
 

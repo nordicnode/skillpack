@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{extract_xml_tag, LanguageSpec};
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct CSharp;
 
@@ -55,6 +56,28 @@ impl LanguageSpec for CSharp {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("using {ns};", ns = name.replace('-', ""))
+    }
+    fn cli_candidate(&self, root: &Path, _name: &str) -> Option<CliCandidate> {
+        // `dotnet run --project <csproj>` from the project root (the
+        // canonical uninstalled invocation — mirrors `go run .`). Requires
+        // `dotnet` on PATH (honest `None` otherwise). `select_csproj` skips
+        // `WinExe` projects (GUI — no stdout) for deterministic, cross-platform
+        // CLI invocation. The trailing `--` separates `dotnet run`'s own flags
+        // from the app's argv so an appended `--help` reaches the app, not
+        // dotnet (dotnet would print its own help and never invoke the program).
+        which_on_path("dotnet")?;
+        let csproj = select_csproj(root)?;
+        let csproj_arg = csproj.to_string_lossy().to_string();
+        Some(CliCandidate {
+            argv: vec![
+                "dotnet".to_string(),
+                "run".to_string(),
+                "--project".to_string(),
+                csproj_arg,
+                "--".to_string(),
+            ],
+            spawn_cwd: root.to_path_buf(),
+        })
     }
 }
 

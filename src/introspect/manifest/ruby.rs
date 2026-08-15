@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::introspect::cli_probe::has_gemspec;
 
 use super::LanguageSpec;
+use crate::introspect::cli_candidates::{canonicalize_for_argv, which_on_path, CliCandidate};
 
 pub(crate) struct Ruby;
 
@@ -40,6 +41,22 @@ impl LanguageSpec for Ruby {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("require '{name}'")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        let ruby = which_on_path("ruby")
+            .or_else(|| which_on_path("bundle"))
+            .map(|b| b.to_string_lossy().to_string())?;
+        for dir in &["exe", "bin"] {
+            let p = root.join(dir).join(name);
+            if p.is_file() {
+                let abs = canonicalize_for_argv(&p);
+                return Some(CliCandidate {
+                    argv: vec![ruby.clone(), abs],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+        None
     }
 }
 

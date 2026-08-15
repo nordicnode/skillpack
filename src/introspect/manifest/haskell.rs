@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{extract_key_colon_value, first_file_with_ext, pascal_name, LanguageSpec};
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Haskell;
 
@@ -42,6 +43,37 @@ impl LanguageSpec for Haskell {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("import {mod}", mod = pascal_name(name))
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // `stack run <name> --` (when a `stack.yaml` exists) else
+        // `cabal run <name> --`. The trailing `--` separates the build tool's
+        // own flags from the program's argv so the appended `--help` reaches
+        // the executable. Requires the runtime on PATH (honest `None` otherwise).
+        if root.join("stack.yaml").exists() {
+            if let Some(stack) = which_on_path("stack") {
+                return Some(CliCandidate {
+                    argv: vec![
+                        stack.to_string_lossy().to_string(),
+                        "run".to_string(),
+                        name.to_string(),
+                        "--".to_string(),
+                    ],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+        if let Some(cabal) = which_on_path("cabal") {
+            return Some(CliCandidate {
+                argv: vec![
+                    cabal.to_string_lossy().to_string(),
+                    "run".to_string(),
+                    name.to_string(),
+                    "--".to_string(),
+                ],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+        None
     }
 }
 

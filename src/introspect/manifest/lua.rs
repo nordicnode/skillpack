@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{first_file_with_ext, LanguageSpec};
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Lua;
 
@@ -34,6 +35,29 @@ impl LanguageSpec for Lua {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("require(\"{name}\")")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // `lua <script>` against a conventional entry point. Requires `lua`
+        // (or `luajit`) on PATH; honest `None` when no script/runtime is present.
+        let lua = which_on_path("lua")
+            .or_else(|| which_on_path("luajit"))?
+            .to_string_lossy()
+            .to_string();
+        for script in &[
+            format!("bin/{name}.lua"),
+            format!("bin/{name}"),
+            "main.lua".to_string(),
+            "cli.lua".to_string(),
+            format!("src/{name}.lua"),
+        ] {
+            if root.join(script).is_file() {
+                return Some(CliCandidate {
+                    argv: vec![lua, script.clone()],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+        None
     }
 }
 

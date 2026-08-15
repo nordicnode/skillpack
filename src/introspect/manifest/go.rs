@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::LanguageSpec;
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Go;
 
@@ -45,6 +46,70 @@ impl LanguageSpec for Go {
     fn import_pattern(&self, name: &str) -> String {
         format!("import \"{name}\"")
     }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        let go = which_on_path("go")?.to_string_lossy().to_string();
+
+        // 1. Root directory is `package main`.
+        if is_go_main_package(root) {
+            return Some(CliCandidate {
+                argv: vec![go, "run".to_string(), ".".to_string()],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+
+        // 2. `./cmd/<name>` or `./cmd/...` is `package main`.
+        let cmd_named = root.join("cmd").join(name);
+        if cmd_named.is_dir() && is_go_main_package(&cmd_named) {
+            return Some(CliCandidate {
+                argv: vec![go, "run".to_string(), format!("./cmd/{name}")],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+        let cmd_root = root.join("cmd");
+        if cmd_root.is_dir() {
+            if let Ok(entries) = fs::read_dir(&cmd_root) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_dir() && is_go_main_package(&p) {
+                        if let Some(sub) = p.file_name().and_then(|s| s.to_str()) {
+                            return Some(CliCandidate {
+                                argv: vec![go, "run".to_string(), format!("./cmd/{sub}")],
+                                spawn_cwd: root.to_path_buf(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Installed binary on PATH.
+        if let Some(bin) = which_on_path(name) {
+            return Some(CliCandidate {
+                argv: vec![bin.to_string_lossy().to_string()],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+
+        None
+    }
+}
+
+fn is_go_main_package(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "go") {
+            let Ok(raw) = fs::read_to_string(&path) else {
+                continue;
+            };
+            if raw.lines().any(|l| l.trim() == "package main") {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]

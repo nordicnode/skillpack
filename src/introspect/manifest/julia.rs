@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::LanguageSpec;
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Julia;
 
@@ -48,6 +49,25 @@ impl LanguageSpec for Julia {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("using {name}")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // `julia --project=. <script>` against a conventional entry point.
+        // Requires `julia` on PATH; honest `None` when no script/runtime is present.
+        let julia = which_on_path("julia")?.to_string_lossy().to_string();
+        for script in &[
+            format!("bin/{name}.jl"),
+            "main.jl".to_string(),
+            "src/cli.jl".to_string(),
+            format!("src/{name}.jl"),
+        ] {
+            if root.join(script).is_file() {
+                return Some(CliCandidate {
+                    argv: vec![julia, "--project=.".to_string(), script.clone()],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+        None
     }
 }
 

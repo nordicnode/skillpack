@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{extract_key_colon_value, LanguageSpec};
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct R;
 
@@ -47,6 +48,27 @@ impl LanguageSpec for R {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("library({name})")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // `Rscript <script>` against a conventional entry point (R packages ship
+        // CLIs under `inst/` or `exec/`). Requires `Rscript` on PATH; honest
+        // `None` otherwise.
+        let rscript = which_on_path("Rscript")?.to_string_lossy().to_string();
+        for script in &[
+            "inst/cli.R".to_string(),
+            format!("inst/{name}.R"),
+            "exec/cli.R".to_string(),
+            "cli.R".to_string(),
+            "main.R".to_string(),
+        ] {
+            if root.join(script).is_file() {
+                return Some(CliCandidate {
+                    argv: vec![rscript, script.clone()],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+        None
     }
 }
 

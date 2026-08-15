@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use super::LanguageSpec;
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Unknown;
 
@@ -27,5 +28,13 @@ impl LanguageSpec for Unknown {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("(no standard import form for {name}; document it via `skillpack update`)")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // Unknown languages: the only invocation we can offer is a bare
+        // command on PATH (e.g. a hand-installed binary).
+        which_on_path(name).map(|_| CliCandidate {
+            argv: vec![name.to_string()],
+            spawn_cwd: root.to_path_buf(),
+        })
     }
 }

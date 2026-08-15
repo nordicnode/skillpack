@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{first_file_ending_with, LanguageSpec};
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Erlang;
 
@@ -40,6 +41,15 @@ impl LanguageSpec for Erlang {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("application:ensure_all_started({name}).")
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // No clean uninstalled invocation (rebar3 shell/escript require
+        // a release to already be built). Fall back to a PATH probe for an
+        // installed escript/binary; honest `None` when absent.
+        which_on_path(name).map(|p| CliCandidate {
+            argv: vec![p.to_string_lossy().to_string()],
+            spawn_cwd: root.to_path_buf(),
+        })
     }
 }
 

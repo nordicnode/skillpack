@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{extract_key_colon_value, first_file_with_ext, pascal_name, LanguageSpec};
+use crate::introspect::cli_candidates::{which_on_path, CliCandidate};
 
 pub(crate) struct Ocaml;
 
@@ -64,6 +65,21 @@ impl LanguageSpec for Ocaml {
 
     fn import_pattern(&self, name: &str) -> String {
         format!("open {mod}", mod = pascal_name(name))
+    }
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        // `dune exec <name>` from a dune project. Requires `dune` on PATH;
+        // honest `None` otherwise.
+        if !root.join("dune-project").is_file() && !root.join("dune").is_dir() {
+            return None;
+        }
+        which_on_path("dune").map(|dune| CliCandidate {
+            argv: vec![
+                dune.to_string_lossy().to_string(),
+                "exec".to_string(),
+                name.to_string(),
+            ],
+            spawn_cwd: root.to_path_buf(),
+        })
     }
 }
 

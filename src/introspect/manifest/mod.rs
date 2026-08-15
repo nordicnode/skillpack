@@ -19,6 +19,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::introspect::cli_candidates::CliCandidate;
 use crate::types::Language;
 
 mod ccpp;
@@ -48,11 +49,6 @@ mod shell;
 mod swift;
 mod unknown;
 mod zig;
-
-// `select_csproj` parses a csproj manifest field; `cli_candidates` resolves
-// `csharp_cli_candidate` through it, so it is re-exported for the parent
-// module (`super::select_csproj`).
-pub(crate) use csharp::select_csproj;
 
 /// Everything skillpack knows about one language: how to detect it on disk,
 /// how to pull scalars from its manifest, and the derived hints downstream
@@ -95,6 +91,15 @@ pub trait LanguageSpec {
     /// given the resolved manifest name (`name` may be a fallback when the
     /// manifest has none).
     fn import_pattern(&self, name: &str) -> String;
+    /// Resolve the CLI invocation candidate for this language: the argv to
+    /// spawn `--help` against (a built artifact, `python -m <pkg>`, `go run
+    /// .`, …), or `None` when no runnable CLI can be established on this
+    /// machine. Default `None` covers languages without a clean invocation
+    /// (e.g. Nix); script-first and runtime languages override.
+    fn cli_candidate(&self, root: &Path, name: &str) -> Option<CliCandidate> {
+        let _ = (root, name);
+        None
+    }
 }
 
 /// Registry: `Language` → its spec implementation. One arm per language —
