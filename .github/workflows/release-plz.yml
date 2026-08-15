@@ -139,9 +139,18 @@ jobs:
       # `release-plz-*` branch whose PR is no longer open, keeping only the
       # PR this run just opened/reopened.
       - name: Prune stale release-plz branches
+        # Note: GitHub's expression grammar rejects property access on a
+        # parenthesized filter chain like `(x | fromJSON).head_branch` (the
+        # workflow fails to load with 0 jobs), so pass the raw JSON through an
+        # env var and parse it with jq instead.
+        env:
+          PR_JSON: ${{ steps.release-plz.outputs.pr }}
         run: |
           set -euo pipefail
-          keep="${{ steps.release-plz.outputs.pr != '' && (steps.release-plz.outputs.pr | fromJSON).head_branch || '' }}"
+          keep=""
+          if [ -n "$PR_JSON" ] && [ "$PR_JSON" != "null" ]; then
+            keep=$(printf '%s' "$PR_JSON" | jq -r '.head_branch')
+          fi
           for b in $(gh api "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name' | grep '^release-plz-' || true); do
             if [ "$b" = "$keep" ]; then
               echo "keeping $b (this run's PR)"
