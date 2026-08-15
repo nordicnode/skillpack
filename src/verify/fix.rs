@@ -229,6 +229,7 @@ fn apply_regen_skill_md_frontmatter(
     // the body starts with a blank line, so the joined artifact mirrors what
     // `init` writes on a fresh run (modulo the maintainer's body edits).
     let spliced = format!("{fresh_frontmatter}\n{preserved_body}");
+    ensure_no_symlink_ancestors(root, loc)?;
     std::fs::write(&committed_path, &spliced)
         .with_context(|| format!("writing spliced skill {}", committed_path.display()))?;
     Ok(FixOutcome {
@@ -270,8 +271,29 @@ fn write_one(root: &Path, file: &GeneratedFileOutput) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating parent dir for {}", p.display()))?;
     }
+    ensure_no_symlink_ancestors(root, &file.rel_path)?;
     std::fs::write(&p, &file.contents)
         .with_context(|| format!("writing {} for --fix", p.display()))?;
+    Ok(())
+}
+
+/// Refuse to write through a symlink — mirrors `init`/`update`'s guard so
+/// `verify --fix` can't escape the project root through a symlinked ancestor
+/// (a path that `init` refuses is a path `--fix` must refuse too, or the
+/// hardening is inconsistent).
+fn ensure_no_symlink_ancestors(root: &Path, rel_path: &str) -> Result<()> {
+    let mut cur = root.to_path_buf();
+    for comp in Path::new(rel_path).components() {
+        cur.push(comp.as_os_str());
+        if let Ok(meta) = std::fs::symlink_metadata(&cur) {
+            if meta.file_type().is_symlink() {
+                bail!(
+                    "refusing to write through a symlink at {}; remove it or re-run in a non-symlinked checkout",
+                    cur.display()
+                );
+            }
+        }
+    }
     Ok(())
 }
 

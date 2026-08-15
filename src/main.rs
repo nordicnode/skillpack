@@ -17,7 +17,7 @@ use clap::{CommandFactory, Parser, ValueEnum};
 use skillpack::cli::{resolve_targets, Cli, Commands, LogFormat, Target};
 use skillpack::config::Config;
 use skillpack::exit;
-use skillpack::generate::{coerce_kebab, render_all, GeneratedFileOutput};
+use skillpack::generate::{self, coerce_kebab, render_all, GeneratedFileOutput};
 use skillpack::interview;
 use skillpack::introspect;
 use skillpack::types;
@@ -226,8 +226,16 @@ fn trace_detected(profile: &types::ProjectProfile) {
 /// a generic description/trigger the maintainer can refine via
 /// `skillpack update` / `skillpack add`. Single-language repos return the
 /// primary skill only (byte-identical to the old `--auto` path).
+///
+/// The secondary intents are deliberately LIBRARY-shaped: they carry an
+/// `import_pattern` (derived from the secondary language's manifest where
+/// possible), language-correct `category`/`globs`/`opencode_mode` overrides,
+/// and no invocation — so a TS frontend in a Rust-CLI repo renders as a
+/// library skill about TypeScript, never as a second "run the Rust binary"
+/// skill.
 fn auto_intents(
     profile: &types::ProjectProfile,
+    root: &Path,
     triggers: &[String],
     import: Option<&str>,
 ) -> Result<Vec<(String, types::Intent)>> {
@@ -238,13 +246,23 @@ fn auto_intents(
     )];
     for lang in &profile.secondary_languages {
         let lang_str = lang.as_str();
+        let skill_name = format!("{primary_name}-{lang_str}");
         out.push((
-            format!("{primary_name}-{lang_str}"),
+            skill_name.clone(),
             types::Intent {
                 one_line_description: format!("Manage the {lang_str} surface of {primary_name}"),
                 when_to_use_phrases: vec![format!("touch the {lang_str} code")],
                 invocation_command: None,
-                import_pattern: None,
+                // Library-style: the pattern is derived from the secondary
+                // language's manifest (package/crate/module name) so the skill
+                // renders the import branch, not the primary CLI's invocation.
+                import_pattern: Some(secondary_import_pattern(*lang, root, &skill_name)),
+                // Language-correct derived-field overrides: the profile's
+                // dominant language (e.g. Rust) must not leak into the
+                // secondary skill's category/globs/opencode-mode.
+                category: Some(generate::category_hint(*lang).to_string()),
+                globs: Some(generate::cursor_globs_hint(*lang)),
+                opencode_mode: Some("subagent".to_string()),
                 author: profile.authors.clone(),
                 license: profile.license.clone().or_else(|| Some("MIT".to_string())),
                 ..Default::default()
@@ -252,6 +270,62 @@ fn auto_intents(
         ));
     }
     Ok(out)
+}
+
+/// Derive a library import pattern for a secondary language in a polyglot
+/// monorepo, using the language's own manifest name when present (the
+/// package/crate/module the agent would actually import) and falling back to
+/// the secondary skill name. One language-shaped pattern per ecosystem so the
+/// rendered skill tells an agent how to consume the package in that language.
+fn secondary_import_pattern(lang: types::Language, root: &Path, fallback: &str) -> String {
+    let name =
+        introspect::project_manifest_name(root, lang).unwrap_or_else(|| fallback.to_string());
+    match lang {
+        types::Language::Rust => {
+            format!("use {crate_name}::…;", crate_name = name.replace('-', "_"))
+        }
+        types::Language::Node => format!("import {{ … }} from '{name}'"),
+        types::Language::Python => format!("import {module}", module = name.replace('-', "_")),
+        types::Language::Go => format!("import \"{name}\""),
+        types::Language::Ruby => format!("require '{name}'"),
+        types::Language::Php => format!("require '{name}'"),
+        types::Language::Jvm => format!("import {pkg}.*;", pkg = name.replace('-', ".")),
+        types::Language::CSharp => format!("using {ns};", ns = name.replace('-', "")),
+        types::Language::Zig => format!("const {name} = @import(\"{name}\");"),
+        types::Language::Swift => format!("import {name}"),
+        types::Language::CCpp => format!("#include <{name}.h>"),
+        types::Language::Elixir => format!("import {mod}", mod = pascal_name(&name)),
+        types::Language::Deno => format!("import {{ … }} from \"{name}\""),
+        types::Language::Nix => format!("{{ inputs, ... }}: inputs.{name}"),
+        types::Language::Dart => format!("import 'package:{name}/{name}.dart';"),
+        types::Language::Haskell => format!("import {mod}", mod = pascal_name(&name)),
+        types::Language::Lua => format!("require(\"{name}\")"),
+        types::Language::Julia => format!("using {name}"),
+        types::Language::Crystal => format!("require \"./{name}\""),
+        types::Language::Clojure => format!("(require '[{name} :refer :all])"),
+        types::Language::Ocaml => format!("open {mod}", mod = pascal_name(&name)),
+        types::Language::Erlang => format!("application:ensure_all_started({name})."),
+        types::Language::R => format!("library({name})"),
+        types::Language::Perl => format!("use {name};"),
+        types::Language::Unknown => {
+            format!("(no standard import form for {name}; document it via `skillpack update`)")
+        }
+    }
+}
+
+/// Upper-camel-case a kebab/snake name for languages whose import statement
+/// names a module (`import Foo.Bar`), e.g. `my-lib` → `MyLib`.
+fn pascal_name(name: &str) -> String {
+    name.split(['-', '_', '.'])
+        .filter(|s| !s.is_empty())
+        .map(|seg| {
+            let mut c = seg.chars();
+            match c.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
 }
 
 /// Derive the [`Intent`] entirely from the repo — `init --auto`. Zero
@@ -541,7 +615,7 @@ fn run_init_inner(
         // license from the LICENSE file, invocation from the detected
         // CLI) so a fresh checkout inits with ZERO flags and zero prompts.
         // A polyglot monorepo gets one skill per detected language.
-        auto_intents(&profile, &triggers, import.as_deref())?
+        auto_intents(&profile, root, &triggers, import.as_deref())?
     } else if non_interactive {
         // Plain --non-interactive without a config: the intent comes from
         // the bootstrap flags (description/trigger/author + invocation or
@@ -758,6 +832,16 @@ fn verify_rendered(
                 .with_context(|| format!("creating {}", parent.display()))?;
         }
         std::fs::write(&p, &f.contents).with_context(|| format!("writing {}", p.display()))?;
+    }
+    // Also drop the committed `skillpack.toml` into the temp dir when one
+    // exists: `verify`'s discovery stage reads it to learn which `name:`
+    // values are legitimate (`[[skills]]` entries) before firing the
+    // name_drift warning. Without it, every multi-skill re-init would report
+    // spurious name_drift warnings for the secondary skills, prompt the user
+    // in interactive mode, and drag the pre-commit score down (Bug: the temp
+    // dir held only the rendered files, so `allowed_skill_names` was empty).
+    if let Some(cfg) = Config::load(root)? {
+        cfg.save(tmp.path())?;
     }
     let input = VerifyInput {
         // Discovery reads the rendered files from the temp dir (we verify the
@@ -1473,15 +1557,26 @@ fn compute_candidates<'f>(
         };
 
         let candidate = if is_frontmatter_target(&file.rel_path) {
-            let fresh_fm = skillpack::verify::fix::split_frontmatter(&file.contents)
-                .map(|(fm, _body)| fm)
-                .unwrap_or_else(|| file.contents.clone());
-            let preserved_body = committed
-                .as_deref()
-                .and_then(skillpack::verify::fix::split_frontmatter)
-                .map(|(_fm, body)| body)
-                .unwrap_or_default();
-            format!("{fresh_fm}\n{preserved_body}")
+            match &committed {
+                // Existing file: splice the fresh frontmatter onto the
+                // committed body so a maintainer's hand-tailored prose
+                // survives regeneration.
+                Some(committed) => {
+                    let fresh_fm = skillpack::verify::fix::split_frontmatter(&file.contents)
+                        .map(|(fm, _body)| fm)
+                        .unwrap_or_else(|| file.contents.clone());
+                    let preserved_body = skillpack::verify::fix::split_frontmatter(committed)
+                        .map(|(_fm, body)| body)
+                        .unwrap_or_default();
+                    format!("{fresh_fm}\n{preserved_body}")
+                }
+                // New file (not on disk yet): the full fresh render. The old
+                // splice reused the same path for both, so a target added
+                // since the last `update` was written as frontmatter-only
+                // (empty preserved body) — the body prose silently dropped
+                // and invisible to `diff`/`verify` afterwards.
+                None => file.contents.clone(),
+            }
         } else {
             file.contents.clone()
         };
@@ -2079,6 +2174,19 @@ fn run_remove_inner(
         .collect();
     if remaining.len() == original_len {
         bail!("skill `{skill_name}` not found in skillpack.toml; nothing removed");
+    }
+    // Refuse to remove the LAST skill: a pack needs at least one skill to
+    // render any distribution file, and deleting the last one would leave
+    // skillpack.toml skill-less (broken for `init`/`update`/`verify`) while
+    // the pack-level files (plugin.json / marketplace.json) still reference
+    // the deleted skill. Refuse up front with an actionable message instead
+    // of half-removing the pack and then failing mid-way.
+    if remaining.is_empty() {
+        bail!(
+            "`{skill_name}` is the only skill in skillpack.toml; removing it would \
+             leave the pack empty. Re-create the pack with `skillpack init`, or \
+             add another skill first via `skillpack add <name>`."
+        );
     }
 
     // Persist the shrunken pack first (so a failure later doesn't leave the

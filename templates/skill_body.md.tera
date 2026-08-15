@@ -19,12 +19,13 @@ Invoke this {{ noun }} when the user's task matches any of these triggers:
 {% if has_cli %}Ensure `{{ cli_binary }}` is installed and available on PATH before invoking the examples below.
 {% else %}This is a library, not a CLI. The agent uses it by importing from the host project, not by spawning a binary.
 
-Import pattern:
+{% if import_pattern %}Import pattern:
 
 ```
 {{ import_pattern }}
 ```
-{% endif %}
+{% else %}No import pattern is documented yet. Add one via `skillpack add` / `skillpack update`, or edit `import_pattern` in skillpack.toml, so the agent knows how to consume this package.
+{% endif %}{% endif %}
 {% if has_cli %}## Invocation
 
 The exact command an agent should run to use this tool:

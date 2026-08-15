@@ -159,7 +159,8 @@ pub enum Commands {
         /// Agent ecosystem(s) to generate distribution files for. Repeat to
         /// emit multiple: `--target claude --target cursor`. Defaults to
         /// `claude` only (backward compatible). Pass the special value
-        /// `all` to emit every supported target.
+        /// `all` to emit every supported target, or `list` to print the
+        /// canonical target names and exit.
         #[arg(long, num_args = 1.., value_name = "ECOSYSTEM")]
         target: Vec<String>,
 
@@ -262,7 +263,10 @@ pub enum Commands {
     /// wholesale, so any hand-tailored frontmatter fields skillpack
     /// doesn't manage (e.g. cursor `globs`, opencode `mode`) are
     /// overwritten. To preserve those, edit the template or keep them in
-    /// `skillpack.toml`-driven fields.
+    /// `skillpack.toml`-driven fields. The body prose (including the
+    /// auto-generated "Documented flags" list) is preserved as-is: if the
+    /// CLI's flags changed, run `skillpack init` (wholesale regen) or
+    /// hand-edit the body to refresh it.
     Update {
         /// Project root to operate on. Defaults to the current directory.
         #[arg(long, value_name = "DIR", default_value = ".")]
@@ -270,8 +274,8 @@ pub enum Commands {
 
         /// Agent ecosystem(s) to regenerate for. Defaults to every target
         /// whose files are already present in the repo (falling back to `all`
-        /// when none are found). Pass `all` or specific names to override.
-        /// Repeats.
+        /// when none are found). Pass `all` or specific names to override, or
+        /// `list` to print the canonical target names and exit. Repeats.
         #[arg(long, num_args = 1.., value_name = "ECOSYSTEM")]
         target: Vec<String>,
 
@@ -307,7 +311,8 @@ pub enum Commands {
 
         /// Agent ecosystem(s) to check. Defaults to every target whose files
         /// are already present in the repo (falling back to `all` when none
-        /// are found). Pass `all` or specific names to override. Repeats.
+        /// are found). Pass `all` or specific names to override, or `list` to
+        /// print the canonical target names and exit. Repeats.
         #[arg(long, num_args = 1.., value_name = "ECOSYSTEM")]
         target: Vec<String>,
 
@@ -373,7 +378,8 @@ pub enum Commands {
         license: Option<String>,
 
         /// Agent ecosystem(s) to regenerate after appending. Defaults to
-        /// `claude`; `all` refreshes every target. Repeats.
+        /// `claude`; `all` refreshes every target, `list` prints the canonical
+        /// target names and exits. Repeats.
         #[arg(long, num_args = 1.., value_name = "ECOSYSTEM")]
         target: Vec<String>,
 
@@ -403,7 +409,7 @@ pub enum Commands {
 
         /// Agent ecosystem(s) to regenerate after removal. Defaults to the
         /// ecosystems already present in the repo; `all` refreshes every
-        /// target. Repeats.
+        /// target, `list` prints the canonical target names and exits. Repeats.
         #[arg(long, num_args = 1.., value_name = "ECOSYSTEM")]
         target: Vec<String>,
 

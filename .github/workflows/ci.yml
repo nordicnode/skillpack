@@ -193,6 +193,18 @@ jobs:
           fi
           if [ "$fail" = "1" ]; then exit 1; fi
           echo "version sync OK: $cargo_ver"
+      # The release-plz sync strips the per-binary sha256 pins when it bumps
+      # the version (they can't exist until the release is published); a
+      # committed formula with the `re-pin sha256` reminder is a broken tap
+      # (`brew install` fails without a checksum). Fail until the pins are
+      # regenerated via scripts/update_homebrew_sha256.py.
+      - name: homebrew formula has pinned checksums
+        run: |
+          if grep -q "TODO: re-pin sha256" homebrew/skillpack.rb; then
+            echo "::error::homebrew/skillpack.rb has unpinned sha256 placeholders; run python3 scripts/update_homebrew_sha256.py after the release is published"
+            exit 1
+          fi
+          echo "homebrew checksums pinned"
 
   # The two committed JSON Schemas (skillpack.schema.json for the config, and
   # verify-report.schema.json for `verify --format json`) must stay valid

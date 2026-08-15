@@ -53,7 +53,11 @@ pub(crate) fn select_csproj(root: &Path) -> Option<PathBuf> {
 }
 
 /// Pull the project name out of the language manifest, best-effort.
-pub(crate) fn project_manifest_name(root: &Path, language: Language) -> Option<String> {
+/// Best-effort package/crate/module name from the language manifest at
+/// `root`, used by `init --auto` to name the primary skill and by the
+/// polyglot path to derive per-secondary-language import patterns. `pub`
+/// (not `pub(crate)`) because the bin target consumes it directly.
+pub fn project_manifest_name(root: &Path, language: Language) -> Option<String> {
     match language {
         Language::Rust => {
             // Parse Cargo.toml with the real toml crate (same path as Python)

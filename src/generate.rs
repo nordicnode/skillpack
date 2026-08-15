@@ -75,15 +75,21 @@ pub const OUTPUT_PATHS: [&str; 4] = [
 /// Build the full Tera context from profile + intent.
 pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
     let name = coerce_kebab(&profile.name);
-    let keywords = Keywords {
-        inner: keywords_for(profile, intent),
-    };
     // `display_name` is the human label for the tool in prose ("Do not use
     // this skill if the user only wants to *read* {{ display_name }}"). It is
     // the tool *name*, not the README blurp (which can read as a sentence and
     // mangle the surrounding prose).
     let display_name = name.clone();
-    let has_cli = profile.has_cli;
+    // Whether THIS skill is a CLI. Derived from the intent first: an explicit
+    // `invocation_command` means CLI even when introspection found no binary
+    // (a fresh checkout with no built artifact — the user's documented
+    // invocation must not be silently dropped to the library branch), and an
+    // explicit `import_pattern` means library even when the repo's dominant
+    // language ships a CLI (a secondary skill in a polyglot monorepo).
+    // `profile.has_cli` remains the fallback for the config-replay case where
+    // the intent carries neither field (the SKILL.md template then falls back
+    // to the bare `cli_binary` name instead of an empty fenced block).
+    let has_cli = skill_is_cli(profile, intent);
     // `cli_binary` is the bare name agents/users would type to invoke the tool
     // (e.g. `fd`, not the crate name `fd-find`). Derive from the actual CLI
     // command argv (the built binary path) so a `[[bin]].name` rename surfaces
@@ -114,6 +120,8 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
     // flat list (Tera has no recursive macros). Order = declaration order
     // (clap), preserved by the `Vec` on the profile → deterministic
     // snapshots. Empty for non-subcommand CLIs and pure libraries.
+    // (Unchanged from profile-level derivation: subcommands come from the
+    // introspected CLI surface, which is profile-level by construction.)
     let documented_subcommands: Vec<serde_json::Value> =
         flatten_subcommands(&profile.cli_subcommand_tree)
             .into_iter()
@@ -176,6 +184,14 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         .clone()
         .unwrap_or_else(|| opencode_mode_hint(profile.language).to_string());
 
+    // `keywords` seed the language + cli/library distinction from the same
+    // per-skill `has_cli` the body renders — a `--invocation`-documented CLI
+    // whose binary isn't built yet must be discoverable as a CLI (not
+    // `library`) in the marketplace entry.
+    let keywords = Keywords {
+        inner: keywords_for(profile, intent, has_cli),
+    };
+
     tera::Context::from_serialize(serde_json::json!({
         "name": name,
         "display_name": display_name,
@@ -212,14 +228,29 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
     .expect("Tera context serializes from JSON literal")
 }
 
+/// True when THIS skill (not necessarily the repo's dominant language) is a
+/// CLI. An explicit `invocation_command` wins over introspection (a fresh
+/// checkout with no built artifact still documents its CLI), an explicit
+/// `import_pattern` marks a library even in a CLI-bearing repo (a secondary
+/// skill in a polyglot monorepo), and `profile.has_cli` is the fallback when
+/// the intent carries neither field (config replay of a CLI pack that elided
+/// `invocation_command`).
+pub(crate) fn skill_is_cli(profile: &ProjectProfile, intent: &Intent) -> bool {
+    // (pub(crate): used within the lib only; the bin derives CLI-vs-library
+    // from the intent fields directly in auto_intents.)
+    intent.invocation_command.is_some() || (profile.has_cli && intent.import_pattern.is_none())
+}
+
 /// Resolve a skill's marketplace keywords: its explicit `keywords` override, or
 /// the derived list when the config doesn't pin one. Exposed so `render_all`
 /// can merge every skill's keywords into the pack-level marketplace entry.
-fn keywords_for(profile: &ProjectProfile, intent: &Intent) -> Vec<String> {
+/// `has_cli` is the per-skill value (see [`skill_is_cli`]) so the marketplace
+/// keyword seeds match the body's CLI/library branch.
+fn keywords_for(profile: &ProjectProfile, intent: &Intent, has_cli: bool) -> Vec<String> {
     intent
         .keywords
         .clone()
-        .unwrap_or_else(|| derive_keywords(profile, intent))
+        .unwrap_or_else(|| derive_keywords(profile, intent, has_cli))
 }
 
 /// Escape a string so it's safe to embed inside YAML double-quoted scalar.
@@ -334,7 +365,7 @@ pub fn render_all(
     if skills.len() > 1 {
         let mut merged: Vec<String> = Vec::new();
         for (_, intent) in skills {
-            for kw in keywords_for(profile, intent) {
+            for kw in keywords_for(profile, intent, skill_is_cli(profile, intent)) {
                 if !merged.contains(&kw) {
                     merged.push(kw);
                 }
@@ -819,9 +850,11 @@ const MAX_DERIVED_KEYWORDS: usize = 16;
 ///   - CLI subcommand NAMES (from the subcommand tree) — high-signal verbs
 ///     like `init`, `verify`, `doctor` that a marketplace searcher would type
 ///   - one content word from the README `description_hint` (longest non-stopword)
-fn derive_keywords(profile: &ProjectProfile, intent: &Intent) -> Vec<String> {
+///
+/// `has_cli` is the per-skill value (see [`skill_is_cli`]).
+fn derive_keywords(profile: &ProjectProfile, intent: &Intent, has_cli: bool) -> Vec<String> {
     let mut kws = vec![profile.language.as_str().to_string()];
-    if profile.has_cli {
+    if has_cli {
         kws.push("cli".to_string());
     } else {
         kws.push("library".to_string());
@@ -912,7 +945,7 @@ fn is_stopword(w: &str) -> bool {
     )
 }
 
-fn category_hint(lang: Language) -> &'static str {
+pub fn category_hint(lang: Language) -> &'static str {
     match lang {
         Language::Rust => "the Rust tooling",
         Language::Node => "the JavaScript/Node tooling",
@@ -942,7 +975,7 @@ fn category_hint(lang: Language) -> &'static str {
     }
 }
 
-fn allowed_tools_hint(lang: Language, has_cli: bool) -> Option<&'static str> {
+pub(crate) fn allowed_tools_hint(lang: Language, has_cli: bool) -> Option<&'static str> {
     // A CLI skill can use Bash to run the CLI and Read to consult its output.
     // A pure-library skill leans on the host project's tooling (no Bash of
     // its own), so we leave the hint blank — the maintainer can override via
@@ -962,7 +995,7 @@ fn allowed_tools_hint(lang: Language, has_cli: bool) -> Option<&'static str> {
 /// `alwaysApply: true`. With neither, generated rules won't auto-trigger.
 /// Derive glob patterns from the detected language so the rule activates on
 /// the relevant files. Empty for Unknown — the maintainer should curate.
-fn cursor_globs_hint(lang: Language) -> Vec<String> {
+pub fn cursor_globs_hint(lang: Language) -> Vec<String> {
     match lang {
         Language::Rust => vec!["*.rs".into()],
         Language::Node => vec![
@@ -1076,7 +1109,7 @@ fn globs_to_yaml(globs: &[String]) -> String {
 /// OpenCode `mode` frontmatter: `primary` for CLI tools (standalone agent),
 /// `subagent` for pure libraries (invoked by a parent agent). Conservative
 /// default `subagent` for Unknown since the maintainer should confirm.
-fn opencode_mode_hint(lang: Language) -> &'static str {
+pub fn opencode_mode_hint(lang: Language) -> &'static str {
     if let Language::Unknown = lang {
         "subagent"
     } else {

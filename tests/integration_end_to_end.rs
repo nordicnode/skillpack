@@ -5513,3 +5513,316 @@ fn remove_skill_drops_entry_files_and_config() {
         .assert()
         .failure();
 }
+
+/// Minimal single-language repo (Cargo.toml + README) with NO built binary
+/// and NO git remote — introspection derives `name` from the manifest and
+/// `description_hint` from the README, and `has_cli` comes out false (no
+/// `target/` artifact, binary not on PATH). Used by tests that exercise the
+/// no-binary bootstrap paths.
+fn scratch_manifest_repo() -> PathBuf {
+    let root = tempfile::tempdir().unwrap().keep();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"chronicle\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("README.md"),
+        "# chronicle\n\nChronicle journals events to a chronological log.\n",
+    )
+    .unwrap();
+    root
+}
+
+// Bug: `init --non-interactive --invocation <CMD>` on a fresh checkout (no
+// built artifact, binary not on PATH — the CI bootstrap case) rendered the
+// LIBRARY branch and silently dropped the user's documented invocation: the
+// SKILL.md said "This is a library, not a CLI" with an empty import pattern,
+// and `verify` still passed 100/100. The template must key CLI-vs-library off
+// the INTENT (`invocation_command` vs `import_pattern`), with `profile.has_cli`
+// only as the config-replay fallback.
+#[test]
+fn non_interactive_invocation_renders_cli_even_without_detected_binary() {
+    let root = scratch_manifest_repo();
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+            "--description",
+            "Journal events to a log",
+            "--trigger",
+            "log events",
+            "--invocation",
+            "chronicle --new \"entry\"",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let skill = fs::read_to_string(root.join("skills/chronicle/SKILL.md")).unwrap();
+    assert!(
+        skill.contains("## Invocation"),
+        "a --invocation-documented CLI must render the Invocation branch, got:\n{skill}"
+    );
+    assert!(
+        !skill.contains("This is a library, not a CLI"),
+        "the library branch must not leak, got:\n{skill}"
+    );
+    assert!(
+        skill.contains("chronicle --new \"entry\""),
+        "the user's exact --invocation must be documented, got:\n{skill}"
+    );
+}
+
+// Bug: `update` writing a frontmatter-bearing target that is NOT on disk yet
+// (e.g. `--target cursor` after a claude-only `init`) wrote frontmatter-only
+// files — the body was dropped because the splice preserved an empty committed
+// body, and the result was invisible to `diff`/`verify` (both pass on the
+// frontmatter). A missing file must get the FULL fresh render.
+#[test]
+fn update_creates_full_body_for_new_frontmatter_target() {
+    let root = scratch_manifest_repo();
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+            "--description",
+            "Journal events to a log",
+            "--trigger",
+            "log events",
+            "--invocation",
+            "chronicle",
+            "--target",
+            "claude",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+    assert!(!root.join(".cursor/rules/chronicle.mdc").exists());
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["update", "--root", ".", "--target", "cursor"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let mdc = fs::read_to_string(root.join(".cursor/rules/chronicle.mdc")).unwrap();
+    assert!(
+        mdc.contains("# chronicle"),
+        "new .mdc must carry the body heading, got:\n{mdc}"
+    );
+    assert!(
+        mdc.contains("## When to use"),
+        "new .mdc must carry the body prose, got:\n{mdc}"
+    );
+}
+
+// Bug: the init pre-commit gate verified rendered files in a temp dir that had
+// no skillpack.toml, so discovery's `allowed_skill_names` was empty and every
+// secondary skill's `name:` fired a spurious `name_drift` warning on re-init
+// (interactive users got prompted "proceed with warnings?", non-interactive
+// runs printed noise + a degraded score). The temp dir must also carry the
+// committed config so multi-skill names are recognized.
+#[test]
+fn multi_skill_reinit_produces_no_name_drift_warnings() {
+    let root = scratch_manifest_repo();
+    // Both skills are pure libraries (import patterns, no CLI) so the
+    // pre-commit gate has nothing else to warn about — the ONLY signal that
+    // used to fire on a multi-skill re-init was the spurious name_drift.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+            "--description",
+            "Journal events to a log",
+            "--trigger",
+            "log events",
+            "--import",
+            "import chronicle",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+    fs::write(
+        root.join("skillpack.toml"),
+        format!(
+            "{}\n[[skills]]\nname = \"sidekick\"\none_line_description = \"Handle auxiliary chores\"\nwhen_to_use_phrases = [\"aux task\"]\nimport_pattern = \"import sidekick\"\n",
+            fs::read_to_string(root.join("skillpack.toml")).unwrap()
+        ),
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--target",
+            "claude",
+        ])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "multi-skill re-init must succeed");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !combined.contains("matches the canonical project name"),
+        "secondary skill name must NOT be flagged as drift during re-init, got:\n{combined}"
+    );
+    assert!(
+        !combined.contains("warning"),
+        "pre-commit gate must be warning-free, got:\n{combined}"
+    );
+}
+
+// Bug: `init --auto` on a polyglot monorepo rendered every secondary language
+// skill as a second CLI skill — the primary's binary, the primary's flags,
+// `category: the Rust tooling`, `allowed-tools: Read, Bash`, and Rust globs —
+// even for a pure-library secondary (e.g. a TS frontend). Secondaries must
+// render as LIBRARY skills with their own language's category/globs/import
+// pattern.
+#[cfg(unix)]
+#[test]
+fn auto_polyglot_secondary_skill_renders_as_library_with_its_own_language() {
+    let root = tempfile::tempdir().unwrap().keep();
+    fs::create_dir_all(root.join("target/release")).unwrap();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"chronicle\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[[bin]]\nname = \"chronicle\"\npath = \"src/main.rs\"\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+    fs::write(
+        root.join("target/release/chronicle"),
+        "#!/bin/sh\necho \"chronicle 0.1.0 --help\"\n",
+    )
+    .unwrap();
+    // Make the launcher executable so the CLI probe can spawn `--help`.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            root.join("target/release/chronicle"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+    fs::write(
+        root.join("package.json"),
+        "{\"name\": \"@acme/webui\", \"version\": \"1.0.0\"}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("README.md"),
+        "# chronicle\n\nChronicle journals events to a chronological log.\n",
+    )
+    .unwrap();
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["init", "--root", ".", "--auto", "--target", "claude"])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // The PRIMARY skill is a CLI (built artifact present).
+    let primary = fs::read_to_string(root.join("skills/chronicle/SKILL.md")).unwrap();
+    assert!(primary.contains("## Invocation"));
+
+    // The SECONDARY skill is a library about ITS language, not a second CLI.
+    let secondary = fs::read_to_string(root.join("skills/chronicle-node/SKILL.md")).unwrap();
+    assert!(
+        secondary.contains("This is a library, not a CLI"),
+        "secondary must render the library branch, got:\n{secondary}"
+    );
+    assert!(
+        !secondary.contains("## Invocation"),
+        "secondary must not document a CLI invocation, got:\n{secondary}"
+    );
+    assert!(
+        secondary.contains("import { … } from '@acme/webui'"),
+        "secondary must carry the node import pattern, got:\n{secondary}"
+    );
+    assert!(
+        secondary.contains("the JavaScript/Node tooling"),
+        "secondary must use its own language category, got:\n{secondary}"
+    );
+    assert!(
+        !secondary.contains("the Rust tooling"),
+        "secondary must not inherit the primary language's category, got:\n{secondary}"
+    );
+
+    // The secondary Cursor rule gets Node globs, not Rust `*.rs`.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["update", "--root", ".", "--target", "cursor"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    let mdc = fs::read_to_string(root.join(".cursor/rules/chronicle-node.mdc")).unwrap();
+    assert!(
+        mdc.contains("\"*.ts\"") && !mdc.contains("\"*.rs\""),
+        "secondary rule must use node globs, got:\n{mdc}"
+    );
+}
+
+// Bug: `skillpack remove` on the LAST skill deleted the skill files, rewrote
+// skillpack.toml to a skill-less config, then failed with a fatal error —
+// leaving the pack half-removed and broken. It must refuse up front and leave
+// everything intact.
+#[test]
+fn remove_last_skill_refuses_and_keeps_pack_intact() {
+    let root = scratch_manifest_repo();
+    write_skillpack_toml(&root, "chronicle");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+    assert!(root.join("skills/chronicle/SKILL.md").exists());
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["remove", "chronicle", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("only skill"));
+
+    // Nothing may have been deleted or rewritten.
+    assert!(
+        root.join("skills/chronicle/SKILL.md").exists(),
+        "the skill file must survive a refused removal"
+    );
+    let cfg = fs::read_to_string(root.join("skillpack.toml")).unwrap();
+    assert!(
+        cfg.contains("name = \"chronicle\""),
+        "the config must survive a refused removal, got:\n{cfg}"
+    );
+}
