@@ -1,0 +1,65 @@
+# skillpack
+
+Generate and verify the agent-distribution layer for any OSS project
+
+## When to use
+
+Invoke this rule when the user's task matches any of these triggers:
+
+- generate a claude code skill pack
+- verify agent-discoverability of a CLI or library
+- scaffold claude plugin distribution files
+
+
+## When NOT to use
+
+- Do not use this rule if the user only wants to *read* or *inspect* skillpack without performing an action — prefer reading docs directly.
+- Do not use this rule for tasks outside the Rust tooling it was built for.
+
+## Installation
+
+Ensure `skillpack` is installed and available on PATH before invoking the examples below.
+
+## Invocation
+
+The exact command an agent should run to use this tool:
+
+```
+skillpack init
+```
+
+Run `skillpack --help` to discover the available flags. Documented flags (verified by `skillpack verify`):
+
+- `--non-interactive`
+- `--verbose`
+- `--debug`
+- `--log-level`
+- `--log-format`
+- `-h`
+- `--help`
+- `-V`
+- `--version`
+
+
+### Subcommands
+
+This CLI uses subcommands. Each one has its own flags (verified by `skillpack verify`):
+
+- `init` — flags: `--root`, `--non-interactive`, `--author`, `--invocation`, `--import`, `--accept-warnings`, `--auto`, `--license`, `--trigger`, `--description`, `--verbose`, `--debug`, `--log-level`, `--target`, `--force`, `--dry-run`, `--log-format`, `--template-dir`, `--format`
+- `verify` — flags: `--root`, `--format`, `--fix`, `--min-score`, `--watch`, `--template-dir`, `--verbose`, `--debug`, `--log-level`, `--log-format`
+- `doctor` — flags: `--root`, `--format`, `--verbose`, `--debug`, `--log-level`, `--log-format`
+- `update` — flags: `--root`, `--target`, `--force`, `--template-dir`, `--format`, `--verbose`, `--debug`, `--log-level`, `--log-format`
+- `diff` — flags: `--root`, `--target`, `--force`, `--template-dir`, `--format`, `--verbose`, `--debug`, `--log-level`, `--log-format`
+- `add` — flags: `--non-interactive`, `--root`, `--description`, `--trigger`, `--author`, `--invocation`, `--import`, `--license`, `--target`, `--force`, `--verbose`, `--debug`, `--log-level`, `--template-dir`, `--format`, `--log-format`
+- `remove` — flags: `--root`, `--target`, `--force`, `--template-dir`, `--format`, `--verbose`, `--debug`, `--log-level`, `--log-format`
+- `completions` — flags: `--verbose`, `--debug`, `--log-level`, `--log-format`
+- `config` — flags: `--root`, `--validate`, `--verbose`, `--debug`, `--log-level`, `--log-format`
+
+Run `skillpack <subcommand> --help` for a subcommand's full options.
+
+## Footguns / gotchas
+
+- Verify the tool is installed before relying on it; do not assume availability.
+- Prefer the documented `skillpack` flags; undocumented flags may change without notice.
+- This file is authoritative for agent invocation; if it drifts from the CLI's real `--help`, run `skillpack verify` to catch it.
+

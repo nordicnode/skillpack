@@ -169,6 +169,11 @@ pub const AUGMENT_RULES_DIR: &str = ".augment/rules";
 /// Verified August 2026.
 pub const AMAZONQ_RULES_DIR: &str = ".amazonq/rules";
 
+/// Trae IDE workspace rules live in `.trae/rules/` (markdown). Source:
+/// docs.trae.ai/ide/rules — "In IDE mode, add the rule's content using
+/// Markdown syntax ... in the .trae/rules directory." Verified August 2026.
+pub const TRAE_RULES_DIR: &str = ".trae/rules";
+
 /// Goose (Block's open-source agent) reads a project-wide
 /// `.goose/instructions.md`. Plain markdown, no frontmatter. Verified August
 /// 2026 against the Goose docs + the ctxlint context-file registry.

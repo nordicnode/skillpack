@@ -513,6 +513,10 @@ pub enum Target {
     /// markdown). Per the AWS Q Developer docs.
     #[clap(name = "amazonq")]
     AmazonQ,
+    /// Trae IDE: `.trae/rules/<name>.md` workspace rule files (plain
+    /// markdown). Per docs.trae.ai/ide/rules — the same rules-directory shape
+    /// as the Cline/Roo/Kilo/Qoder family.
+    Trae,
     /// Goose: a root-level `.goose/instructions.md` instructions file read by
     /// Block's Goose agent. Plain markdown, no frontmatter.
     Goose,
@@ -540,6 +544,7 @@ pub fn target_names() -> Vec<&'static str> {
         "continue",
         "augment",
         "amazonq",
+        "trae",
         "freebuff",
         "all",
     ]
@@ -573,13 +578,14 @@ pub fn resolve_targets(raw: &[String]) -> anyhow::Result<Vec<Target>> {
                 Target::Continue,
                 Target::Augment,
                 Target::AmazonQ,
+                Target::Trae,
             ]);
         } else if r == "freebuff" || r == "agents.md" || r == "agents-md" {
             out.push(Target::AgentsMd);
         } else {
             out.push(Target::from_str(r, true).map_err(|s| {
                 anyhow::anyhow!(
-                    "invalid --target `{s}`; expected claude|cursor|codex|opencode|copilot|agentsmd|claude-md|gemini|windsurf|aider|cline|roo|kilo|goose|qoder|continue|augment|amazonq|freebuff|all"
+                    "invalid --target `{s}`; expected claude|cursor|codex|opencode|copilot|agentsmd|claude-md|gemini|windsurf|aider|cline|roo|kilo|goose|qoder|continue|augment|amazonq|trae|freebuff|all"
                 )
             })?);
         }
@@ -605,12 +611,13 @@ mod tests {
         assert_eq!(targets, vec![Target::AgentsMd]);
 
         let all = resolve_targets(&["all".to_string()]).unwrap();
-        assert_eq!(all.len(), 18);
+        assert_eq!(all.len(), 19);
         assert!(all.contains(&Target::AgentsMd));
         assert!(all.contains(&Target::Cline));
         assert!(all.contains(&Target::Goose));
         assert!(all.contains(&Target::Qoder));
         assert!(all.contains(&Target::AmazonQ));
+        assert!(all.contains(&Target::Trae));
     }
 
     #[test]

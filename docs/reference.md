@@ -124,7 +124,7 @@ No-op when there's no fixable drift.
 | `init --import <PATTERN>` | import pattern for library projects — pass exactly one of `--invocation`/`--import` (bootstrap) |
 | `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
 | `init --license <SPDX>` | override the license for this run                              |
-| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, `claude-md`, `gemini`, `windsurf`, `aider`, `cline`, `roo`, `kilo`, `goose`, `qoder`, `continue`, `augment`, `amazonq`, `freebuff`, or `all` (all 18). Repeatable; the special value `list` prints the canonical names. |
+| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, `claude-md`, `gemini`, `windsurf`, `aider`, `cline`, `roo`, `kilo`, `goose`, `qoder`, `continue`, `augment`, `amazonq`, `trae`, `freebuff`, or `all` (all 19). Repeatable; the special value `list` prints the canonical names. |
 | `init --dry-run` | render + verify + preview without writing any files (or `skillpack.toml`); exits 0 |
 | `init --format human\|json` | human summary (default) or a machine-readable JSON object (`written`/`skipped`/`would_write`) for CI |
 | `init --force` | overwrite an existing `AGENTS.md` at repo root (skip+warn otherwise). Has no effect on other targets, which write to skillpack-owned paths. |
@@ -207,14 +207,32 @@ Polyglot monorepos: `introspect` detects every language manifest (Rust, Node,
 Python, Go, Ruby, PHP, JVM, C#, Zig, Swift, C/C++, Elixir, Deno, Nix,
 Dart/Flutter, Haskell, Lua, Julia, Crystal, Clojure, OCaml, Erlang, R, Perl)
 and records all but the primary as
-`secondary_languages`. `init --auto` on a monorepo with no committed config
-emits one skill per detected language — the primary keeps the project name,
-each secondary becomes `{name}-{lang}` with a library-style intent you can
-refine via `skillpack update` / `skillpack add`.
+`secondary_languages`. Detection walks the root plus a bounded depth-2 scan of
+subdirectories (skipping `node_modules`/`target`/vendored/test-fixture trees),
+so the common monorepo layout — a root manifest plus `web/`, `frontend/`,
+`apps/*`, or `packages/*` — yields its secondary languages; a nested secondary's
+import pattern is derived from that subdirectory's manifest and its cursor
+globs are scoped to the subdirectory. `init --auto` on a monorepo with no
+committed config emits one skill per detected language — the primary keeps the
+project name, each secondary becomes `{name}-{lang}` with a library-style
+intent you can refine via `skillpack update` / `skillpack add`.
+
+Script-first ecosystems (Shell/Bash via shebang'd `*.sh`; PowerShell via
+`.ps1`/`.psm1`/`.psd1`) are detected as PRIMARY languages only — a helper
+script inside an otherwise manifest'd repo never mints a secondary skill.
 
 Limitation: the invocation drift checks (`invocation.*`, which spawn the CLI
 `--help` and diff flags) run against the FIRST skill file only — give each
 skill its own CLI but know that the flag-drift gate checks one of them.
+
+`verify` also parses the committed `skillpack.toml`: an unparseable config is a
+hard FAIL (check `discovery.config.parse`) — the pre-commit gate runs only
+`verify`, so without this a broken config would sail through the hook green.
+
+When the CLI surface changed (new flags/subcommands), `update` and `verify
+--fix` intentionally preserve body prose and can't refresh it — the drift
+warnings say so, and `init --target all` (config replay) is the full
+regeneration path.
 
 ## Config overrides
 

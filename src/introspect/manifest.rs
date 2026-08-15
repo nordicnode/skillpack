@@ -299,7 +299,9 @@ pub fn project_manifest_name(root: &Path, language: Language) -> Option<String> 
             let raw = fs::read_to_string(root.join("Makefile.PL")).ok()?;
             extract_makefile_pl_field(&raw, "NAME")
         }
-        Language::Nix | Language::Unknown => None,
+        // Shell/PowerShell have no name-bearing manifest; the profile falls
+        // back to the dir/repo name.
+        Language::Shell | Language::Powershell | Language::Nix | Language::Unknown => None,
     }
 }
 
@@ -509,7 +511,12 @@ pub(crate) fn project_manifest_version(root: &Path, language: Language) -> Optio
             let raw = fs::read_to_string(root.join("Makefile.PL")).ok()?;
             extract_makefile_pl_field(&raw, "VERSION")
         }
-        Language::Swift | Language::Go | Language::Nix | Language::Unknown => None,
+        Language::Shell
+        | Language::Powershell
+        | Language::Swift
+        | Language::Go
+        | Language::Nix
+        | Language::Unknown => None,
     }
 }
 

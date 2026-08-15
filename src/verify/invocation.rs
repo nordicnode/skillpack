@@ -379,7 +379,9 @@ fn check_flag_drift(help_output: &str, skill_md: &str, report: &mut VerifyReport
             "invocation.flag_drift",
             "SKILL.md documents flags that match `--help`",
             "no flags appear to be documented in SKILL.md (no `--flag` tokens found)",
-            "To fix: document the CLI's flags so an agent knows what to pass.",
+            "To fix: document the CLI's flags so an agent knows what to pass — or re-run \
+             `skillpack init --target all` to regenerate them from `--help` (note: `update`/\
+             `--fix` preserve body prose and can't refresh the flags).",
         ));
         return;
     }
@@ -417,7 +419,9 @@ fn check_flag_drift(help_output: &str, skill_md: &str, report: &mut VerifyReport
                 drifted.join(", ")
             ),
             format!(
-                "To fix: remove `{first}` from SKILL.md, or add `{first}` to your CLI's `--help`."
+                "To fix: remove `{first}` from SKILL.md, or add `{first}` to your CLI's `--help` \
+                 (then re-run `skillpack init --target all` to regenerate the documented flags \
+                 — `update`/`--fix` preserve body prose and can't refresh them)."
             ),
         );
         fail.location = Some(("SKILL.md".to_string(), line_hint));
@@ -735,8 +739,15 @@ fn diff_one_subcommand(bullet: &str, path: &[String], help: &str, report: &mut V
         report.push(CheckResult::fail(
             "invocation.subcommand_drift",
             &check_name,
-            format!("subcommand `{sub}` documents flags missing from `--help`: {}", drifted.join(", ")),
-            format!("To fix: remove the flags from SKILL.md's `{sub}` bullet, or add them to `{sub}`'s `--help`."),
+            format!(
+                "subcommand `{sub}` documents flags missing from `--help`: {}",
+                drifted.join(", ")
+            ),
+            format!(
+                "To fix: remove the flags from SKILL.md's `{sub}` bullet, or add them to `{sub}`'s \
+                 `--help` (then re-run `skillpack init --target all` to regenerate the subcommand \
+                 surface — `update`/`--fix` preserve body prose and can't refresh it)."
+            ),
         ));
     }
 
@@ -755,7 +766,10 @@ fn diff_one_subcommand(bullet: &str, path: &[String], help: &str, report: &mut V
                 "`{sub} --help` advertises flags the skill doesn't document: {}",
                 undocumented.join(", ")
             ),
-            format!("To fix: document these flags in SKILL.md's `{sub}` bullet."),
+            format!(
+                "To fix: document these flags in SKILL.md's `{sub}` bullet — or re-run `skillpack \
+                 init --target all` to regenerate them from `{sub} --help`."
+            ),
         ));
     }
 }

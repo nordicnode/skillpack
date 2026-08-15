@@ -598,8 +598,8 @@ fn render_one_target(
                 contents: rule,
             });
         }
-        Target::Qoder | Target::Continue | Target::Augment | Target::AmazonQ => {
-            // The four rules-directory targets share one shape: plain markdown
+        Target::Qoder | Target::Continue | Target::Augment | Target::AmazonQ | Target::Trae => {
+            // The rules-directory targets share one shape: plain markdown
             // (no frontmatter) under a per-ecosystem directory.
             let mut c = ctx.clone();
             c.insert("noun", "rule");
@@ -699,7 +699,8 @@ fn render_skill_file_only(
         | Target::Qoder
         | Target::Continue
         | Target::Augment
-        | Target::AmazonQ => {
+        | Target::AmazonQ
+        | Target::Trae => {
             let mut c = ctx.clone();
             c.insert("noun", "rule");
             let rule = tera
@@ -746,7 +747,7 @@ pub fn orphaned_skill_rel_paths(name: &str) -> Vec<String> {
     ]
 }
 
-/// the rule targets (Cline, Roo, Kilo, Qoder, Continue, Augment, Amazon Q).
+/// the rule targets (Cline, Roo, Kilo, Qoder, Continue, Augment, Amazon Q, Trae).
 fn rule_dir(target: Target) -> &'static str {
     match target {
         Target::Cline => ".clinerules",
@@ -756,6 +757,7 @@ fn rule_dir(target: Target) -> &'static str {
         Target::Continue => ".continue/rules",
         Target::Augment => ".augment/rules",
         Target::AmazonQ => ".amazonq/rules",
+        Target::Trae => ".trae/rules",
         _ => unreachable!("not a rules-directory target"),
     }
 }
@@ -971,6 +973,8 @@ pub fn category_hint(lang: Language) -> &'static str {
         Language::Erlang => "the Erlang/OTP tooling",
         Language::R => "the R tooling",
         Language::Perl => "the Perl tooling",
+        Language::Shell => "the shell tooling",
+        Language::Powershell => "the PowerShell tooling",
         Language::Unknown => "the tooling",
     }
 }
@@ -1090,6 +1094,8 @@ pub fn cursor_globs_hint(lang: Language) -> Vec<String> {
             "Makefile.PL".into(),
             "META.json".into(),
         ],
+        Language::Shell => vec!["*.sh".into(), "*.bash".into(), "*.zsh".into()],
+        Language::Powershell => vec!["*.ps1".into(), "*.psm1".into(), "*.psd1".into()],
         Language::Unknown => vec![],
     }
 }

@@ -3636,6 +3636,7 @@ fn self_dogfood_regenerated_artifacts_match_committed_byte_identical() {
         ".continue/rules/skillpack.md",
         ".augment/rules/skillpack.md",
         ".amazonq/rules/skillpack.md",
+        ".trae/rules/skillpack.md",
         ".goose/instructions.md",
     ] {
         let regen = fs::read_to_string(dest.join(rel)).unwrap_or_default();
@@ -4420,13 +4421,13 @@ fn target_all_with_dup_does_not_double_write() {
     // content. The marketplace.json is a single plugin entry; if Claude ran
     // twice, render would push duplicate GeneratedFileOutputs with the same
     // rel_path and write_files would write twice. Assert the summary line says
-    // 21: the Claude target emits 4 files (marketplace.json, plugin.json,
-    // skills/<name>/SKILL.md, .claude/skills/<name>/SKILL.md) + 17 more
-    // single-file targets = 21.
+    // 22: the Claude target emits 4 files (marketplace.json, plugin.json,
+    // skills/<name>/SKILL.md, .claude/skills/<name>/SKILL.md) + 18 more
+    // single-file targets = 22.
     let s = String::from_utf8_lossy(&out.stdout);
     assert!(
-        s.contains("wrote 21 file(s)"),
-        "dedup must reduce all+claude to 18 targets (21 files), got:\n{s}"
+        s.contains("wrote 22 file(s)"),
+        "dedup must reduce all+claude to 19 targets (22 files), got:\n{s}"
     );
 
     // Verify still passes — no corruption from the dedup path.
@@ -5830,5 +5831,289 @@ fn remove_last_skill_refuses_and_keeps_pack_intact() {
     assert!(
         cfg.contains("name = \"chronicle\""),
         "the config must survive a refused removal, got:\n{cfg}"
+    );
+}
+
+// A committed-but-corrupt skillpack.toml must FAIL verify: the pre-commit
+// gate runs ONLY `verify`, so without this check a broken config (which
+// breaks `init`/`update`/`--fix` replay) sails through the hook green.
+#[test]
+fn verify_fails_on_corrupt_skillpack_toml() {
+    let root = scratch_manifest_repo();
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+            "--description",
+            "Journal events to a log",
+            "--trigger",
+            "log events",
+            "--invocation",
+            "chronicle --new \"entry\"",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+    assert!(
+        root.join("skills/chronicle/SKILL.md").exists(),
+        "pack must be init'ed before corrupting the config"
+    );
+
+    // Corrupt the config: an unclosed array is invalid TOML.
+    fs::write(
+        root.join("skillpack.toml"),
+        fs::read_to_string(root.join("skillpack.toml"))
+            .unwrap()
+            .replace("license = \"MIT\"", "license = ["),
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "verify must fail on a corrupt config; got {:?}",
+        out.status
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.contains("skillpack.toml failed to parse"),
+        "verify must name the parse failure, got:\n{combined}"
+    );
+}
+
+// A secondary language whose manifest lives in a nested subdirectory (the
+// common monorepo layout: `web/`, `frontend/`, `packages/*`) must produce a
+// skill — and its cursor globs must be scoped to that subdirectory so the
+// rule auto-attaches only under `web/`, not the whole repo.
+// (unix-only: `--auto` needs the executable launcher the CLI probe spawns.)
+#[cfg(unix)]
+#[test]
+fn nested_polyglot_auto_creates_secondary_with_scoped_globs() {
+    let root = scratch_manifest_repo();
+    // `--auto` needs a detected CLI (else the primary is a library and it
+    // demands `--import`); fake a built binary like the polyglot test does.
+    fs::create_dir_all(root.join("target/release")).unwrap();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("target/release/chronicle"),
+        "#!/bin/sh\necho \"chronicle 0.1.0 --help\"\n",
+    )
+    .unwrap();
+    // Make the launcher executable so the CLI probe can spawn `--help`.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            root.join("target/release/chronicle"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+    fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+    fs::create_dir_all(root.join("web")).unwrap();
+    fs::write(
+        root.join("web/package.json"),
+        "{\n  \"name\": \"webui\",\n  \"version\": \"0.1.0\",\n  \"type\": \"module\"\n}\n",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--auto",
+            "--target",
+            "cursor",
+            "--author",
+            "Test Author",
+        ])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "nested polyglot init must succeed, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    let mdc = fs::read_to_string(root.join(".cursor/rules/chronicle-node.mdc"))
+        .expect("secondary skill .mdc must exist");
+    assert!(
+        mdc.contains("\"web/*.ts\""),
+        "node globs must be scoped to the web/ subdir, got:\n{mdc}"
+    );
+    assert!(
+        mdc.contains("\"web/package.json\""),
+        "manifest glob must be scoped to the web/ subdir, got:\n{mdc}"
+    );
+    assert!(
+        mdc.contains("import { … } from 'webui'"),
+        "import pattern must derive from the nested manifest name, got:\n{mdc}"
+    );
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success();
+}
+
+// A script-first repo (no language manifest, just shebang'd shell) must
+// detect as Shell and render a shell-shaped skill: its own category, *.sh
+// globs, and a source-able import pattern.
+#[test]
+fn shell_only_repo_renders_shell_skill() {
+    let root = tempfile::tempdir().unwrap().keep();
+    fs::create_dir_all(root.join("bin")).unwrap();
+    fs::write(
+        root.join("bin/tool.sh"),
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'usage: tool <cmd>\\n'\n",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--description",
+            "Shell helper tool",
+            "--trigger",
+            "shell chores",
+            "--import",
+            "source ./tool.sh",
+            "--target",
+            "cursor",
+            "--author",
+            "Test Author",
+        ])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "shell init must succeed, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // The skill name derives from the repo dir (no manifest carries a name),
+    // so locate the single generated rule instead of guessing its name.
+    let rule = fs::read_dir(root.join(".cursor/rules"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().and_then(|x| x.to_str()) == Some("mdc"))
+        .expect("shell rule must be generated");
+    let mdc = fs::read_to_string(rule).unwrap();
+    assert!(
+        mdc.contains("the shell tooling"),
+        "category must be shell-shaped, got:\n{mdc}"
+    );
+    assert!(
+        mdc.contains("\"*.sh\""),
+        "globs must match shell scripts, got:\n{mdc}"
+    );
+    assert!(
+        mdc.contains("source ./tool.sh"),
+        "import pattern must be shell-shaped, got:\n{mdc}"
+    );
+}
+
+// The debounced re-run loop: `verify --watch` must emit a SECOND report when
+// a watched file changes. The existing startup test only covers the banner +
+// initial report; this asserts the loop actually re-verifies.
+#[test]
+fn verify_watch_reruns_on_file_change() {
+    use std::io::BufRead;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::Duration;
+
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_skillpack"))
+        .args(["verify", "--watch", "--root", "."])
+        .current_dir(&root)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn verify --watch");
+
+    // Drain both pipes continuously so the child never blocks on a full pipe,
+    // and record everything for the assertions.
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let readers: Vec<Box<dyn std::io::Read + Send>> = vec![Box::new(stdout), Box::new(stderr)];
+    for reader in readers {
+        let lines = Arc::clone(&lines);
+        thread::spawn(move || {
+            let mut reader = std::io::BufReader::new(reader);
+            let mut buf = String::new();
+            while let Ok(n) = reader.read_line(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                lines.lock().unwrap().push(buf.clone());
+                buf.clear();
+            }
+        });
+    }
+
+    // Let the initial report land, then poke a watched file.
+    thread::sleep(Duration::from_secs(3));
+    let mut f = fs::OpenOptions::new()
+        .append(true)
+        .open(root.join("skillpack.toml"))
+        .unwrap();
+    use std::io::Write;
+    writeln!(f, "# watch-rerun probe").unwrap();
+    drop(f);
+    thread::sleep(Duration::from_secs(4));
+
+    child.kill().expect("kill watch process");
+    let _ = child.wait();
+
+    let collected = lines.lock().unwrap().join("");
+    let reports = collected.matches("discoverability score").count();
+    assert!(
+        reports >= 2,
+        "watch must re-run verify after a file change (saw {reports} report(s)); output:\n{collected}"
     );
 }

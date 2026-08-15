@@ -32,6 +32,7 @@ def sha256_of(url: str) -> str:
 
 
 def main() -> int:
+    dry_run = "--dry-run" in sys.argv[1:]
     lines = FORMULA.read_text().splitlines()
     out = []
     updated = 0
@@ -43,8 +44,12 @@ def main() -> int:
             out.append(line)
             i += 1
             continue
-        out.append(line)
-        out.append(f'{m.group(1)}sha256 "{sha256_of(m.group(2))}"')
+        digest = sha256_of(m.group(2))
+        if dry_run:
+            print(f"{m.group(2)} -> {digest}")
+        else:
+            out.append(line)
+            out.append(f'{m.group(1)}sha256 "{digest}"')
         updated += 1
         i += 1
         # Drop a pre-existing sha256 line (or the re-pin reminder comment the
@@ -53,8 +58,11 @@ def main() -> int:
             lines[i].lstrip().startswith("sha256 ") or "re-pin sha256" in lines[i]
         ):
             i += 1
-    FORMULA.write_text("\n".join(out) + "\n")
-    print(f"updated {updated} sha256 pin(s) in {FORMULA}")
+    if not dry_run:
+        FORMULA.write_text("\n".join(out) + "\n")
+        print(f"updated {updated} sha256 pin(s) in {FORMULA}")
+    else:
+        print(f"dry run: {updated} sha256 pin(s) would be updated (formula untouched)")
     return 0
 
 

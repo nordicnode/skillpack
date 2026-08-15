@@ -3,5 +3,5 @@
   description: Verify that agent distribution files (AGENTS.md, Claude Code, Cursor, Codex) are up-to-date and valid.
   entry: skillpack verify --min-score 100
   language: rust
-  files: ^(\.claude-plugin/|\.claude/skills/|skills/|\.cursor/|\.codex/|\.opencode/|\.windsurf/|\.clinerules/|\.roo/|\.kilocode/|\.qoder/|\.continue/|\.augment/|\.amazonq/|\.goose/|\.github/copilot-instructions\.md|AGENTS\.md|CLAUDE\.md|GEMINI\.md|CONVENTIONS\.md|skillpack\.toml)
+  files: ^(\.claude-plugin/|\.claude/skills/|skills/|\.cursor/|\.codex/|\.opencode/|\.windsurf/|\.clinerules/|\.roo/|\.kilocode/|\.qoder/|\.continue/|\.augment/|\.amazonq/|\.trae/|\.goose/|\.github/copilot-instructions\.md|AGENTS\.md|CLAUDE\.md|GEMINI\.md|CONVENTIONS\.md|skillpack\.toml)
   pass_filenames: false

@@ -136,6 +136,7 @@ Running `skillpack init --target all` generates a clean, non-intrusive distribut
 | **Continue** | `.continue/rules/<tool>.md` | Rule files for Continue.dev. |
 | **Augment Code** | `.augment/rules/<tool>.md` | Project instruction files for Augment Code. |
 | **Amazon Q Developer** | `.amazonq/rules/<tool>.md` | Project rules for AWS's Amazon Q Developer. |
+| **Trae** | `.trae/rules/<tool>.md` | Workspace rules for Trae IDE. |
 | **Goose** | `.goose/instructions.md` | Project instructions for Block's Goose agent. |
 | **Deterministic Config** | `skillpack.toml` | Committed configuration making future updates and CI checks deterministic (JSON Schema at `skillpack.schema.json`). |
 
@@ -241,6 +242,16 @@ repos:
 * **Erlang**: `rebar.config` / `*.app.src` (name/version detection).
 * **R**: `DESCRIPTION` / `NAMESPACE` and `Rscript` entrypoints.
 * **Perl**: `cpanfile` / `Makefile.PL` / `META.json` and `perl` script entrypoints.
+* **Shell / Bash**: shebang'd `*.sh` entrypoints (root, `bin/`, `scripts/`, `src/`) and `bash <script>` probes.
+* **PowerShell**: `.ps1` / `.psm1` / `.psd1` scripts and `pwsh -File` probes.
+
+> Script-first ecosystems (Shell/PowerShell) are primary-only: a helper `.sh` or
+> `.ps1` inside an otherwise manifest'd repo never mints a secondary skill — only
+> a repo whose *main* deliverable is scripts gets the Shell/PowerShell category.
+>
+> Agents that read `AGENTS.md` natively (Zed, Cody, Kimi CLI, Devin, JetBrains
+> Junie, Freebuff, Warp, Aider) are covered by the `agentsmd` target — no
+> per-agent file needed.
 
 ---
 

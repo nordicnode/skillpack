@@ -109,6 +109,8 @@ pub(crate) fn primary_cli_candidate(
         Language::Erlang => erlang_cli_candidate(root, name),
         Language::R => r_cli_candidate(root, name),
         Language::Perl => perl_cli_candidate(root, name),
+        Language::Shell => shell_cli_candidate(root, name),
+        Language::Powershell => powershell_cli_candidate(root, name),
         Language::Nix => None,
         Language::Unknown => which_on_path(name).map(|_| CliCandidate {
             argv: vec![name.to_string()],
@@ -863,6 +865,61 @@ fn perl_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
         if root.join(script).is_file() {
             return Some(CliCandidate {
                 argv: vec![perl, script.clone()],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    None
+}
+
+/// Shell: `bash <script>` against a conventional entry point, so a `--help`
+/// probe works even when the script isn't marked executable. Requires `bash`
+/// on PATH (present on unix + Git Bash on Windows); honest `None` otherwise.
+fn shell_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let bash = which_on_path("bash")?.to_string_lossy().to_string();
+    for script in &[
+        format!("bin/{name}.sh"),
+        format!("bin/{name}"),
+        format!("scripts/{name}.sh"),
+        format!("src/{name}.sh"),
+        format!("{name}.sh"),
+        "main.sh".to_string(),
+        "cli.sh".to_string(),
+    ] {
+        if root.join(script).is_file() {
+            return Some(CliCandidate {
+                argv: vec![bash, script.clone()],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    None
+}
+
+/// PowerShell: `pwsh -NoProfile -File <script>` (falling back to the Windows
+/// `powershell.exe` when pwsh isn't installed). Requires the runtime on PATH;
+/// honest `None` otherwise.
+fn powershell_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let pwsh = which_on_path("pwsh")
+        .or_else(|| which_on_path("powershell"))?
+        .to_string_lossy()
+        .to_string();
+    for script in &[
+        format!("bin/{name}.ps1"),
+        format!("scripts/{name}.ps1"),
+        format!("src/{name}.ps1"),
+        format!("{name}.ps1"),
+        "main.ps1".to_string(),
+        "cli.ps1".to_string(),
+    ] {
+        if root.join(script).is_file() {
+            return Some(CliCandidate {
+                argv: vec![
+                    pwsh,
+                    "-NoProfile".to_string(),
+                    "-File".to_string(),
+                    script.clone(),
+                ],
                 spawn_cwd: root.to_path_buf(),
             });
         }

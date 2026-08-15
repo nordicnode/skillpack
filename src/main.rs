@@ -247,6 +247,23 @@ fn auto_intents(
     for lang in &profile.secondary_languages {
         let lang_str = lang.as_str();
         let skill_name = format!("{primary_name}-{lang_str}");
+        // The manifest may live in a nested subdirectory (web/, frontend/,
+        // packages/*) — resolve it so the import pattern uses the real
+        // package/crate/module name and the globs auto-attach only under
+        // that subdirectory.
+        let manifest_dir =
+            introspect::language_manifest_dir(root, *lang).unwrap_or_else(|| root.to_path_buf());
+        let globs = generate::cursor_globs_hint(*lang);
+        let globs = match manifest_dir.strip_prefix(root) {
+            Ok(rel) if !rel.as_os_str().is_empty() => {
+                let prefix = rel.to_string_lossy().replace('\\', "/");
+                globs
+                    .into_iter()
+                    .map(|g| format!("{prefix}/{g}"))
+                    .collect::<Vec<_>>()
+            }
+            _ => globs,
+        };
         out.push((
             skill_name.clone(),
             types::Intent {
@@ -256,12 +273,12 @@ fn auto_intents(
                 // Library-style: the pattern is derived from the secondary
                 // language's manifest (package/crate/module name) so the skill
                 // renders the import branch, not the primary CLI's invocation.
-                import_pattern: Some(secondary_import_pattern(*lang, root, &skill_name)),
+                import_pattern: Some(secondary_import_pattern(*lang, &manifest_dir, &skill_name)),
                 // Language-correct derived-field overrides: the profile's
                 // dominant language (e.g. Rust) must not leak into the
                 // secondary skill's category/globs/opencode-mode.
                 category: Some(generate::category_hint(*lang).to_string()),
-                globs: Some(generate::cursor_globs_hint(*lang)),
+                globs: Some(globs),
                 opencode_mode: Some("subagent".to_string()),
                 author: profile.authors.clone(),
                 license: profile.license.clone().or_else(|| Some("MIT".to_string())),
@@ -307,6 +324,8 @@ fn secondary_import_pattern(lang: types::Language, root: &Path, fallback: &str) 
         types::Language::Erlang => format!("application:ensure_all_started({name})."),
         types::Language::R => format!("library({name})"),
         types::Language::Perl => format!("use {name};"),
+        types::Language::Shell => format!("source ./{name}.sh"),
+        types::Language::Powershell => format!("Import-Module {name}"),
         types::Language::Unknown => {
             format!("(no standard import form for {name}; document it via `skillpack update`)")
         }
@@ -349,8 +368,9 @@ fn auto_intent(
         .filter(|s| !s.is_empty())
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "--auto could not derive a description (no README hint found). \
-                 Pass --description, or run `skillpack init` interactively."
+                "--auto could not derive a description (no README hint or manifest \
+                 description found). Pass --description, or run `skillpack init` \
+                 interactively."
             )
         })?;
 
@@ -1644,6 +1664,7 @@ fn detect_present_targets(root: &Path) -> Vec<Target> {
         (Target::Continue, ".continue/rules"),
         (Target::Augment, ".augment/rules"),
         (Target::AmazonQ, ".amazonq/rules"),
+        (Target::Trae, ".trae/rules"),
         (
             Target::Copilot,
             crate::verify::schema::COPILOT_INSTRUCTIONS_PATH,
@@ -1950,6 +1971,12 @@ fn first_differing_line(committed: &str, candidate: &str) -> String {
 /// files (`.clinerules/`, `.roo/rules/`, `.kilocode/rules/`) are NOT included
 /// — `split_frontmatter` would return None on them.
 fn is_frontmatter_target(rel_path: &str) -> bool {
+    // The plain-markdown rules-directory targets have NO YAML frontmatter, so
+    // they must take the full-render path — splicing "fresh frontmatter + body"
+    // onto a frontmatter-less file would append a spurious blank line and make
+    // an update-written file look permanently drifted. Keep this list in sync
+    // with `generate::rule_dir` (every rules-directory target must appear in
+    // both places).
     if rel_path.starts_with(".clinerules/")
         || rel_path.starts_with(".roo/rules/")
         || rel_path.starts_with(".kilocode/rules/")
@@ -1957,6 +1984,7 @@ fn is_frontmatter_target(rel_path: &str) -> bool {
         || rel_path.starts_with(".continue/rules/")
         || rel_path.starts_with(".augment/rules/")
         || rel_path.starts_with(".amazonq/rules/")
+        || rel_path.starts_with(".trae/rules/")
     {
         return false;
     }
@@ -2270,6 +2298,34 @@ mod confirm_tests {
     use super::*;
 
     #[test]
+    fn is_frontmatter_target_excludes_every_rules_directory() {
+        // Every plain-markdown rules-directory target must take the full-render
+        // path (a frontmatter-less file spliced as "frontmatter + body" grows a
+        // spurious blank line and looks permanently drifted). Keep in sync with
+        // `generate::rule_dir` — a new rules target that misses this list would
+        // hit exactly that bug.
+        for dir in [
+            ".clinerules",
+            ".roo/rules",
+            ".kilocode/rules",
+            ".qoder/rules",
+            ".continue/rules",
+            ".augment/rules",
+            ".amazonq/rules",
+            ".trae/rules",
+        ] {
+            assert!(
+                !is_frontmatter_target(&format!("{dir}/x.md")),
+                "{dir} rules must be treated as plain markdown"
+            );
+        }
+        // Frontmatter-bearing shapes must stay on the splice path.
+        assert!(is_frontmatter_target("skills/x/SKILL.md"));
+        assert!(is_frontmatter_target(".codex/skills/x/SKILL.md"));
+        assert!(is_frontmatter_target(".cursor/rules/x.mdc"));
+    }
+
+    #[test]
     fn keep_anyway_routes_through_overridable_confirm() {
         // A canned "no" aborts; a canned "yes" proceeds. Both go through the
         // same CONFIRM dispatch the real pre-commit gate uses (Improvement E).
@@ -2468,11 +2524,12 @@ mod confirm_tests {
     fn default_refresh_targets_falls_back_to_all_when_nothing_present() {
         let root = scratch_dir("empty");
         let targets = default_refresh_targets(&root).unwrap();
-        assert_eq!(targets.len(), 18, "fallback must be the full target set");
+        assert_eq!(targets.len(), 19, "fallback must be the full target set");
         assert!(targets.contains(&Target::Claude));
         assert!(targets.contains(&Target::Goose));
         assert!(targets.contains(&Target::Qoder));
         assert!(targets.contains(&Target::AmazonQ));
+        assert!(targets.contains(&Target::Trae));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

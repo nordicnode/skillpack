@@ -82,15 +82,29 @@ pub fn run(
     // project name. Build the allowed set from skillpack.toml so the
     // name_drift warn fires only for genuinely unknown names. The canonical
     // name is added by the caller (profile_name), so we only need the extras.
-    let allowed_skill_names: std::collections::HashSet<String> =
-        match crate::config::Config::load(root) {
-            Ok(Some(cfg)) => cfg
-                .to_intents()
-                .into_iter()
-                .map(|(n, _)| crate::generate::coerce_kebab(&n))
-                .collect(),
-            _ => std::collections::HashSet::new(),
-        };
+    let allowed_skill_names: std::collections::HashSet<String> = match crate::config::Config::load(
+        root,
+    ) {
+        Ok(Some(cfg)) => cfg
+            .to_intents()
+            .into_iter()
+            .map(|(n, _)| crate::generate::coerce_kebab(&n))
+            .collect(),
+        Ok(None) => std::collections::HashSet::new(),
+        // A committed-but-unparseable skillpack.toml is a hard failure: it
+        // breaks `init`/`update`/`--fix` replay and the pre-commit gate
+        // runs ONLY `verify`, so this check is what keeps a broken config
+        // from sailing through the hook.
+        Err(e) => {
+            out.push(CheckResult::fail(
+                    "discovery.config.parse",
+                    "skillpack.toml parses and validates",
+                    format!("skillpack.toml failed to parse: {e}"),
+                    "To fix: repair the config, or run `skillpack config --validate` for the exact error.",
+                ));
+            std::collections::HashSet::new()
+        }
+    };
 
     // Claude Code: marketplace.json + plugin.json + skills/<name>/SKILL.md.
     // The marketplace/plugin checks only run when the Claude distribution is
@@ -277,6 +291,11 @@ pub fn run(
             schema::AMAZONQ_RULES_DIR,
             "discovery.amazonq.rule",
             "skillpack init --target amazonq",
+        ),
+        (
+            schema::TRAE_RULES_DIR,
+            "discovery.trae.rule",
+            "skillpack init --target trae",
         ),
     ] {
         let rules = plainmd::find_rule_files(root, dir);

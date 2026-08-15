@@ -16,7 +16,8 @@
 //! exist we pick the one most likely to *ship a CLI* (Rust, then node), which
 //! matches the polyglot-monorepo reality.
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
@@ -40,8 +41,6 @@ pub(crate) use cli_candidates::which_on_path;
 pub use manifest::project_manifest_name;
 pub(crate) use manifest::{project_manifest_version, select_csproj};
 pub(crate) use repo::{normalize_git_url, urls_equivalent};
-#[cfg(test)]
-use std::path::PathBuf;
 pub(crate) use workspace::{
     first_cargo_member_name, first_npm_member_name, is_cargo_workspace_only, is_npm_workspace_only,
 };
@@ -128,91 +127,230 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
 /// `Makefile`-only is deliberately NOT a C/C++ signal here — a bare Makefile
 /// is ubiquitous in polyglot repos and would false-flag almost every one.
 pub(crate) fn detect_all_languages(root: &Path) -> Vec<Language> {
-    let mut langs = Vec::new();
-    let signals: &[(Language, bool)] = &[
-        (Language::Rust, root.join("Cargo.toml").exists()),
-        (Language::Node, root.join("package.json").exists()),
-        (
-            Language::Python,
-            root.join("pyproject.toml").exists()
-                || root.join("setup.py").exists()
-                || root.join("setup.cfg").exists(),
-        ),
-        (Language::Go, root.join("go.mod").exists()),
-        (Language::Php, root.join("composer.json").exists()),
-        (
-            Language::Jvm,
-            root.join("pom.xml").exists()
-                || root.join("build.gradle").exists()
-                || root.join("build.gradle.kts").exists(),
-        ),
-        (Language::CSharp, cli_probe::has_csproj(root)),
-        (
-            Language::Ruby,
-            root.join("Gemfile").exists() || cli_probe::has_gemspec(root),
-        ),
-        (
-            Language::Zig,
-            root.join("build.zig").exists() || root.join("build.zig.zon").exists(),
-        ),
-        (Language::Swift, root.join("Package.swift").exists()),
-        (
-            Language::CCpp,
-            root.join("CMakeLists.txt").exists() || root.join("meson.build").exists(),
-        ),
-        (Language::Elixir, root.join("mix.exs").exists()),
-        (
-            Language::Deno,
-            root.join("deno.json").exists() || root.join("deno.jsonc").exists(),
-        ),
-        (
-            Language::Nix,
-            root.join("flake.nix").exists()
-                || root.join("shell.nix").exists()
-                || root.join("default.nix").exists(),
-        ),
-        (Language::Dart, root.join("pubspec.yaml").exists()),
-        (
-            Language::Haskell,
-            root.join("stack.yaml").exists()
-                || root.join("cabal.project").exists()
-                || cli_probe::has_cabal_file(root),
-        ),
-        (
-            Language::Lua,
-            cli_probe::has_file_with_ext(root, "rockspec"),
-        ),
-        (Language::Julia, root.join("Project.toml").exists()),
-        (Language::Crystal, root.join("shard.yml").exists()),
-        (
-            Language::Clojure,
-            root.join("deps.edn").exists() || root.join("project.clj").exists(),
-        ),
-        (
-            Language::Ocaml,
-            root.join("dune-project").exists() || cli_probe::has_file_with_ext(root, "opam"),
-        ),
-        (
-            Language::Erlang,
-            root.join("rebar.config").exists() || cli_probe::has_file_ending_with(root, ".app.src"),
-        ),
-        (
-            Language::R,
-            cli_probe::root_file_contains(root, "DESCRIPTION", "Package:"),
-        ),
-        (
-            Language::Perl,
-            root.join("cpanfile").exists()
-                || root.join("Makefile.PL").exists()
-                || root.join("META.json").exists(),
-        ),
+    // Declaration order = canonical order (mirrors `detect_language`'s
+    // precedence for the root: Rust beats Node, etc.).
+    const ORDER: [Language; 24] = [
+        Language::Rust,
+        Language::Node,
+        Language::Python,
+        Language::Go,
+        Language::Php,
+        Language::Jvm,
+        Language::CSharp,
+        Language::Ruby,
+        Language::Zig,
+        Language::Swift,
+        Language::CCpp,
+        Language::Elixir,
+        Language::Deno,
+        Language::Nix,
+        Language::Dart,
+        Language::Haskell,
+        Language::Lua,
+        Language::Julia,
+        Language::Crystal,
+        Language::Clojure,
+        Language::Ocaml,
+        Language::Erlang,
+        Language::R,
+        Language::Perl,
     ];
-    for (lang, present) in signals {
-        if *present {
-            langs.push(*lang);
+    // Walk the nested subdirectories once and reuse the list across every
+    // language check (a 24× walk of a 50-dir monorepo would be wasteful).
+    let nested = nested_dirs(root);
+    let mut langs = Vec::new();
+    for lang in ORDER {
+        if language_present(root, lang) || nested.iter().any(|d| language_present(d, lang)) {
+            langs.push(lang);
         }
     }
     langs
+}
+
+/// The directory holding `lang`'s manifest: the root when the manifest sits
+/// there, otherwise the first nested match (bounded walk, depth ≤ 2, noise
+/// dirs skipped). `pub` (not `pub(crate)`) because the bin target's
+/// `auto_intents` uses it to scope a secondary skill's import pattern and
+/// cursor globs to the subdirectory the manifest lives in.
+pub fn language_manifest_dir(root: &Path, lang: Language) -> Option<PathBuf> {
+    if language_present(root, lang) {
+        return Some(root.to_path_buf());
+    }
+    nested_dirs(root)
+        .into_iter()
+        .find(|d| language_present(d, lang))
+}
+
+/// Bounded list of candidate subdirectories that could hold a secondary
+/// language's manifest: depth-1 then depth-2 entries, sorted for
+/// cross-platform determinism, skipping noise dirs and dot-dirs (VCS
+/// metadata, vendored/generated trees, test fixtures).
+fn nested_dirs(root: &Path) -> Vec<PathBuf> {
+    fn depth1_dirs(dir: &Path) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir() && !is_noise_dir(p))
+            .collect();
+        dirs.sort();
+        dirs
+    }
+
+    let mut out = Vec::new();
+    for d in depth1_dirs(root) {
+        out.push(d.clone());
+        out.extend(depth1_dirs(&d));
+    }
+    out
+}
+
+/// Skip VCS/metadata, vendored/generated trees, and test-fixture dirs when
+/// hunting for secondary-language manifests.
+fn is_noise_dir(p: &Path) -> bool {
+    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    name.starts_with('.')
+        || matches!(
+            name,
+            "node_modules"
+                | "target"
+                | "dist"
+                | "build"
+                | "out"
+                | "vendor"
+                | "venv"
+                | "__pycache__"
+                | "coverage"
+                | "Pods"
+                | "bazel-bin"
+                | "bazel-out"
+                | "tests"
+                | "test"
+                | "docs"
+        )
+}
+
+/// Per-directory signal check for one language, mirroring the conditions in
+/// `detect_language`'s chain — keep the two in sync. Used by
+/// `detect_all_languages` / `language_manifest_dir` to probe the root and
+/// nested subdirectories alike. `CCpp` deliberately omits the bare
+/// `Makefile` signal here (weak and shared across ecosystems), matching the
+/// pre-nested-walk behavior; `detect_language` still honors Makefile for the
+/// PRIMARY.
+fn language_present(dir: &Path, lang: Language) -> bool {
+    match lang {
+        Language::Rust => dir.join("Cargo.toml").exists(),
+        Language::Node => dir.join("package.json").exists(),
+        Language::Python => {
+            dir.join("pyproject.toml").exists()
+                || dir.join("setup.py").exists()
+                || dir.join("setup.cfg").exists()
+        }
+        Language::Go => dir.join("go.mod").exists(),
+        Language::Php => dir.join("composer.json").exists(),
+        Language::Jvm => {
+            dir.join("pom.xml").exists()
+                || dir.join("build.gradle").exists()
+                || dir.join("build.gradle.kts").exists()
+        }
+        Language::CSharp => cli_probe::has_csproj(dir),
+        Language::Ruby => dir.join("Gemfile").exists() || cli_probe::has_gemspec(dir),
+        Language::Zig => dir.join("build.zig").exists() || dir.join("build.zig.zon").exists(),
+        Language::Swift => dir.join("Package.swift").exists(),
+        Language::CCpp => dir.join("CMakeLists.txt").exists() || dir.join("meson.build").exists(),
+        Language::Elixir => dir.join("mix.exs").exists(),
+        Language::Deno => dir.join("deno.json").exists() || dir.join("deno.jsonc").exists(),
+        Language::Nix => {
+            dir.join("flake.nix").exists()
+                || dir.join("shell.nix").exists()
+                || dir.join("default.nix").exists()
+        }
+        Language::Dart => dir.join("pubspec.yaml").exists(),
+        Language::Haskell => {
+            dir.join("stack.yaml").exists()
+                || dir.join("cabal.project").exists()
+                || cli_probe::has_cabal_file(dir)
+        }
+        Language::Lua => cli_probe::has_file_with_ext(dir, "rockspec"),
+        Language::Julia => dir.join("Project.toml").exists(),
+        Language::Crystal => dir.join("shard.yml").exists(),
+        Language::Clojure => dir.join("deps.edn").exists() || dir.join("project.clj").exists(),
+        Language::Ocaml => {
+            dir.join("dune-project").exists() || cli_probe::has_file_with_ext(dir, "opam")
+        }
+        Language::Erlang => {
+            dir.join("rebar.config").exists() || cli_probe::has_file_ending_with(dir, ".app.src")
+        }
+        Language::R => cli_probe::root_file_contains(dir, "DESCRIPTION", "Package:"),
+        Language::Perl => {
+            dir.join("cpanfile").exists()
+                || dir.join("Makefile.PL").exists()
+                || dir.join("META.json").exists()
+        }
+        // Script-first ecosystems are PRIMARY-only: `detect_language` covers
+        // them via `shell_project`/`powershell_project`, but weak signals
+        // like a stray `*.sh` must not mint a secondary skill.
+        Language::Shell | Language::Powershell | Language::Unknown => false,
+    }
+}
+
+/// True when the repo's primary surface is shell scripting: a shebang'd
+/// `*.sh` at the root (excluding the ubiquitous install/setup/configure
+/// helpers that tag along with non-shell projects) or under `bin/`/
+/// `scripts/`/`src/`. Weak but sufficient — this branch only fires when NO
+/// other language manifest exists.
+fn shell_project(root: &Path) -> bool {
+    fn has_shell_shebang(p: &Path) -> bool {
+        fs::read_to_string(p)
+            .ok()
+            .and_then(|c| c.lines().next().map(str::to_string))
+            .is_some_and(|l| {
+                l.starts_with("#!")
+                    && (l.contains("bash") || l.contains("/sh") || l.contains("zsh"))
+            })
+    }
+    if let Ok(rd) = fs::read_dir(root) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) == Some("sh") {
+                let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                if !matches!(stem, "install" | "setup" | "configure") && has_shell_shebang(&p) {
+                    return true;
+                }
+            }
+        }
+    }
+    for sub in ["bin", "scripts", "src"] {
+        if let Ok(rd) = fs::read_dir(root.join(sub)) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.extension().and_then(|x| x.to_str()) == Some("sh") && has_shell_shebang(&p) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// True when the repo ships PowerShell scripts/modules (`.ps1`/`.psm1`/
+/// `.psd1`) at the root or under `bin`/`src`/`scripts`/`tools`. Same weak
+/// primary-only status as [`shell_project`].
+fn powershell_project(root: &Path) -> bool {
+    for sub in ["", "bin", "src", "scripts", "tools"] {
+        if let Ok(rd) = fs::read_dir(root.join(sub)) {
+            for e in rd.flatten() {
+                if matches!(
+                    e.path().extension().and_then(|x| x.to_str()),
+                    Some("ps1") | Some("psm1") | Some("psd1")
+                ) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Detect the dominant language by checking for known manifests. Each falsy
@@ -314,6 +452,10 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
         || root.join("META.json").exists()
     {
         Language::Perl
+    } else if shell_project(root) {
+        Language::Shell
+    } else if powershell_project(root) {
+        Language::Powershell
     } else {
         diag.push(
             "detect_language",
@@ -323,7 +465,8 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
                 + "*.csproj, build.zig, Package.swift, CMakeLists.txt, meson.build, Makefile, mix.exs, deno.json, "
                 + "flake.nix, shell.nix, pubspec.yaml, stack.yaml, *.cabal, *.rockspec, Project.toml, "
                 + "shard.yml, deps.edn, project.clj, dune-project, *.opam, rebar.config, *.app.src, "
-                + "DESCRIPTION, cpanfile, Makefile.PL, META.json); "
+                + "DESCRIPTION, cpanfile, Makefile.PL, META.json, shell scripts (*.sh with a shebang), "
+                + "powershell (*.ps1/psm1/psd1)); "
                 + "language detected as Unknown",
         );
         Language::Unknown
@@ -370,7 +513,11 @@ mod parse_tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         for (rel, contents) in files {
-            std::fs::write(root.join(rel), contents).unwrap();
+            let p = root.join(rel);
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(p, contents).unwrap();
         }
         root
     }
@@ -423,6 +570,72 @@ mod parse_tests {
     fn detect_all_languages_empty_for_no_manifests() {
         let root = scratch(&[]);
         assert!(detect_all_languages(&root).is_empty());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn detect_language_recognizes_shell_and_powershell() {
+        let mut diag = DiagTrace::default();
+
+        let shell = scratch(&[("bin/tool.sh", "#!/usr/bin/env bash\nset -euo pipefail\n")]);
+        assert_eq!(detect_language(&shell, &mut diag), Language::Shell);
+        cleanup(&shell);
+
+        // Root-level shebang'd script, excluding generic helper names.
+        let shell_root = scratch(&[("myscript.sh", "#!/bin/bash\necho hi\n")]);
+        assert_eq!(detect_language(&shell_root, &mut diag), Language::Shell);
+        cleanup(&shell_root);
+
+        // `install.sh` alone is not a shell project (ships with every
+        // ecosystem); falls through to Unknown.
+        let only_install = scratch(&[("install.sh", "#!/bin/sh\nset -e\n")]);
+        assert_eq!(detect_language(&only_install, &mut diag), Language::Unknown);
+        cleanup(&only_install);
+
+        let ps = scratch(&[("bin/tool.ps1", "Write-Host \"hi\"\n")]);
+        assert_eq!(detect_language(&ps, &mut diag), Language::Powershell);
+        cleanup(&ps);
+
+        let psm = scratch(&[("MyModule.psm1", "function Invoke-Hi {}\n")]);
+        assert_eq!(detect_language(&psm, &mut diag), Language::Powershell);
+        cleanup(&psm);
+    }
+
+    #[test]
+    fn detect_all_languages_finds_nested_monorepo_languages() {
+        let root = scratch(&[
+            ("Cargo.toml", "[package]\nname = \"x\"\n"),
+            ("web/package.json", "{}"),
+            ("packages/app/package.json", "{}"),
+            // Noise: fixtures and vendored trees must not mint skills.
+            ("tests/fixtures/package.json", "{}"),
+            ("node_modules/pkg/package.json", "{}"),
+            ("target/debug/package.json", "{}"),
+        ]);
+        let langs = detect_all_languages(&root);
+        assert_eq!(langs, vec![Language::Rust, Language::Node]);
+        let dir = language_manifest_dir(&root, Language::Node).unwrap();
+        assert_ne!(
+            dir, root,
+            "nested Node manifest must resolve away from the root"
+        );
+        assert!(
+            dir.join("package.json").exists(),
+            "resolved dir must actually hold the manifest: {}",
+            dir.display()
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn detect_all_languages_excludes_shell_secondaries() {
+        // A Rust repo with a helper script is Rust-only; shell never becomes
+        // a secondary skill.
+        let root = scratch(&[
+            ("Cargo.toml", "[package]\nname = \"x\"\n"),
+            ("scripts/ci.sh", "#!/usr/bin/env bash\nset -e\n"),
+        ]);
+        assert_eq!(detect_all_languages(&root), vec![Language::Rust]);
         cleanup(&root);
     }
 

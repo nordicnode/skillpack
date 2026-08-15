@@ -146,6 +146,8 @@ pub enum Language {
     Erlang,
     R,
     Perl,
+    Shell,
+    Powershell,
     Unknown,
 }
 
@@ -176,6 +178,8 @@ impl Language {
             Self::Erlang => "erlang",
             Self::R => "r",
             Self::Perl => "perl",
+            Self::Shell => "shell",
+            Self::Powershell => "powershell",
             Self::Unknown => "unknown",
         }
     }
