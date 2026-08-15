@@ -62,20 +62,24 @@ static TERA: Lazy<Tera> = Lazy::new(|| {
     tera
 });
 
-/// The three files `init` emits, relative to the project root. Documented for
-/// external tooling/tests; the renderer computes paths itself.
+/// The four files the Claude target emits, relative to the project root.
+/// Documented for external tooling/tests; the renderer computes paths itself.
 #[allow(dead_code)]
-pub const OUTPUT_PATHS: [&str; 3] = [
+pub const OUTPUT_PATHS: [&str; 4] = [
     ".claude-plugin/marketplace.json",
     ".claude-plugin/plugin.json",
     "skills/<tool>/SKILL.md",
+    ".claude/skills/<tool>/SKILL.md",
 ];
 
 /// Build the full Tera context from profile + intent.
 pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
     let name = coerce_kebab(&profile.name);
     let keywords = Keywords {
-        inner: derive_keywords(profile, intent),
+        inner: intent
+            .keywords
+            .clone()
+            .unwrap_or_else(|| derive_keywords(profile, intent)),
     };
     // `display_name` is the human label for the tool in prose ("Do not use
     // this skill if the user only wants to *read* {{ display_name }}"). It is
@@ -154,6 +158,27 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         .map(crate::introspect::normalize_git_url)
         .unwrap_or_default();
 
+    // Derived-field overrides (skillpack.toml) — power users can pin the
+    // otherwise language-derived values. Each falls back to the language hint
+    // when the config omits it, so existing packs render byte-identically.
+    let category = intent
+        .category
+        .clone()
+        .unwrap_or_else(|| category_hint(profile.language).to_string());
+    let allowed_tools = intent
+        .allowed_tools
+        .clone()
+        .or_else(|| allowed_tools_hint(profile.language).map(str::to_string));
+    let globs_list = intent
+        .globs
+        .clone()
+        .unwrap_or_else(|| cursor_globs_hint(profile.language));
+    let globs_yaml = globs_to_yaml(&globs_list);
+    let opencode_mode = intent
+        .opencode_mode
+        .clone()
+        .unwrap_or_else(|| opencode_mode_hint(profile.language).to_string());
+
     tera::Context::from_serialize(serde_json::json!({
         "name": name,
         "display_name": display_name,
@@ -173,10 +198,10 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         "import_pattern": intent.import_pattern,
         "documented_flags": documented_flags,
         "documented_subcommands": documented_subcommands,
-        "category_hint": category_hint(profile.language),
-        "allowed_tools": allowed_tools_hint(profile.language),
-        "globs": cursor_globs_yaml(profile.language),
-        "opencode_mode": opencode_mode_hint(profile.language),
+        "category_hint": category,
+        "allowed_tools": allowed_tools,
+        "globs": globs_yaml,
+        "opencode_mode": opencode_mode,
         "footguns": &intent.footguns,
     }))
     .expect("Tera context serializes from JSON literal")
@@ -198,8 +223,10 @@ fn one_line_description_yaml(s: &str) -> String {
     escape_yaml(s)
 }
 
-/// Renders all three files and returns them with their root-relative paths.
-/// The skill path uses the kebab name.
+/// Renders the Claude distribution files and returns them with their
+/// root-relative paths. The skill path uses the kebab name, emitted at BOTH
+/// the plugin path (`skills/<name>/SKILL.md`) and the native Claude Code path
+/// (`.claude/skills/<name>/SKILL.md`) — same content, two directories.
 pub fn render(
     profile: &ProjectProfile,
     intent: &Intent,
@@ -231,6 +258,10 @@ pub fn render(
         },
         GeneratedFileOutput {
             rel_path: format!("skills/{name}/SKILL.md"),
+            contents: skill.clone(),
+        },
+        GeneratedFileOutput {
+            rel_path: format!(".claude/skills/{name}/SKILL.md"),
             contents: skill,
         },
     ])
@@ -301,9 +332,7 @@ pub fn render_all(
             let mut ctx = build_context(profile, intent);
             let dir = coerce_kebab(skill_name);
             ctx.insert("name", &dir);
-            if let Some(f) = render_skill_file_only(&tera, &ctx, target, &dir)? {
-                out.push(f);
-            }
+            out.extend(render_skill_file_only(&tera, &ctx, target, &dir)?);
         }
     }
     Ok(out)
@@ -322,10 +351,11 @@ fn render_one_target(
     let mut out = Vec::new();
     match target {
         Target::Claude => {
-            // Inline the three-file Claude render so we reuse the `tera`
+            // Inline the four-file Claude render so we reuse the `tera`
             // built above — `render()` would rebuild it (and re-derive
             // the context) for no reason. Output order matches `render()`:
-            // marketplace, plugin, SKILL.md.
+            // marketplace, plugin, skills/<name>/SKILL.md, and the native
+            // .claude/skills/<name>/SKILL.md.
             let mut c = ctx.clone();
             c.insert("noun", "skill");
             let marketplace = tera
@@ -345,6 +375,10 @@ fn render_one_target(
             });
             out.push(GeneratedFileOutput {
                 rel_path: format!("skills/{name}/SKILL.md"),
+                contents: skill.clone(),
+            });
+            out.push(GeneratedFileOutput {
+                rel_path: format!(".claude/skills/{name}/SKILL.md"),
                 contents: skill,
             });
         }
@@ -464,33 +498,90 @@ fn render_one_target(
                 contents: conventions,
             });
         }
+        Target::Cline => {
+            // Cline workspace rules: `.clinerules/<name>.md`, plain markdown
+            // (no frontmatter → always active). Per docs.cline.bot.
+            let mut c = ctx.clone();
+            c.insert("noun", "rule");
+            let rule = tera
+                .render("CLAUDE.md", &c)
+                .context("rendering cline rule")?;
+            out.push(GeneratedFileOutput {
+                rel_path: format!(".clinerules/{name}.md"),
+                contents: rule,
+            });
+        }
+        Target::Roo => {
+            // Roo Code workspace rules: `.roo/rules/<name>.md`, plain markdown.
+            let mut c = ctx.clone();
+            c.insert("noun", "rule");
+            let rule = tera.render("CLAUDE.md", &c).context("rendering roo rule")?;
+            out.push(GeneratedFileOutput {
+                rel_path: format!(".roo/rules/{name}.md"),
+                contents: rule,
+            });
+        }
+        Target::Kilo => {
+            // Kilo Code rules: `.kilocode/rules/<name>.md`, plain markdown,
+            // auto-included via the backward-compatible directory.
+            let mut c = ctx.clone();
+            c.insert("noun", "rule");
+            let rule = tera
+                .render("CLAUDE.md", &c)
+                .context("rendering kilo rule")?;
+            out.push(GeneratedFileOutput {
+                rel_path: format!(".kilocode/rules/{name}.md"),
+                contents: rule,
+            });
+        }
+        Target::Goose => {
+            // Goose: `.goose/instructions.md`, root-level plain markdown.
+            let mut c = ctx.clone();
+            c.insert("noun", "tool");
+            let instructions = tera
+                .render("CLAUDE.md", &c)
+                .context("rendering goose instructions")?;
+            out.push(GeneratedFileOutput {
+                rel_path: schema::GOOSE_INSTRUCTIONS_PATH.to_string(),
+                contents: instructions,
+            });
+        }
     }
     Ok(out)
 }
 
-/// Render the per-skill file for one target from one skill context — the file
-/// a multi-skill pack emits for every additional skill. Returns `None` for
-/// targets without a per-skill form (Copilot and AGENTS.md are single
-/// instructions files per repo, not per skill).
+/// Render the per-skill file(s) for one target from one skill context — the
+/// file(s) a multi-skill pack emits for every additional skill. Returns an
+/// empty vec for targets without a per-skill form (Copilot and AGENTS.md are
+/// single instructions files per repo, not per skill).
 fn render_skill_file_only(
     tera: &tera::Tera,
     ctx: &tera::Context,
     target: Target,
     name: &str,
-) -> Result<Option<GeneratedFileOutput>> {
+) -> Result<Vec<GeneratedFileOutput>> {
     match target {
         Target::Claude | Target::Codex => {
             let mut c = ctx.clone();
             c.insert("noun", "skill");
             let skill = tera.render("SKILL.md", &c).context("rendering SKILL.md")?;
-            let rel_path = match target {
-                Target::Claude => format!("skills/{name}/SKILL.md"),
-                _ => format!(".codex/skills/{name}/SKILL.md"),
-            };
-            Ok(Some(GeneratedFileOutput {
-                rel_path,
-                contents: skill,
-            }))
+            let mut out = Vec::new();
+            if target == Target::Claude {
+                out.push(GeneratedFileOutput {
+                    rel_path: format!("skills/{name}/SKILL.md"),
+                    contents: skill.clone(),
+                });
+                out.push(GeneratedFileOutput {
+                    rel_path: format!(".claude/skills/{name}/SKILL.md"),
+                    contents: skill,
+                });
+            } else {
+                out.push(GeneratedFileOutput {
+                    rel_path: format!(".codex/skills/{name}/SKILL.md"),
+                    contents: skill,
+                });
+            }
+            Ok(out)
         }
         Target::Cursor => {
             let mut c = ctx.clone();
@@ -498,10 +589,10 @@ fn render_skill_file_only(
             let mdc = tera
                 .render("cursor-rule.mdc", &c)
                 .context("rendering cursor-rule.mdc")?;
-            Ok(Some(GeneratedFileOutput {
+            Ok(vec![GeneratedFileOutput {
                 rel_path: format!(".cursor/rules/{name}.mdc"),
                 contents: mdc,
-            }))
+            }])
         }
         Target::Windsurf => {
             let mut c = ctx.clone();
@@ -509,10 +600,10 @@ fn render_skill_file_only(
             let rule = tera
                 .render("windsurf-rule.md", &c)
                 .context("rendering windsurf-rule.md")?;
-            Ok(Some(GeneratedFileOutput {
+            Ok(vec![GeneratedFileOutput {
                 rel_path: format!(".windsurf/rules/{name}.md"),
                 contents: rule,
-            }))
+            }])
         }
         Target::OpenCode => {
             let mut c = ctx.clone();
@@ -520,14 +611,33 @@ fn render_skill_file_only(
             let agent = tera
                 .render("opencode-agent.md", &c)
                 .context("rendering opencode-agent.md")?;
-            Ok(Some(GeneratedFileOutput {
+            Ok(vec![GeneratedFileOutput {
                 rel_path: format!(".opencode/agents/{name}.md"),
                 contents: agent,
-            }))
+            }])
         }
-        Target::Copilot | Target::AgentsMd | Target::ClaudeMd | Target::Gemini | Target::Aider => {
-            Ok(None)
+        Target::Cline | Target::Roo | Target::Kilo => {
+            let mut c = ctx.clone();
+            c.insert("noun", "rule");
+            let rule = tera
+                .render("CLAUDE.md", &c)
+                .context("rendering rule file")?;
+            let rel_path = match target {
+                Target::Cline => format!(".clinerules/{name}.md"),
+                Target::Roo => format!(".roo/rules/{name}.md"),
+                _ => format!(".kilocode/rules/{name}.md"),
+            };
+            Ok(vec![GeneratedFileOutput {
+                rel_path,
+                contents: rule,
+            }])
         }
+        Target::Copilot
+        | Target::AgentsMd
+        | Target::ClaudeMd
+        | Target::Gemini
+        | Target::Aider
+        | Target::Goose => Ok(Vec::new()),
     }
 }
 
@@ -786,12 +896,12 @@ fn cursor_globs_hint(lang: Language) -> Vec<String> {
     }
 }
 
-/// Format globs as a YAML flow-sequence string with quoted entries:
+/// Format a glob list as a YAML flow-sequence string with quoted entries:
 /// `"*.rs", "*.go"`. Empty vec → empty string (template's `{% if globs %}`
 /// gates the line). The template wraps with `globs: [{{ globs }}]` →
 /// `globs: ["*.rs"]`.
-fn cursor_globs_yaml(lang: Language) -> String {
-    cursor_globs_hint(lang)
+fn globs_to_yaml(globs: &[String]) -> String {
+    globs
         .iter()
         .map(|g| format!("\"{g}\""))
         .collect::<Vec<_>>()
@@ -880,14 +990,15 @@ mod tests {
     }
 
     #[test]
-    fn renders_three_files_with_valid_paths() {
+    fn renders_four_files_with_valid_paths() {
         let p = cli_profile();
         let i = cli_intent();
         let files = render(&p, &i, None).unwrap();
-        assert_eq!(files.len(), 3);
+        assert_eq!(files.len(), 4);
         assert_eq!(files[0].rel_path, ".claude-plugin/marketplace.json");
         assert_eq!(files[1].rel_path, ".claude-plugin/plugin.json");
         assert_eq!(files[2].rel_path, "skills/chronicle/SKILL.md");
+        assert_eq!(files[3].rel_path, ".claude/skills/chronicle/SKILL.md");
     }
 
     #[test]
@@ -1061,10 +1172,13 @@ mod tests {
         assert_eq!(mp_count, 1, "marketplace.json is pack-level, emitted once");
         assert_eq!(ag_count, 1, "AGENTS.md is pack-level, emitted once");
 
-        // Every skill has its own per-skill file.
+        // Every skill has its own per-skill file, at BOTH the plugin path
+        // and the native `.claude/skills/` path.
         for rel in [
             "skills/chronicle/SKILL.md",
             "skills/sidekick/SKILL.md",
+            ".claude/skills/chronicle/SKILL.md",
+            ".claude/skills/sidekick/SKILL.md",
             ".codex/skills/sidekick/SKILL.md",
             ".cursor/rules/sidekick.mdc",
             ".opencode/agents/sidekick.md",
@@ -1096,6 +1210,98 @@ mod tests {
             .find(|f| f.rel_path == "skills/chronicle/SKILL.md")
             .unwrap();
         assert!(prim.contents.contains("name: chronicle"));
+    }
+
+    /// The four new rule/instructions targets (Cline, Roo, Kilo, Goose)
+    /// render plain-markdown files at their native paths — no frontmatter.
+    #[test]
+    fn renders_new_rule_and_instructions_targets() {
+        let p = cli_profile();
+        let i = cli_intent();
+        let files = render_targets(
+            &p,
+            &i,
+            &[Target::Cline, Target::Roo, Target::Kilo, Target::Goose],
+            None,
+        )
+        .unwrap();
+
+        let cline = files
+            .iter()
+            .find(|f| f.rel_path == ".clinerules/chronicle.md")
+            .unwrap();
+        assert!(
+            !cline.contents.trim_start().starts_with("---"),
+            "Cline rule must be plain markdown, got:\n{}",
+            cline.contents
+        );
+        assert!(cline.contents.starts_with("# chronicle"));
+        assert!(cline.contents.contains("Invoke this rule when"));
+
+        assert!(files
+            .iter()
+            .any(|f| f.rel_path == ".roo/rules/chronicle.md"));
+        assert!(files
+            .iter()
+            .any(|f| f.rel_path == ".kilocode/rules/chronicle.md"));
+
+        let goose = files
+            .iter()
+            .find(|f| f.rel_path == ".goose/instructions.md")
+            .unwrap();
+        assert!(!goose.contents.trim_start().starts_with("---"));
+        assert!(goose.contents.starts_with("# chronicle"));
+    }
+
+    /// Derived fields (allowed-tools, globs, category, opencode mode,
+    /// keywords) are overridable from the intent; the override wins over the
+    /// language hint, and the fallback stays byte-identical when omitted.
+    #[test]
+    fn derived_field_overrides_win_over_language_hints() {
+        let p = cli_profile();
+        let mut i = cli_intent();
+        i.allowed_tools = Some("Read, Bash(npm test:*)".into());
+        i.globs = Some(vec!["src/**".into(), "*.md".into()]);
+        i.category = Some("the data tooling".into());
+        i.opencode_mode = Some("subagent".into());
+        i.keywords = Some(vec!["journal".into(), "log".into()]);
+
+        let skill = render(&p, &i, None).unwrap()[2].contents.clone();
+        assert!(
+            skill.contains("allowed-tools: Read, Bash(npm test:*)"),
+            "allowed-tools override must win, got:\n{skill}"
+        );
+        assert!(
+            skill.contains("the data tooling"),
+            "category override must win, got:\n{skill}"
+        );
+
+        let mdc = render_targets(&p, &i, &[Target::Cursor], None).unwrap()[0]
+            .contents
+            .clone();
+        assert!(
+            mdc.contains("globs: [\"src/**\", \"*.md\"]"),
+            "globs override must win, got:\n{mdc}"
+        );
+
+        let agent = render_targets(&p, &i, &[Target::OpenCode], None).unwrap()[0]
+            .contents
+            .clone();
+        assert!(
+            agent.contains("mode: subagent"),
+            "opencode mode override must win, got:\n{agent}"
+        );
+
+        // Marketplace keywords override.
+        let mp = render(&p, &i, None).unwrap()[0].contents.clone();
+        assert!(
+            mp.contains("\"journal\""),
+            "keywords override must win, got:\n{mp}"
+        );
+
+        // The fallback (no override) still renders the language hint.
+        let base = render(&p, &cli_intent(), None).unwrap()[2].contents.clone();
+        assert!(base.contains("allowed-tools: Read, Bash"));
     }
 
     #[test]

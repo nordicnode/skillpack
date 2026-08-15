@@ -70,7 +70,18 @@ pub fn run(input: &VerifyInput) -> Result<VerifyReport> {
     // its own documented invocation and must be on PATH to be spawnable.
     let skill_files = discovery::find_skill_files(root);
     let mut spawned_primary = false;
+    // The Claude target emits the same SKILL.md at BOTH `skills/<name>/` and
+    // the native `.claude/skills/<name>/`. They are one skill, not two —
+    // dedupe by skill directory name so invocation checks run once per skill.
+    // (Discovery still checks both copies structurally; this only avoids a
+    // redundant double spawn of the same CLI.)
+    let mut seen_skill_dirs = std::collections::HashSet::new();
     for skill_path in &skill_files {
+        if let Some(dir) = skill_path.parent().and_then(|p| p.file_name()) {
+            if !seen_skill_dirs.insert(dir.to_string_lossy().to_string()) {
+                continue;
+            }
+        }
         let skill_md = match std::fs::read_to_string(skill_path) {
             Ok(s) => s,
             Err(e) => {
@@ -145,6 +156,9 @@ pub enum OutputFormat {
     Human,
     Json,
     Sarif,
+    /// GitHub Actions workflow commands: one `::error`/`::warning` annotation
+    /// per failed/warned check, so CI failures surface inline on the PR diff.
+    Github,
 }
 
 /// Pretty-print a report as the human-facing output (design §5.2 step 4).
@@ -229,6 +243,43 @@ pub fn render_json(report: &VerifyReport) -> String {
         "results": results,
     });
     serde_json::to_string_pretty(&body).expect("verify report serializes to JSON")
+}
+
+/// Render the report as GitHub Actions workflow commands (`::error` /
+/// `::warning`). Emitted to stdout so a CI step like
+/// `skillpack verify --format github` annotates the PR diff inline. Each
+/// `Error` maps to `::error`, each `Warn` to `::warning`; `file`/`line` are
+/// threaded from the result's `location` (absent when the check has no file
+/// location). Newlines in messages are flattened to spaces — a workflow
+/// command is a single line.
+pub fn render_github_annotations(report: &VerifyReport) -> String {
+    use self::result::Severity;
+
+    let mut out = String::new();
+    for r in &report.results {
+        let kind = match r.severity {
+            Severity::Error => "error",
+            Severity::Warn => "warning",
+            _ => continue,
+        };
+        // Flatten the message + suggestion to one line (workflow commands
+        // cannot contain raw newlines).
+        let mut message = r.message.replace(['\r', '\n'], " ");
+        if let Some(s) = &r.suggestion {
+            message.push(' ');
+            message.push_str(&s.replace(['\r', '\n'], " "));
+        }
+        let file_prop = match &r.location {
+            Some((file, Some(line))) => format!(" file={file},line={line}"),
+            Some((file, None)) => format!(" file={file}"),
+            None => String::new(),
+        };
+        out.push_str(&format!(
+            "::{kind}{file_prop},title={}::{message}\n",
+            r.check_id
+        ));
+    }
+    out
 }
 
 /// Render the report as SARIF 2.1.0 for GitHub Code Scanning upload-sarif.

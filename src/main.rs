@@ -24,6 +24,7 @@ use skillpack::types;
 use skillpack::verify::{self, VerifyInput, VerifyReport};
 
 fn main() {
+    skillpack::spawn::reset_sigpipe();
     let cli = Cli::parse();
     init_logging(cli.effective_log_filter(), cli.log_format);
 
@@ -43,6 +44,7 @@ fn main() {
             author,
             invocation,
             import,
+            format,
         } => run_init(
             &root,
             cli.verbose,
@@ -59,6 +61,7 @@ fn main() {
             author,
             invocation,
             import,
+            format,
         ),
         Commands::Verify {
             root,
@@ -82,13 +85,58 @@ fn main() {
             target,
             force,
             template_dir,
-        } => run_update(&root, cli.verbose, target, force, template_dir.as_deref()),
+            format,
+        } => run_update(
+            &root,
+            cli.verbose,
+            target,
+            force,
+            template_dir.as_deref(),
+            format,
+        ),
         Commands::Diff {
             root,
             target,
             force,
             template_dir,
-        } => run_diff(&root, cli.verbose, target, force, template_dir.as_deref()),
+            format,
+        } => run_diff(
+            &root,
+            cli.verbose,
+            target,
+            force,
+            template_dir.as_deref(),
+            format,
+        ),
+        Commands::Add {
+            name,
+            root,
+            non_interactive,
+            description,
+            trigger,
+            author,
+            invocation,
+            import,
+            license,
+            target,
+            force,
+            template_dir,
+        } => run_add(
+            &root,
+            cli.verbose,
+            &name,
+            non_interactive,
+            description,
+            trigger,
+            author,
+            invocation,
+            import,
+            license,
+            target,
+            force,
+            template_dir.as_deref(),
+        ),
+        Commands::Config { root, validate } => run_config(&root, validate),
         Commands::Completions { shell } => {
             let mut cmd = <Cli as CommandFactory>::command();
             clap_complete::generate(shell, &mut cmd, "skillpack", &mut std::io::stdout());
@@ -128,10 +176,45 @@ fn trace_detected(profile: &types::ProjectProfile) {
     tracing::debug!(
         name = %profile.name,
         language = %profile.language.as_str(),
+        secondary = profile.secondary_languages.len(),
         has_cli = profile.has_cli,
         diag_notes = profile.diag.0.len(),
         "detected"
     );
+}
+
+/// Build one skill per detected language for a polyglot monorepo. The primary
+/// (dominant) language keeps the project name + full auto-derived intent; each
+/// secondary language becomes a library-style skill named `{name}-{lang}` with
+/// a generic description/trigger the maintainer can refine via
+/// `skillpack update` / `skillpack add`. Single-language repos return the
+/// primary skill only (byte-identical to the old `--auto` path).
+fn auto_intents(
+    profile: &types::ProjectProfile,
+    triggers: &[String],
+    import: Option<&str>,
+) -> Result<Vec<(String, types::Intent)>> {
+    let primary_name = coerce_kebab(&profile.name);
+    let mut out = vec![(
+        primary_name.clone(),
+        auto_intent(profile, triggers, import)?,
+    )];
+    for lang in &profile.secondary_languages {
+        let lang_str = lang.as_str();
+        out.push((
+            format!("{primary_name}-{lang_str}"),
+            types::Intent {
+                one_line_description: format!("Manage the {lang_str} surface of {primary_name}"),
+                when_to_use_phrases: vec![format!("touch the {lang_str} code")],
+                invocation_command: None,
+                import_pattern: None,
+                author: profile.authors.clone(),
+                license: profile.license.clone().or_else(|| Some("MIT".to_string())),
+                ..Default::default()
+            },
+        ));
+    }
+    Ok(out)
 }
 
 /// Derive the [`Intent`] entirely from the repo — `init --auto`. Zero
@@ -313,7 +396,11 @@ fn run_init(
     author: Option<String>,
     invocation: Option<String>,
     import: Option<String>,
+    format: verify::OutputFormat,
 ) -> i32 {
+    if let Some(code) = handle_list_request(&raw_targets) {
+        return code;
+    }
     match run_init_inner(
         root,
         verbose,
@@ -330,6 +417,7 @@ fn run_init(
         author,
         invocation,
         import,
+        format,
     ) {
         Ok(c) => c,
         Err(e) => {
@@ -356,6 +444,7 @@ fn run_init_inner(
     author: Option<String>,
     invocation: Option<String>,
     import: Option<String>,
+    format: verify::OutputFormat,
 ) -> Result<i32> {
     let profile = introspect::introspect(root).context("introspecting repo")?;
     if verbose {
@@ -413,10 +502,8 @@ fn run_init_inner(
         // (description from the README hint, author from git config,
         // license from the LICENSE file, invocation from the detected
         // CLI) so a fresh checkout inits with ZERO flags and zero prompts.
-        vec![(
-            coerce_kebab(&profile.name),
-            auto_intent(&profile, &triggers, import.as_deref())?,
-        )]
+        // A polyglot monorepo gets one skill per detected language.
+        auto_intents(&profile, &triggers, import.as_deref())?
     } else if non_interactive {
         // Plain --non-interactive without a config: the intent comes from
         // the bootstrap flags (description/trigger/author + invocation or
@@ -507,6 +594,19 @@ fn run_init_inner(
 
     // Step 5 — write files + save config.
     if dry_run {
+        if is_json(format) {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "command": "init",
+                    "dry_run": true,
+                    "written": [],
+                    "skipped": [],
+                    "would_write": files.iter().map(|f| &f.rel_path).collect::<Vec<_>>(),
+                })
+            );
+            return Ok(exit::INIT_OK);
+        }
         println!(
             "dry run: would write {} file(s) under {} (no changes made):",
             files.len(),
@@ -519,6 +619,19 @@ fn run_init_inner(
     }
     let (written, skipped) = write_files(root, &files, force)?;
     Config::from_intents(&skills).save_if_changed(root)?;
+    if is_json(format) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "command": "init",
+                "dry_run": false,
+                "written": written.iter().map(|f| &f.rel_path).collect::<Vec<_>>(),
+                "skipped": skipped.iter().map(|f| &f.rel_path).collect::<Vec<_>>(),
+                "config": Config::path(root).display().to_string(),
+            })
+        );
+        return Ok(exit::INIT_OK);
+    }
     println!(
         "✓ wrote {} file(s) under {}:",
         written.len(),
@@ -542,6 +655,27 @@ fn run_init_inner(
         }
     }
     Ok(exit::INIT_OK)
+}
+
+/// True when an output format is machine-readable (JSON or SARIF — SARIF is
+/// not meaningful for init/update/diff, so it degrades to JSON).
+fn is_json(format: verify::OutputFormat) -> bool {
+    !matches!(format, verify::OutputFormat::Human)
+}
+
+/// Handle the special `--target list` value: print the canonical target names
+/// and return the exit code to return early with. Returns `None` when no
+/// `list` value was requested.
+fn handle_list_request(raw: &[String]) -> Option<i32> {
+    if raw.iter().any(|r| r == "list") {
+        println!("supported --target values (repeat the flag; `all` = every target):");
+        for name in skillpack::cli::target_names() {
+            println!("  {name}");
+        }
+        Some(exit::INIT_OK)
+    } else {
+        None
+    }
 }
 
 fn interview_run(profile: &types::ProjectProfile) -> Result<types::Intent> {
@@ -781,6 +915,14 @@ fn print_profile(profile: &types::ProjectProfile, to_stderr: bool) {
     emit!("introspection");
     emit!("  name:        {}", profile.name);
     emit!("  language:    {}", profile.language.as_str());
+    if !profile.secondary_languages.is_empty() {
+        let langs: Vec<&str> = profile
+            .secondary_languages
+            .iter()
+            .map(|l| l.as_str())
+            .collect();
+        emit!("  secondary:   {}", langs.join(", "));
+    }
     emit!("  has_cli:     {}", profile.has_cli);
     if let Some(cmd) = &profile.cli_command {
         emit!("  cli_command: {}", cmd.join(" "));
@@ -863,6 +1005,7 @@ fn run_verify_inner(
         verify::OutputFormat::Human => verify::render(report),
         verify::OutputFormat::Json => format!("{}\n", verify::render_json(report)),
         verify::OutputFormat::Sarif => format!("{}\n", verify::render_sarif(report)),
+        verify::OutputFormat::Github => verify::render_github_annotations(report),
     };
     let run_verify = || -> Result<verify::VerifyReport> {
         let input = VerifyInput {
@@ -1092,8 +1235,8 @@ fn run_doctor_inner(
             );
         }
         crate::verify::OutputFormat::Human => render_doctor_human(&profile, verbose),
-        crate::verify::OutputFormat::Sarif => {
-            bail!("doctor does not support SARIF output; use `verify --format sarif`")
+        crate::verify::OutputFormat::Sarif | crate::verify::OutputFormat::Github => {
+            bail!("doctor does not support this format; use `verify` for machine-readable reports")
         }
     }
 
@@ -1113,6 +1256,14 @@ fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool) {
         println!("skillpack doctor");
         println!("  name:     {}", profile.name);
         println!("  language: {}", profile.language.as_str());
+        if !profile.secondary_languages.is_empty() {
+            let langs: Vec<&str> = profile
+                .secondary_languages
+                .iter()
+                .map(|l| l.as_str())
+                .collect();
+            println!("  secondary: {}", langs.join(", "));
+        }
         println!("  has_cli:  {}", profile.has_cli);
         if let Some(cmd) = &profile.cli_command {
             println!("  cli:      {}", cmd.join(" "));
@@ -1175,8 +1326,12 @@ fn run_update(
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
+    format: verify::OutputFormat,
 ) -> i32 {
-    match run_update_inner(root, verbose, raw_targets, force, template_dir) {
+    if let Some(code) = handle_list_request(&raw_targets) {
+        return code;
+    }
+    match run_update_inner(root, verbose, raw_targets, force, template_dir, format) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -1325,6 +1480,7 @@ fn run_update_inner(
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
+    format: verify::OutputFormat,
 ) -> Result<i32> {
     let (profile, skills, files) = render_from_config(root, &raw_targets, template_dir)?;
     if verbose {
@@ -1375,6 +1531,18 @@ fn run_update_inner(
     Config::from_intents(&skills).save_if_changed(root)?;
 
     // Summary.
+    if is_json(format) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "command": "update",
+                "written": written.iter().map(|f| &f.rel_path).collect::<Vec<_>>(),
+                "unchanged": unchanged,
+                "skipped": skipped.iter().map(|f| &f.rel_path).collect::<Vec<_>>(),
+            })
+        );
+        return Ok(exit::INIT_OK);
+    }
     println!(
         "✓ updated {} file(s), {} unchanged, under {}:",
         written.len(),
@@ -1407,8 +1575,12 @@ fn run_diff(
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
+    format: verify::OutputFormat,
 ) -> i32 {
-    match run_diff_inner(root, verbose, &raw_targets, force, template_dir) {
+    if let Some(code) = handle_list_request(&raw_targets) {
+        return code;
+    }
+    match run_diff_inner(root, verbose, &raw_targets, force, template_dir, format) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("fatal: {e:#}");
@@ -1423,6 +1595,7 @@ fn run_diff_inner(
     raw_targets: &[String],
     force: bool,
     template_dir: Option<&Path>,
+    format: verify::OutputFormat,
 ) -> Result<i32> {
     let (profile, _skills, files) = render_from_config(root, raw_targets, template_dir)?;
     if verbose {
@@ -1459,6 +1632,24 @@ fn run_diff_inner(
         }
     }
 
+    if is_json(format) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "command": "diff",
+                "clean": drifted == 0 && missing == 0,
+                "drifted": drifted,
+                "missing": missing,
+                "unchanged": unchanged,
+                "held": held,
+            })
+        );
+        return Ok(if drifted == 0 && missing == 0 {
+            exit::INIT_OK
+        } else {
+            exit::DIFF_DRIFT
+        });
+    }
     if drifted == 0 && missing == 0 {
         println!(
             "✓ all {unchanged} file(s) up-to-date ({})",
@@ -1507,9 +1698,17 @@ fn first_differing_line(committed: &str, candidate: &str) -> String {
 
 /// True if the given rel-path is a frontmatter-bearing file that needs body
 /// preservation during `update` (SKILL.md, cursor .mdc, opencode .md).
-/// AGENTS.md and copilot-instructions.md are plain markdown (no frontmatter)
-/// so they are NOT included — `split_frontmatter` would return None on them.
+/// Plain-markdown files (AGENTS.md, copilot-instructions.md, CLAUDE.md,
+/// GEMINI.md, CONVENTIONS.md, `.goose/instructions.md`) and the plain rule
+/// files (`.clinerules/`, `.roo/rules/`, `.kilocode/rules/`) are NOT included
+/// — `split_frontmatter` would return None on them.
 fn is_frontmatter_target(rel_path: &str) -> bool {
+    if rel_path.starts_with(".clinerules/")
+        || rel_path.starts_with(".roo/rules/")
+        || rel_path.starts_with(".kilocode/rules/")
+    {
+        return false;
+    }
     rel_path.ends_with("SKILL.md")
         || rel_path.ends_with(".mdc")
         || (rel_path.ends_with(".md")
@@ -1517,7 +1716,8 @@ fn is_frontmatter_target(rel_path: &str) -> bool {
             && !rel_path.ends_with("copilot-instructions.md")
             && !rel_path.ends_with("CLAUDE.md")
             && !rel_path.ends_with("GEMINI.md")
-            && !rel_path.ends_with("CONVENTIONS.md"))
+            && !rel_path.ends_with("CONVENTIONS.md")
+            && !rel_path.ends_with("instructions.md"))
 }
 
 /// True if the given rel-path is a root-level plain instructions file
@@ -1529,7 +1729,153 @@ fn is_collision_guarded(rel_path: &str) -> bool {
             | crate::verify::schema::CLAUDE_MD_PATH
             | crate::verify::schema::GEMINI_MD_PATH
             | crate::verify::schema::CONVENTIONS_MD_PATH
+            | crate::verify::schema::GOOSE_INSTRUCTIONS_PATH
     )
+}
+
+/// `skillpack add` — append a new skill to an existing `skillpack.toml` pack
+/// and regenerate the distribution files. The new skill's intent comes from
+/// the interview (or the `--non-interactive` bootstrap flags); the existing
+/// skills are left untouched.
+#[allow(clippy::too_many_arguments)]
+fn run_add(
+    root: &Path,
+    verbose: bool,
+    name: &str,
+    non_interactive: bool,
+    description: Option<String>,
+    triggers: Vec<String>,
+    author: Option<String>,
+    invocation: Option<String>,
+    import: Option<String>,
+    license_override: Option<String>,
+    raw_targets: Vec<String>,
+    force: bool,
+    template_dir: Option<&Path>,
+) -> i32 {
+    if let Some(code) = handle_list_request(&raw_targets) {
+        return code;
+    }
+    match run_add_inner(
+        root,
+        verbose,
+        name,
+        non_interactive,
+        description,
+        triggers,
+        author,
+        invocation,
+        import,
+        license_override,
+        raw_targets,
+        force,
+        template_dir,
+    ) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("fatal: {e:#}");
+            exit::INIT_FATAL
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_add_inner(
+    root: &Path,
+    verbose: bool,
+    name: &str,
+    non_interactive: bool,
+    description: Option<String>,
+    triggers: Vec<String>,
+    author: Option<String>,
+    invocation: Option<String>,
+    import: Option<String>,
+    license_override: Option<String>,
+    raw_targets: Vec<String>,
+    force: bool,
+    template_dir: Option<&Path>,
+) -> Result<i32> {
+    let profile = introspect::introspect(root).context("introspecting repo for add")?;
+    let Some(cfg) = Config::load(root)? else {
+        bail!(
+            "no skillpack.toml at {}: `add` appends to an existing pack.\n\
+             To fix: run `skillpack init` first to seed the pack, then `skillpack add <name>`.",
+            root.display()
+        );
+    };
+
+    let skill_name = coerce_kebab(name);
+    let mut intents = cfg.to_intents();
+    if intents.iter().any(|(n, _)| coerce_kebab(n) == skill_name) {
+        bail!("skill `{skill_name}` already exists in skillpack.toml; pick a different name");
+    }
+
+    let mut intent = if non_interactive {
+        bootstrap_intent(
+            &profile,
+            description.as_deref(),
+            &triggers,
+            author.as_deref(),
+            invocation.as_deref(),
+            import.as_deref(),
+        )?
+    } else {
+        interview_run(&profile)?
+    };
+    if let Some(lic) = license_override {
+        intent.license = Some(lic);
+    }
+    intents.push((skill_name, intent));
+
+    // Persist the expanded pack, then delegate to `update` — which re-loads
+    // the (now larger) config and re-renders every target.
+    Config::from_intents(&intents).save_if_changed(root)?;
+    run_update_inner(
+        root,
+        verbose,
+        raw_targets,
+        force,
+        template_dir,
+        verify::OutputFormat::Human,
+    )
+}
+
+/// `skillpack config` — validate (or summarize) the committed `skillpack.toml`.
+/// `--validate` exits non-zero on an invalid config (mirrors the load-time
+/// structural invariants: kebab-case names, well-formed TOML).
+fn run_config(root: &Path, validate: bool) -> i32 {
+    match Config::load(root) {
+        Ok(Some(cfg)) => {
+            let intents = cfg.to_intents();
+            if validate {
+                println!("skillpack.toml is valid ({} skill(s))", intents.len());
+            } else {
+                println!("skillpack.toml summary:");
+                println!("  skills: {}", intents.len());
+                for (name, intent) in &intents {
+                    println!("    - {name}: {}", intent.one_line_description);
+                }
+                if let Some(a) = &cfg.defaults.author {
+                    println!("  defaults.author: {a}");
+                }
+                if let Some(l) = &cfg.defaults.license {
+                    println!("  defaults.license: {l}");
+                }
+            }
+            exit::INIT_OK
+        }
+        Ok(None) => {
+            eprintln!(
+                "no skillpack.toml at {} (run `skillpack init` first)",
+                Config::path(root).display()
+            );
+            exit::INIT_FATAL
+        }
+        Err(e) => {
+            eprintln!("invalid skillpack.toml: {e:#}");
+            exit::INIT_FATAL
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1563,6 +1909,7 @@ mod confirm_tests {
         let profile = types::ProjectProfile {
             name: "fd-find".into(),
             language: types::Language::Rust,
+            secondary_languages: Vec::new(),
             has_cli: true,
             cli_command: Some(vec![bin.to_string_lossy().to_string(), "--help".into()]),
             cli_help_output: Some("usage".into()),
@@ -1600,6 +1947,7 @@ mod confirm_tests {
         let profile = types::ProjectProfile {
             name: "test".into(),
             language: types::Language::Rust,
+            secondary_languages: Vec::new(),
             has_cli: false,
             cli_command: None,
             cli_help_output: None,

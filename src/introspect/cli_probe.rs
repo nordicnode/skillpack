@@ -325,7 +325,7 @@ fn spawn_candidate(candidate: &CliCandidate, diag: &mut DiagTrace) -> DetectCli 
             // global flags). Best-effort: a subcommand that fails/times out is
             // omitted here — `verify` surfaces the gap if the skill documents
             // a subcommand we couldn't capture.
-            let subs = capture_subcommand_tree(candidate, &output);
+            let subs = capture_subcommand_tree(candidate, &output, diag);
             DetectCli {
                 has_cli: true,
                 command: Some(command),
@@ -396,14 +396,66 @@ fn spawn_candidate(candidate: &CliCandidate, diag: &mut DiagTrace) -> DetectCli 
 /// one-level-deep limit — but now genuinely recursive.
 const MAX_SUBCOMMAND_DEPTH: usize = 4;
 
+/// Hard cap on the TOTAL number of `--help` probes across the whole tree.
+/// Depth is bounded above, but breadth is not — a wide CLI (e.g. one with
+/// hundreds of top-level subcommands) would otherwise fork a process per node
+/// and, multiplied by recursion, could spawn thousands of probes. The budget
+/// keeps introspect bounded and predictable; when it is exhausted we truncate
+/// the tree and note it in the `doctor` trace rather than silently dropping
+/// branches.
+const MAX_SUBCOMMAND_SPAWNS: usize = 64;
+
+/// A shared, decrementing spawn allowance threaded through the recursive
+/// capture. `exhausted` records whether the budget ever hit zero.
+struct SpawnBudget {
+    remaining: usize,
+    exhausted: bool,
+}
+
+impl SpawnBudget {
+    fn new(limit: usize) -> Self {
+        Self {
+            remaining: limit,
+            exhausted: false,
+        }
+    }
+
+    /// Try to spend one spawn. Returns `true` when the spawn may proceed.
+    fn spend(&mut self) -> bool {
+        if self.remaining == 0 {
+            self.exhausted = true;
+            return false;
+        }
+        self.remaining -= 1;
+        true
+    }
+}
+
 /// For a subcommand CLI, recursively capture `<cli> <path...> --help` for every
 /// subcommand advertised at each level, returning a `SubcommandNode` tree in
 /// declaration order. Reuses the same guarded spawn + timeout as the top-level
 /// capture. A spawn that fails/times out still contributes a node (its name came
 /// from the parent's `--help`) with empty `help` and no `children`, so verify
-/// can surface the gap if the skill documents that subcommand.
-fn capture_subcommand_tree(candidate: &CliCandidate, top_level_help: &str) -> Vec<SubcommandNode> {
-    capture_children(candidate, &[], top_level_help, 0)
+/// can surface the gap if the skill documents that subcommand. When the total
+/// spawn budget is exhausted, the tree is truncated and a `doctor` note records
+/// it.
+fn capture_subcommand_tree(
+    candidate: &CliCandidate,
+    top_level_help: &str,
+    diag: &mut DiagTrace,
+) -> Vec<SubcommandNode> {
+    let mut budget = SpawnBudget::new(MAX_SUBCOMMAND_SPAWNS);
+    let tree = capture_children(candidate, &[], top_level_help, 0, &mut budget);
+    if budget.exhausted {
+        diag.push(
+            "detect_cli",
+            format!(
+                "subcommand tree truncated after {MAX_SUBCOMMAND_SPAWNS} `--help` probes \
+                 (wide CLI); deeper branches are not documented"
+            ),
+        );
+    }
+    tree
 }
 
 /// Recursive core of [`capture_subcommand_tree`]. `prefix` is the subcommand
@@ -414,6 +466,7 @@ fn capture_children(
     prefix: &[String],
     help_output: &str,
     depth: usize,
+    budget: &mut SpawnBudget,
 ) -> Vec<SubcommandNode> {
     if depth >= MAX_SUBCOMMAND_DEPTH {
         return Vec::new();
@@ -421,13 +474,19 @@ fn capture_children(
     let subs = crate::verify::invocation::extract_subcommands(help_output);
     let mut out = Vec::with_capacity(subs.len());
     for sub in subs {
+        // Honor the shared budget: once it is spent, stop probing (the rest of
+        // this level's subcommands are silently omitted rather than documented
+        // shallowly — verify will surface the gap if the skill documents them).
+        if !budget.spend() {
+            break;
+        }
         let help = spawn_subcommand_help(candidate, prefix, &sub);
         let mut child_prefix = prefix.to_vec();
         child_prefix.push(sub.clone());
         let children = if help.is_empty() {
             Vec::new()
         } else {
-            capture_children(candidate, &child_prefix, &help, depth + 1)
+            capture_children(candidate, &child_prefix, &help, depth + 1, budget)
         };
         out.push(SubcommandNode {
             name: sub,

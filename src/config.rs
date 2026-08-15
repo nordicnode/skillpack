@@ -64,6 +64,21 @@ pub struct SkillConfig {
     /// Optional project-specific footguns or gotchas to document for agents.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub footguns: Vec<String>,
+    /// Override the language-derived `allowed-tools` frontmatter value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<String>,
+    /// Override the language-derived Cursor/Windsurf auto-attach `globs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub globs: Option<Vec<String>>,
+    /// Override the language-derived `category` prose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Override the language-derived OpenCode `mode`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_mode: Option<String>,
+    /// Override the derived marketplace `keywords` list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keywords: Option<Vec<String>>,
 }
 
 impl SkillConfig {
@@ -79,6 +94,11 @@ impl SkillConfig {
             license: self.license.clone().or_else(|| defaults.license.clone()),
             verify_stdin: self.verify_stdin.clone(),
             footguns: self.footguns.clone(),
+            allowed_tools: self.allowed_tools.clone(),
+            globs: self.globs.clone(),
+            category: self.category.clone(),
+            opencode_mode: self.opencode_mode.clone(),
+            keywords: self.keywords.clone(),
         }
     }
 
@@ -94,6 +114,11 @@ impl SkillConfig {
             license: intent.license.clone(),
             verify_stdin: intent.verify_stdin.clone(),
             footguns: intent.footguns.clone(),
+            allowed_tools: intent.allowed_tools.clone(),
+            globs: intent.globs.clone(),
+            category: intent.category.clone(),
+            opencode_mode: intent.opencode_mode.clone(),
+            keywords: intent.keywords.clone(),
         }
     }
 }
@@ -269,6 +294,7 @@ mod tests {
                 license: None,
                 verify_stdin: None,
                 footguns: Vec::new(),
+                ..Default::default()
             }),
             skills: Vec::new(),
             defaults: Defaults::default(),
@@ -297,6 +323,7 @@ mod tests {
                 license: None,
                 verify_stdin: None,
                 footguns: Vec::new(),
+                ..Default::default()
             }),
             skills: Vec::new(),
             defaults: Defaults::default(),
@@ -325,6 +352,7 @@ mod tests {
                 license: None,
                 verify_stdin: None,
                 footguns: Vec::new(),
+                ..Default::default()
             }),
             skills: Vec::new(),
             defaults: Defaults::default(),
@@ -346,6 +374,7 @@ mod tests {
                 license: None,
                 verify_stdin: None,
                 footguns: Vec::new(),
+                ..Default::default()
             }],
             defaults: Defaults::default(),
         };
@@ -365,6 +394,7 @@ mod tests {
                 license: None,
                 verify_stdin: None,
                 footguns: Vec::new(),
+                ..Default::default()
             }),
             skills: vec![
                 SkillConfig {
@@ -377,6 +407,7 @@ mod tests {
                     license: None,
                     verify_stdin: None,
                     footguns: Vec::new(),
+                    ..Default::default()
                 },
                 SkillConfig {
                     name: "beta".into(),
@@ -388,6 +419,7 @@ mod tests {
                     license: None,
                     verify_stdin: None,
                     footguns: Vec::new(),
+                    ..Default::default()
                 },
             ],
             defaults: Defaults::default(),
@@ -419,6 +451,7 @@ mod tests {
                     license: Some("MIT".into()),
                     verify_stdin: None,
                     footguns: Vec::new(),
+                    ..Default::default()
                 },
             ),
             (
@@ -432,6 +465,7 @@ mod tests {
                     license: None,
                     verify_stdin: None,
                     footguns: Vec::new(),
+                    ..Default::default()
                 },
             ),
         ];
@@ -466,6 +500,7 @@ mod tests {
                 license: None,
                 verify_stdin: Some("\n".into()),
                 footguns: Vec::new(),
+                ..Default::default()
             }),
             skills: Vec::new(),
             defaults: Defaults::default(),

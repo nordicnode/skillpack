@@ -1,7 +1,7 @@
 <div align="center">
   <img src="docs/logo.png" width="480" alt="skillpack logo">
   <p><strong>The agent-distribution layer for modern OSS tools and libraries.</strong></p>
-  <p>Generate, verify, and maintain agent instructions across Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, Freebuff, and 10+ AI coding ecosystems.</p>
+  <p>Generate, verify, and maintain agent instructions across Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, Freebuff, and 14 AI coding ecosystems.</p>
 
   <p>
     <a href="https://github.com/nordicnode/skillpack/actions/workflows/ci.yml"><img src="https://github.com/nordicnode/skillpack/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
@@ -56,7 +56,7 @@ Without an agent guidance layer, AI coding agents frequently:
 
 ## Key Features
 
-* **Universal Multi-Ecosystem Generation**: Generates native guidance files for **10 agent formats** simultaneously (`AGENTS.md`, Claude Code, Cursor `.mdc`, Codex, OpenCode, Copilot, `CLAUDE.md`, `GEMINI.md`, Windsurf, and Aider). Freebuff and other AGENTS.md-native agents read the generated `AGENTS.md`.
+* **Universal Multi-Ecosystem Generation**: Generates native guidance files for **14 agent formats** simultaneously (`AGENTS.md`, Claude Code (plugin + native `.claude/skills/`), Cursor `.mdc`, Codex, OpenCode, Copilot, `CLAUDE.md`, `GEMINI.md`, Windsurf, Aider, Cline, Roo Code, Kilo Code, and Goose). Freebuff and other AGENTS.md-native agents read the generated `AGENTS.md`.
 * **Zero-Drift Verification**: Simulates agent invocations against your live CLI to verify that every documented flag and subcommand actually exists.
 * **Pre-Commit Safe**: `skillpack init` validates the complete surface before writing a single file to disk.
 * **Non-Destructive Updates**: `skillpack update` refreshes flags and versions while preserving your hand-written descriptions and notes.
@@ -69,7 +69,13 @@ Without an agent guidance layer, AI coding agents frequently:
 ### 1. Installation
 
 ```bash
-# Prebuilt binaries (fastest, no Rust toolchain needed)
+# One-command installer (prebuilt binary, no Rust toolchain)
+curl -fsSL https://raw.githubusercontent.com/nordicnode/skillpack/main/install.sh | sh
+
+# Or via Homebrew
+brew install --formula homebrew/skillpack.rb
+
+# Or via cargo-binstall (prebuilt binary)
 cargo install cargo-binstall && cargo binstall skillpack
 
 # Or build from source
@@ -114,7 +120,7 @@ Running `skillpack init --target all` generates a clean, non-intrusive distribut
 | Target / Ecosystem | Generated File(s) | Description |
 |---|---|---|
 | **AGENTS.md** | `AGENTS.md` | Standard instructions file read natively by **Freebuff**, Zed, Cursor, Windsurf, and 60k+ repos. |
-| **Claude Code** | `.claude-plugin/` & `skills/<tool>/SKILL.md` | Plugin manifest and skill specification for Claude Code. |
+| **Claude Code** | `.claude-plugin/`, `skills/<tool>/SKILL.md` & `.claude/skills/<tool>/SKILL.md` | Plugin manifest + skill spec, plus the native `.claude/skills/` directory Claude auto-loads with no install step. |
 | **Codex** | `.codex/skills/<tool>/SKILL.md` | Skill specification for the OpenAI Codex CLI (same `SKILL.md` shape as Claude Code). |
 | **Cursor** | `.cursor/rules/<tool>.mdc` | Context-aware rule file with automated file-glob matching. |
 | **OpenCode** | `.opencode/agents/<tool>.md` | Agent definition for OpenCode AI coding environments. |
@@ -123,7 +129,11 @@ Running `skillpack init --target all` generates a clean, non-intrusive distribut
 | **CLAUDE.md** | `CLAUDE.md` | Root instructions file read by Claude Code, Cline, and Roo Code. |
 | **Windsurf** | `.windsurf/rules/<tool>.md` | Cascade IDE rule file. |
 | **Aider** | `CONVENTIONS.md` | Codebase convention guidelines for Aider. |
-| **Deterministic Config** | `skillpack.toml` | Committed configuration making future updates and CI checks deterministic. |
+| **Cline** | `.clinerules/<tool>.md` | Workspace rules for the Cline coding agent (optional `paths:` conditional frontmatter). |
+| **Roo Code** | `.roo/rules/<tool>.md` | Workspace rules for Roo Code. |
+| **Kilo Code** | `.kilocode/rules/<tool>.md` | Workspace rules for Kilo Code (auto-included directory). |
+| **Goose** | `.goose/instructions.md` | Project instructions for Block's Goose agent. |
+| **Deterministic Config** | `skillpack.toml` | Committed configuration making future updates and CI checks deterministic (JSON Schema at `skillpack.schema.json`). |
 
 ---
 

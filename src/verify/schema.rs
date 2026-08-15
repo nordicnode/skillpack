@@ -76,6 +76,12 @@ pub const CURSOR_RULES_DIR: &str = ".cursor/rules";
 /// convention — same `SKILL.md` frontmatter shape as Claude, installed under
 /// `.codex/skills/`. Verified July 2026.
 pub const CODEX_SKILLS_DIR: &str = ".codex/skills";
+/// Native Claude Code skills directory `.claude/skills/<name>/SKILL.md`.
+/// Source: code.claude.com/docs/en/skills — Claude Code scans `.claude/skills/`
+/// and auto-loads each skill with no plugin-install step. Same `SKILL.md`
+/// frontmatter shape as the plugin `skills/<name>/SKILL.md` path, different
+/// directory (native vs plugin-installed). Verified August 2026.
+pub const CLAUDE_SKILLS_DIR: &str = ".claude/skills";
 /// OpenCode agent definitions live under `.opencode/agents/<name>.md`. Source:
 /// opencode.ai/docs/agents — "Place them in: Per-project:
 /// `.opencode/agents/`". The markdown file name becomes the agent name.
@@ -120,6 +126,31 @@ pub const WINDSURF_RULES_DIR: &str = ".windsurf/rules";
 /// Aider reads a root-level `CONVENTIONS.md` for repo conventions. Plain
 /// markdown, no frontmatter. Verified July 2026 against the aider docs.
 pub const CONVENTIONS_MD_PATH: &str = "CONVENTIONS.md";
+
+/// Cline workspace rules live in `.clinerules/` (`.md`/`.txt` files, optional
+/// `paths:` YAML frontmatter for conditional rules). Source:
+/// docs.cline.bot/customization/cline-rules — "Workspace rules go in
+/// `.clinerules/` at your project root." Verified August 2026.
+pub const CLINE_RULES_DIR: &str = ".clinerules";
+
+/// Roo Code workspace rules live in `.roo/rules/` (markdown; mode-specific
+/// rules live in `.roo/rules-{modeSlug}/`). Source: docs.roocode.com custom
+/// modes / rules — "Instructions can also live in `.roo/rules/`
+/// (workspace-wide)." Verified August 2026.
+pub const ROO_RULES_DIR: &str = ".roo/rules";
+
+/// Kilo Code project rules. The current format references `.kilo/rules/*.md`
+/// via `kilo.jsonc`'s `instructions` array, but `.kilocode/rules/` is
+/// auto-included for backward compatibility (kilo.ai/docs/customize/custom-rules
+/// — "The extension is backward compatible with `.kilocode/rules/` directories").
+/// Emitting into the backward-compatible directory loads with zero config edit.
+/// Verified August 2026.
+pub const KILOCODE_RULES_DIR: &str = ".kilocode/rules";
+
+/// Goose (Block's open-source agent) reads a project-wide
+/// `.goose/instructions.md`. Plain markdown, no frontmatter. Verified August
+/// 2026 against the Goose docs + the ctxlint context-file registry.
+pub const GOOSE_INSTRUCTIONS_PATH: &str = ".goose/instructions.md";
 
 // Action-verb heuristic: the first word of a good skill description is an
 // action verb (e.g. "Lint", "Generate", "Format"). We don't enforce grammar —

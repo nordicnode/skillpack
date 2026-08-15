@@ -226,11 +226,56 @@ pub fn run(
             "discovery.aider",
             "To fix: add instructions content, or run `skillpack init --target aider`.",
         ),
+        (
+            schema::GOOSE_INSTRUCTIONS_PATH,
+            "discovery.goose",
+            "To fix: add instructions content, or run `skillpack init --target goose`.",
+        ),
     ] {
         if let Some(p) = plainmd::find_plain_file(root, rel) {
             out.push(plainmd::check_plain_md(
                 root, &p, check_id, rel, empty_hint,
             )?);
+        }
+    }
+
+    // Cline / Roo Code / Kilo Code — plain-markdown workspace rule directories.
+    // Loose structural check (non-empty; `#` heading unless a `---` frontmatter
+    // block is present, which rule formats legitimately support).
+    for (dir, check_id, target_hint) in [
+        (
+            schema::CLINE_RULES_DIR,
+            "discovery.cline.rule",
+            "skillpack init --target cline",
+        ),
+        (
+            schema::ROO_RULES_DIR,
+            "discovery.roo.rule",
+            "skillpack init --target roo",
+        ),
+        (
+            schema::KILOCODE_RULES_DIR,
+            "discovery.kilocode.rule",
+            "skillpack init --target kilo",
+        ),
+    ] {
+        let rules = plainmd::find_rule_files(root, dir);
+        if rules.is_empty() && root.join(dir).is_dir() {
+            out.push(CheckResult::fail(
+                &format!("{check_id}.missing"),
+                "at least one rule file exists",
+                format!("{dir}/ exists but contains no .md file"),
+                format!("To fix: run `{target_hint}` or add a rule under {dir}/<name>.md."),
+            ));
+        } else {
+            for rule_path in rules {
+                out.push(plainmd::check_plain_rule_md(
+                    root,
+                    &rule_path,
+                    check_id,
+                    &format!("To fix: add rule content, or run `{target_hint}`."),
+                )?);
+            }
         }
     }
 
@@ -240,8 +285,8 @@ pub fn run(
     if out.is_empty() {
         out.push(CheckResult::fail(
             "discovery.empty",
-            "at least one ecosystem is present (Claude / Codex / Cursor / OpenCode / Copilot / AGENTS.md / CLAUDE.md / GEMINI.md / Windsurf / Aider)",
-            "no distribution files found (none of: .claude-plugin/, .codex/skills/, .cursor/rules/, .windsurf/rules/, .opencode/agents/, .github/copilot-instructions.md, AGENTS.md, CLAUDE.md, GEMINI.md, CONVENTIONS.md)",
+            "at least one ecosystem is present (Claude / Codex / Cursor / OpenCode / Copilot / AGENTS.md / CLAUDE.md / GEMINI.md / Windsurf / Aider / Cline / Roo / Kilo / Goose)",
+            "no distribution files found (none of: .claude-plugin/, .claude/skills/, .codex/skills/, .cursor/rules/, .windsurf/rules/, .opencode/agents/, .github/copilot-instructions.md, AGENTS.md, CLAUDE.md, GEMINI.md, CONVENTIONS.md, .clinerules/, .roo/rules/, .kilocode/rules/, .goose/instructions.md)",
             "To fix: run `skillpack init --target <ecosystem>` first.",
         ));
     }
@@ -785,12 +830,14 @@ fn check_one_skill_md(
     }
 
     // Skill-directory vs frontmatter name: agents load skills by DIRECTORY
-    // (`skills/<name>/SKILL.md` / `.codex/skills/<name>/SKILL.md`), so a
-    // directory that disagrees with the advertised `name:` is a discoverability
-    // defect even when the name itself matches the canonical project name.
-    // Only fires for paths nested under a `skills/` dir — a root `SKILL.md`
-    // has no skill directory to disagree with. Warn (not fail): some agents
-    // read the frontmatter `name` and ignore the path.
+    // (`skills/<name>/SKILL.md` / `.claude/skills/<name>/SKILL.md` /
+    // `.codex/skills/<name>/SKILL.md`), so a directory that disagrees with
+    // the advertised `name:` is a discoverability defect even when the name
+    // itself matches the canonical project name. Only fires for paths whose
+    // grandparent is a `skills` directory (the native `.claude/skills/` grand-
+    // parent is named `skills` too) — a root `SKILL.md` has no skill directory
+    // to disagree with. Warn (not fail): some agents read the frontmatter
+    // `name` and ignore the path.
     let under_skills_dir = path
         .parent()
         .and_then(|p| p.parent())
@@ -895,20 +942,23 @@ fn check_one_skill_md(
 
 // ----- helpers --------------------------------------------------------------
 
-/// Every SKILL.md under `skills/*/SKILL.md` plus a root `SKILL.md`, sorted for
+/// Every SKILL.md under `skills/*/SKILL.md` AND the native
+/// `.claude/skills/*/SKILL.md` directory, plus a root `SKILL.md`, sorted for
 /// deterministic verification (read_dir order is unspecified). A plugin may
 /// legitimately ship multiple skills (Improvement C).
 pub(crate) fn find_skill_files(root: &Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
-    let skills_dir = root.join("skills");
-    if skills_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(&skills_dir) {
-            let mut names: Vec<_> = entries.flatten().collect();
-            names.sort_by_key(|e| e.file_name());
-            for entry in names {
-                let candidate = entry.path().join("SKILL.md");
-                if candidate.is_file() {
-                    out.push(candidate);
+    for skills_dir in ["skills", schema::CLAUDE_SKILLS_DIR] {
+        let dir = root.join(skills_dir);
+        if dir.is_dir() {
+            if let Ok(entries) = fs::read_dir(&dir) {
+                let mut names: Vec<_> = entries.flatten().collect();
+                names.sort_by_key(|e| e.file_name());
+                for entry in names {
+                    let candidate = entry.path().join("SKILL.md");
+                    if candidate.is_file() {
+                        out.push(candidate);
+                    }
                 }
             }
         }

@@ -4,6 +4,43 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Native Claude Code skills directory: the Claude target now also emits
+  `.claude/skills/<name>/SKILL.md` (auto-loaded with no plugin install step).
+- Four new ecosystem targets: **Cline** (`.clinerules/<name>.md`), **Roo Code**
+  (`.roo/rules/<name>.md`), **Kilo Code** (`.kilocode/rules/<name>.md`), and
+  **Goose** (`.goose/instructions.md`) — `--target all` now covers 14 formats.
+- `skillpack add <name>`: append a skill to an existing pack (interview or
+  `--non-interactive` bootstrap) and regenerate.
+- `--target list`: print the canonical `--target` values.
+- `--format json` for `init`/`update`/`diff`: machine-readable summaries for CI.
+- `verify --format github`: GitHub Actions `::error`/`::warning` annotations
+  for inline PR-diff comments.
+- `skillpack config` + `config --validate`: summarize/validate the committed
+  `skillpack.toml`; a JSON Schema ships at `skillpack.schema.json`.
+- Derived-field overrides in `skillpack.toml`: `allowed_tools`, `category`,
+  `globs`, `opencode_mode`, and `keywords` can pin the language-derived values.
+- Polyglot monorepo detection: `introspect` records `secondary_languages` and
+  `init --auto` emits one skill per detected language.
+- One-command `install.sh` + a Homebrew formula (`homebrew/skillpack.rb`) and a
+  static `x86_64-unknown-linux-musl` release binary.
+
+### Fixed
+
+- `init` re-running on a hand-authored `[[skills]]` pack no longer collapses it
+  to the primary skill (it now renders every skill).
+- Subcommand capture now honors a total `--help` spawn budget (breadth cap),
+  truncating wide CLIs instead of forking thousands of probes.
+- Subcommand parsing now recognizes cobra (`Available Commands:`) and argparse
+  (`{cmd1,cmd2}` usage) help shapes, not just clap.
+- `command_from_documented` no longer reads surrounding prose as the program
+  name (a secondary skill used to resolve to CLI `` `The` ``).
+- Version drift now genuinely tolerates a CLI that prints `--version` and
+  exits non-zero (captured output is carried through `RanNonZero`).
+
 ## [0.13.0](https://github.com/nordicnode/skillpack/compare/v0.12.1...v0.13.0) - 2026-08-14
 
 ### Added

@@ -30,6 +30,7 @@ fn cli_profile() -> ProjectProfile {
     ProjectProfile {
         name: "chronicle".to_string(),
         language: Language::Rust,
+        secondary_languages: Vec::new(),
         has_cli: true,
         cli_command: Some(vec!["chronicle".to_string(), "--help".to_string()]),
         cli_help_output: Some(
@@ -67,6 +68,7 @@ fn lib_profile() -> ProjectProfile {
     ProjectProfile {
         name: "fastcsv".to_string(),
         language: Language::Node,
+        secondary_languages: Vec::new(),
         has_cli: false,
         cli_command: None,
         cli_help_output: None,

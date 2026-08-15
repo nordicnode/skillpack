@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand, ValueEnum};
     name = "skillpack",
     bin_name = "skillpack",
     version,
-    about = "Generate and verify the agent-distribution layer for any OSS project (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, AGENTS.md, CLAUDE.md, GEMINI.md, Windsurf, Aider)."
+    about = "Generate and verify the agent-distribution layer for any OSS project (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, AGENTS.md, CLAUDE.md, GEMINI.md, Windsurf, Aider, Cline, Roo Code, Kilo Code, Goose)."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -183,6 +183,12 @@ pub enum Commands {
         /// directory (e.g. `SKILL.md.tera`, `plugin.json.tera`).
         #[arg(long, value_name = "DIR")]
         template_dir: Option<PathBuf>,
+
+        /// Output format. `human` (default) prints the interactive summary;
+        /// `json` prints a machine-readable object (`written`/`skipped` file
+        /// lists) to stdout for CI scripts.
+        #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
+        format: crate::verify::OutputFormat,
     },
     /// Check the distribution files against the agent schemas + CLI drift.
     Verify {
@@ -276,6 +282,11 @@ pub enum Commands {
         /// semantics as `init --template-dir`.
         #[arg(long, value_name = "DIR")]
         template_dir: Option<PathBuf>,
+
+        /// Output format. `human` (default) prints the interactive summary;
+        /// `json` prints a machine-readable object to stdout.
+        #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
+        format: crate::verify::OutputFormat,
     },
     /// Check whether distribution files are stale: re-render every target
     /// in memory, compare against on-disk content, report files that
@@ -307,6 +318,67 @@ pub enum Commands {
         /// a pack generated with custom templates.
         #[arg(long, value_name = "DIR")]
         template_dir: Option<PathBuf>,
+
+        /// Output format. `human` (default) prints the interactive summary;
+        /// `json` prints a machine-readable object to stdout.
+        #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
+        format: crate::verify::OutputFormat,
+    },
+    /// Append a new skill to an existing `skillpack.toml` pack and regenerate
+    /// the distribution files for it (no full re-init, no interview of the
+    /// existing skills). The new skill's intent comes from the interview, or
+    /// from the same `--description`/`--trigger`/`--invocation`/`--import`
+    /// bootstrap flags `init --non-interactive` uses.
+    Add {
+        /// Kebab-case name for the new skill (its directory + frontmatter).
+        name: String,
+
+        /// Project root to operate on. Defaults to the current directory.
+        #[arg(long, value_name = "DIR", default_value = ".")]
+        root: PathBuf,
+
+        /// Skip interactive prompts. Requires `--description` + `--trigger` +
+        /// exactly one of `--invocation`/`--import` (mirrors `init
+        /// --non-interactive` bootstrap).
+        #[arg(long)]
+        non_interactive: bool,
+
+        /// One-sentence task description for the new skill.
+        #[arg(long, value_name = "TEXT")]
+        description: Option<String>,
+
+        /// Trigger phrase for `when_to_use`; repeatable.
+        #[arg(long, value_name = "PHRASE")]
+        trigger: Vec<String>,
+
+        /// Author name for the new skill (defaults to the pack defaults).
+        #[arg(long, value_name = "NAME")]
+        author: Option<String>,
+
+        /// Exact CLI invocation (CLI projects).
+        #[arg(long, value_name = "CMD")]
+        invocation: Option<String>,
+
+        /// Import pattern (library projects).
+        #[arg(long, value_name = "PATTERN")]
+        import: Option<String>,
+
+        /// SPDX license id override for the new skill.
+        #[arg(long, value_name = "SPDX")]
+        license: Option<String>,
+
+        /// Agent ecosystem(s) to regenerate after appending. Defaults to
+        /// `claude`; `all` refreshes every target. Repeats.
+        #[arg(long, num_args = 1.., value_name = "ECOSYSTEM")]
+        target: Vec<String>,
+
+        /// Overwrite an existing root-level AGENTS.md (collision guard).
+        #[arg(long)]
+        force: bool,
+
+        /// Override one or more Tera templates (same semantics as `init`).
+        #[arg(long, value_name = "DIR")]
+        template_dir: Option<PathBuf>,
     },
     /// Print shell completions to stdout for the given shell, so users can
     /// tab-complete `skillpack` flags and subcommands. Pipe the output into
@@ -316,6 +388,19 @@ pub enum Commands {
         /// Shell to generate completions for.
         #[arg(value_enum)]
         shell: clap_complete::Shell,
+    },
+    /// Validate (and inspect) the committed `skillpack.toml` config.
+    Config {
+        /// Project root to operate on. Defaults to the current directory.
+        #[arg(long, value_name = "DIR", default_value = ".")]
+        root: PathBuf,
+
+        /// Validate `skillpack.toml` against the structural invariants
+        /// (kebab-case names, well-formed TOML) and exit non-zero when it is
+        /// invalid. Without this flag, prints a human summary of the skills
+        /// and defaults instead.
+        #[arg(long)]
+        validate: bool,
     },
 }
 
@@ -359,6 +444,42 @@ pub enum Target {
     /// Aider: a root-level `CONVENTIONS.md` the aider coding agent reads for
     /// repo conventions. Plain markdown, no frontmatter.
     Aider,
+    /// Cline: `.clinerules/<name>.md` workspace rule files (plain markdown;
+    /// optional `paths:` YAML frontmatter scopes a rule to matching files).
+    /// Per docs.cline.bot/customization/cline-rules.
+    Cline,
+    /// Roo Code: `.roo/rules/<name>.md` workspace rule files (plain markdown).
+    /// Per docs.roocode.com custom modes / rules.
+    Roo,
+    /// Kilo Code: `.kilocode/rules/<name>.md` rule files (auto-included via
+    /// the backward-compatible directory). Per kilo.ai/docs/customize/custom-rules.
+    Kilo,
+    /// Goose: a root-level `.goose/instructions.md` instructions file read by
+    /// Block's Goose agent. Plain markdown, no frontmatter.
+    Goose,
+}
+
+/// The canonical `--target` value names (declaration order, plus the `all`
+/// sentinel and the `freebuff` alias). Used by the `--target list` helper.
+pub fn target_names() -> Vec<&'static str> {
+    vec![
+        "claude",
+        "cursor",
+        "codex",
+        "opencode",
+        "copilot",
+        "agentsmd",
+        "claude-md",
+        "gemini",
+        "windsurf",
+        "aider",
+        "cline",
+        "roo",
+        "kilo",
+        "goose",
+        "freebuff",
+        "all",
+    ]
 }
 
 /// Expand a list of targets, resolving the string `"all"` into every concrete
@@ -381,13 +502,17 @@ pub fn resolve_targets(raw: &[String]) -> anyhow::Result<Vec<Target>> {
                 Target::Gemini,
                 Target::Windsurf,
                 Target::Aider,
+                Target::Cline,
+                Target::Roo,
+                Target::Kilo,
+                Target::Goose,
             ]);
         } else if r == "freebuff" || r == "agents.md" || r == "agents-md" {
             out.push(Target::AgentsMd);
         } else {
             out.push(Target::from_str(r, true).map_err(|s| {
                 anyhow::anyhow!(
-                    "invalid --target `{s}`; expected claude|cursor|codex|opencode|copilot|agentsmd|claude-md|gemini|windsurf|aider|freebuff|all"
+                    "invalid --target `{s}`; expected claude|cursor|codex|opencode|copilot|agentsmd|claude-md|gemini|windsurf|aider|cline|roo|kilo|goose|freebuff|all"
                 )
             })?);
         }
@@ -413,8 +538,10 @@ mod tests {
         assert_eq!(targets, vec![Target::AgentsMd]);
 
         let all = resolve_targets(&["all".to_string()]).unwrap();
-        assert_eq!(all.len(), 10);
+        assert_eq!(all.len(), 14);
         assert!(all.contains(&Target::AgentsMd));
+        assert!(all.contains(&Target::Cline));
+        assert!(all.contains(&Target::Goose));
     }
 
     #[test]

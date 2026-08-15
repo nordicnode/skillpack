@@ -51,6 +51,12 @@ Other ecosystems:
 - **GitHub Copilot** (`.github/copilot-instructions.md`) — plain markdown:
   non-empty, first non-blank line starts with a `#` heading.
 - **AGENTS.md** — plain markdown at the repo root: non-empty, `#` heading.
+- **Cline** (`.clinerules/<name>.md`), **Roo Code** (`.roo/rules/<name>.md`),
+  and **Kilo Code** (`.kilocode/rules/<name>.md`) — plain-markdown workspace
+  rules (an optional `---` frontmatter block is tolerated; a missing `#`
+  heading warns).
+- **Goose** (`.goose/instructions.md`) — plain markdown at the repo root:
+  non-empty, `#` heading.
 
 A single-ecosystem pack (e.g. `--target copilot` alone) passes `verify`
 without false-positive failures from the other ecosystems.
@@ -116,18 +122,25 @@ No-op when there's no fixable drift.
 | `init --import <PATTERN>` | import pattern for library projects — pass exactly one of `--invocation`/`--import` (bootstrap) |
 | `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
 | `init --license <SPDX>` | override the license for this run                              |
-| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, `claude-md`, `gemini`, `windsurf`, `aider`, or `all` (all ten). Repeatable. |
+| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, `claude-md`, `gemini`, `windsurf`, `aider`, `cline`, `roo`, `kilo`, `goose`, `freebuff`, or `all` (all 14). Repeatable; the special value `list` prints the canonical names. |
+| `init --dry-run` | render + verify + preview without writing any files (or `skillpack.toml`); exits 0 |
+| `init --format human\|json` | human summary (default) or a machine-readable JSON object (`written`/`skipped`/`would_write`) for CI |
 | `init --force` | overwrite an existing `AGENTS.md` at repo root (skip+warn otherwise). Has no effect on other targets, which write to skillpack-owned paths. |
 | `init --template-dir <DIR>` | overlay custom `.tera` templates from a dir; missing files fall back to embedded defaults |
 | `update` | incrementally refresh distribution files from an existing `skillpack.toml` — no interview, no verify gate. Writes only changed files; preserves body prose by splicing fresh frontmatter. |
-| `update --target <ecosystem>` | same target syntax as `init --target` (default: `claude`). Pass `all` to refresh all six. |
+| `update --target <ecosystem>` | same target syntax as `init --target` (default: `claude`). Pass `all` to refresh all 14. |
+| `update --format human\|json` | human summary (default) or a machine-readable JSON object |
 | `update --force` | overwrite an existing `AGENTS.md` (same collision guard as `init --force`). |
 | `update --template-dir <DIR>` | same template override semantics as `init --template-dir` |
 | `diff` | check whether distribution files are stale; exit 1 if any differs, 0 if all clean (CI gate). Same body-preservation semantics as `update`. |
-| `diff --target <ecosystem>` | same target syntax as `update --target` (default: `claude`). Pass `all` to check all six. |
+| `diff --target <ecosystem>` | same target syntax as `update --target` (default: `claude`). Pass `all` to check all 14. |
+| `diff --format human\|json` | human summary (default) or a machine-readable JSON object (`clean`/`drifted`/`missing` counts) |
 | `diff --force` | check `AGENTS.md` too (same collision guard as `update --force`). |
 | `diff --template-dir <DIR>` | same override semantics — use when checking a pack generated with custom templates (avoids spurious drift) |
-| `verify --format human\|json\|sarif` | human report (default), machine-readable JSON for CI, or SARIF 2.1.0 for GitHub Code Scanning upload-sarif |
+| `add <name>` | append a new skill to an existing `skillpack.toml` pack (then regenerate). Same bootstrap flags as `init --non-interactive` (`--description`/`--trigger`/`--author`/`--invocation`/`--import`/`--license`); interactive interview by default. |
+| `config` | print a summary of the committed `skillpack.toml` (skills + defaults) |
+| `config --validate` | validate `skillpack.toml` against the structural invariants; exit non-zero when invalid |
+| `verify --format human\|json\|sarif\|github` | human report (default), machine-readable JSON for CI, SARIF 2.1.0 for GitHub Code Scanning upload-sarif, or GitHub Actions `::error`/`::warning` annotations for inline PR-diff comments |
 | `verify --fix` | mechanically repair detected drift (rewrites only the file the drift lives in; surgical). No-op when nothing is fixable. |
 | `verify --min-score <N>` | minimum discoverability score (0–100) the run must reach to exit zero; gate runs against the post-fix report. Omitted by default. Pairs with `--format json` for CI. |
 | `verify --watch` | re-run verify on every file change (debounced); iterative feedback during SKILL.md / skillpack.toml edits. Only valid with `--format human` (Ctrl-C stops). |
@@ -177,12 +190,40 @@ A marketplace repo can bundle several skills — Claude Code loads every
    `verify --fix` splices the right skill's frontmatter without touching the
    other skills' bodies.
 
-There's no interactive multi-skill interview; author the array by hand and
-let `update` render. `init` always writes a single-skill `[skill]` pack.
+The easier path is `skillpack add <name>` — it appends a skill (via the
+interview, or the `--non-interactive` bootstrap flags) and re-renders in one
+step, instead of hand-authoring the `[[skills]]` array.
+
+Polyglot monorepos: `introspect` detects every language manifest (not just the
+primary) and records the rest as `secondary_languages`. `init --auto` on a
+monorepo with no committed config emits one skill per detected language — the
+primary keeps the project name, each secondary becomes `{name}-{lang}` with a
+library-style intent you can refine via `skillpack update` / `skillpack add`.
 
 Limitation: the invocation drift checks (`invocation.*`, which spawn the CLI
 `--help` and diff flags) run against the FIRST skill file only — give each
 skill its own CLI but know that the flag-drift gate checks one of them.
+
+## Config overrides
+
+The language-derived fields in generated files can be pinned per skill in
+`skillpack.toml` (each optional; the language hint is the fallback):
+
+```toml
+[skill]
+name = "mytool"
+one_line_description = "..."
+when_to_use_phrases = ["..."]
+allowed_tools = "Read, Bash(npm test:*)"   # override the allowed-tools frontmatter
+category = "the data tooling"              # override the category prose
+globs = ["src/**", "*.md"]                 # override Cursor/Windsurf auto-attach globs
+opencode_mode = "subagent"                 # override the OpenCode mode
+keywords = ["journal", "log"]              # override the marketplace keywords
+```
+
+Editor autocomplete/validation for `skillpack.toml` is available via the JSON
+Schema at `skillpack.schema.json` (point your TOML editor's `#:schema` at it,
+or run `skillpack config --validate` to check the file from the CLI).
 
 ## Platform notes
 

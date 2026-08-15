@@ -49,6 +49,10 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
     let mut diag = DiagTrace::default();
 
     let language = detect_language(root, &mut diag);
+    let secondary_languages: Vec<Language> = detect_all_languages(root)
+        .into_iter()
+        .filter(|l| *l != language)
+        .collect();
     let mut manifest_name = manifest::project_manifest_name(root, language);
     // A workspace-only root (no [package]) has no name of its own; its CLI
     // lives in a member. Probe the first member with a name so `detect_cli`
@@ -97,6 +101,7 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
     Ok(ProjectProfile {
         name,
         language,
+        secondary_languages,
         has_cli,
         cli_command,
         cli_help_output,
@@ -108,6 +113,59 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
         authors,
         description_hint,
     })
+}
+
+/// Detect EVERY language present at `root`, in the same priority order as
+/// [`detect_language`] (Rust first, then node, ...). Used to surface polyglot
+/// monorepos: the dominant language wins for the primary skill; the rest are
+/// recorded as `secondary_languages` and get their own skill in `init --auto`.
+/// `Makefile`-only is deliberately NOT a C/C++ signal here — a bare Makefile
+/// is ubiquitous in polyglot repos and would false-flag almost every one.
+pub(crate) fn detect_all_languages(root: &Path) -> Vec<Language> {
+    let mut langs = Vec::new();
+    let signals: &[(Language, bool)] = &[
+        (Language::Rust, root.join("Cargo.toml").exists()),
+        (Language::Node, root.join("package.json").exists()),
+        (
+            Language::Python,
+            root.join("pyproject.toml").exists()
+                || root.join("setup.py").exists()
+                || root.join("setup.cfg").exists(),
+        ),
+        (Language::Go, root.join("go.mod").exists()),
+        (Language::Php, root.join("composer.json").exists()),
+        (
+            Language::Jvm,
+            root.join("pom.xml").exists()
+                || root.join("build.gradle").exists()
+                || root.join("build.gradle.kts").exists(),
+        ),
+        (Language::CSharp, cli_probe::has_csproj(root)),
+        (
+            Language::Ruby,
+            root.join("Gemfile").exists() || cli_probe::has_gemspec(root),
+        ),
+        (
+            Language::Zig,
+            root.join("build.zig").exists() || root.join("build.zig.zon").exists(),
+        ),
+        (Language::Swift, root.join("Package.swift").exists()),
+        (
+            Language::CCpp,
+            root.join("CMakeLists.txt").exists() || root.join("meson.build").exists(),
+        ),
+        (Language::Elixir, root.join("mix.exs").exists()),
+        (
+            Language::Deno,
+            root.join("deno.json").exists() || root.join("deno.jsonc").exists(),
+        ),
+    ];
+    for (lang, present) in signals {
+        if *present {
+            langs.push(*lang);
+        }
+    }
+    langs
 }
 
 /// Detect the dominant language by checking for known manifests. Each falsy
@@ -196,6 +254,7 @@ impl ProjectProfile {
         Self {
             name: "test-tool".to_string(),
             language: Language::Unknown,
+            secondary_languages: Vec::new(),
             has_cli: false,
             cli_command: None,
             cli_help_output: None,
@@ -264,6 +323,24 @@ mod parse_tests {
             .and_then(|c| c.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_default();
         assert_eq!(p.name, cwd_tail);
+    }
+
+    #[test]
+    fn detect_all_languages_finds_polyglot_monorepo() {
+        let root = scratch(&[
+            ("Cargo.toml", "[package]\nname = \"x\"\n"),
+            ("package.json", "{}"),
+        ]);
+        let langs = detect_all_languages(&root);
+        assert_eq!(langs, vec![Language::Rust, Language::Node]);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn detect_all_languages_empty_for_no_manifests() {
+        let root = scratch(&[]);
+        assert!(detect_all_languages(&root).is_empty());
+        cleanup(&root);
     }
 
     #[test]

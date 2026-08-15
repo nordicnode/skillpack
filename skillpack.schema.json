@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/nordicnode/skillpack/main/skillpack.schema.json",
+  "title": "skillpack.toml",
+  "description": "Committed config that makes skillpack re-runs deterministic. Lives at the project root as skillpack.toml.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "skill": {
+      "description": "Single-skill form (written by `skillpack init`; backward compatible). Mutually exclusive in practice with the [[skills]] array form.",
+      "$ref": "#/definitions/SkillConfig"
+    },
+    "skills": {
+      "description": "Multi-skill pack form: one entry per skill. Mutually exclusive in practice with [skill].",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/SkillConfig"
+      }
+    },
+    "defaults": {
+      "description": "Persistent user prefs shared across skills.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "type": "string",
+          "description": "Author display name (fallback for skills that omit it)."
+        },
+        "license": {
+          "type": "string",
+          "description": "SPDX license id, e.g. MIT (default)."
+        }
+      }
+    }
+  },
+  "definitions": {
+    "SkillConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "one_line_description"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$",
+          "description": "Kebab-case plugin/skill name (lowercase letters, digits, single hyphens)."
+        },
+        "one_line_description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One-sentence task description (leads the SKILL.md description)."
+        },
+        "when_to_use_phrases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Trigger phrases that tell an agent when to reach for this skill."
+        },
+        "invocation_command": {
+          "type": "string",
+          "description": "Exact CLI invocation, e.g. `chronicle --new \"entry\"`. Omit for pure libraries."
+        },
+        "import_pattern": {
+          "type": "string",
+          "description": "Import pattern for pure libraries, e.g. `import { parse } from 'fastcsv'`. Omit for CLI projects."
+        },
+        "author": {
+          "type": "string",
+          "description": "Author display name (falls back to defaults.author)."
+        },
+        "license": {
+          "type": "string",
+          "description": "SPDX license id (falls back to defaults.license)."
+        },
+        "verify_stdin": {
+          "type": "string",
+          "description": "Stdin bytes to feed the CLI during verify spawns (for interactive CLIs that block on stdin)."
+        },
+        "footguns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Project-specific gotchas to document for agents."
+        }
+      }
+    }
+  }
+}

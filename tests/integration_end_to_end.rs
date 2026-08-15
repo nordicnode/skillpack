@@ -3613,12 +3613,13 @@ fn self_dogfood_regenerated_artifacts_match_committed_byte_identical() {
         String::from_utf8_lossy(&out.stdout)
     );
 
-    // Byte-equalize the 6 body files that don't carry URL-derived fields.
+    // Byte-equalize the body files that don't carry URL-derived fields.
     // Drift in `globs:`, `mode:`, language-derived `allowed-tools`, the
     // `## Invocation` block, trailing newlines, or template polish all
     // surface here.
     for rel in &[
         "skills/skillpack/SKILL.md",
+        ".claude/skills/skillpack/SKILL.md",
         ".codex/skills/skillpack/SKILL.md",
         ".cursor/rules/skillpack.mdc",
         ".windsurf/rules/skillpack.md",
@@ -3628,6 +3629,10 @@ fn self_dogfood_regenerated_artifacts_match_committed_byte_identical() {
         "CLAUDE.md",
         "GEMINI.md",
         "CONVENTIONS.md",
+        ".clinerules/skillpack.md",
+        ".roo/rules/skillpack.md",
+        ".kilocode/rules/skillpack.md",
+        ".goose/instructions.md",
     ] {
         let regen = fs::read_to_string(dest.join(rel)).unwrap_or_default();
         let committed = fs::read_to_string(repo_root().join(rel)).unwrap_or_default();
@@ -4409,14 +4414,15 @@ fn target_all_with_dup_does_not_double_write() {
 
     // Each file is written exactly once — no duplicate-write panic, no double
     // content. The marketplace.json is a single plugin entry; if Claude ran
-    // twice, render would push two GeneratedFileOutputs with the same rel_path
-    // and write_files would write twice (harmless to disk but the summary count
-    // would be 8 not 12). Assert the summary line says 12 (10 targets incl. the
-    // 4 new harnesses + plugin.json + skillpack.toml).
+    // twice, render would push duplicate GeneratedFileOutputs with the same
+    // rel_path and write_files would write twice. Assert the summary line says
+    // 17: the Claude target emits 4 files (marketplace.json, plugin.json,
+    // skills/<name>/SKILL.md, .claude/skills/<name>/SKILL.md) + 13 more
+    // single-file targets = 17.
     let s = String::from_utf8_lossy(&out.stdout);
     assert!(
-        s.contains("wrote 12 file(s)"),
-        "dedup must reduce all+claude to 10 targets (+2 metadata), got:\n{s}"
+        s.contains("wrote 17 file(s)"),
+        "dedup must reduce all+claude to 14 targets (17 files), got:\n{s}"
     );
 
     // Verify still passes — no corruption from the dedup path.
@@ -5299,4 +5305,132 @@ fn init_template_dir_missing_files_fall_back_to_embedded() {
         !skill.is_empty(),
         "embedded template fallback must produce non-empty SKILL.md"
     );
+}
+
+// --- Item 8: --target list, --format json, and `skillpack add` ---------------
+
+#[test]
+fn target_list_prints_canonical_values() {
+    let root = copy_fixture("rust-cli");
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["init", "--target", "list", "--root", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "--target list must exit 0, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let s = String::from_utf8_lossy(&out.stdout);
+    for name in [
+        "claude", "cursor", "codex", "cline", "roo", "kilo", "goose", "all",
+    ] {
+        assert!(
+            s.contains(name),
+            "--target list must name `{name}`, got:\n{s}"
+        );
+    }
+    // Listing targets is read-only: no skillpack.toml must be written.
+    assert!(!root.join("skillpack.toml").exists());
+}
+
+#[test]
+fn init_format_json_emits_machine_readable_summary() {
+    let root = copy_fixture("rust-cli");
+    write_skillpack_toml(&root, "sample-rust");
+    let out = Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+            "--format",
+            "json",
+        ])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "init --format json must exit 0, got:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["command"], "init");
+    assert_eq!(v["dry_run"], false);
+    assert!(
+        v["written"].as_array().is_some_and(|a| !a.is_empty()),
+        "written must be a non-empty array, got: {v}"
+    );
+}
+
+#[test]
+fn add_skill_appends_second_skill_to_existing_pack() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    // Seed the pack first.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Append a second skill non-interactively.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "add",
+            "sidekick",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--description",
+            "Handle auxiliary chores",
+            "--trigger",
+            "aux task",
+            "--invocation",
+            "sample-rust sidekick",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    // Both skills now exist, and skillpack.toml lists the new entry.
+    assert!(root.join("skills/sample-rust/SKILL.md").exists());
+    assert!(root.join("skills/sidekick/SKILL.md").exists());
+    assert!(root.join(".claude/skills/sidekick/SKILL.md").exists());
+    let cfg = fs::read_to_string(root.join("skillpack.toml")).unwrap();
+    assert!(
+        cfg.contains("sidekick"),
+        "skillpack.toml must list the new skill, got:\n{cfg}"
+    );
+    assert!(
+        cfg.contains("[[skills]]"),
+        "multi-skill pack must serialize as [[skills]], got:\n{cfg}"
+    );
+
+    // verify still passes on the expanded pack.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["verify", "--root", ".", "--format", "json"])
+        .current_dir(&root)
+        .assert()
+        .success();
 }

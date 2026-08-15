@@ -191,23 +191,26 @@ pub fn extract_documented_invocation(skill_md: &str) -> Option<String> {
 /// introspection only resolved the primary binary. Returns `None` when no
 /// program token can be parsed from the invocation block, so the caller can
 /// surface an honest skip instead of guessing.
+///
+/// Only lines INSIDE a fenced code block are candidates — the surrounding
+/// prose ("The exact command an agent should run to use this tool:") must
+/// never be read as the program name (a latent bug that surfaced as "CLI
+/// `The`" for a secondary skill).
 pub fn command_from_documented(skill_md: &str) -> Option<Vec<String>> {
     let block = extract_documented_invocation(skill_md)?;
+    let mut in_fence = false;
     for line in block.lines() {
         let t = line.trim();
-        if t.is_empty() || t.starts_with("```") {
+        if t.starts_with("```") {
+            in_fence = !in_fence;
             continue;
         }
-        // Prefer the first backticked token (inline code), else the first
-        // whitespace-delimited token of the line.
-        let candidate = if let Some(inner) = t.split('`').nth(1) {
-            inner.trim()
-        } else {
-            t
-        };
-        let prog = candidate.split_whitespace().next()?.trim();
-        // A program token is a bare command name or a path. Skip markdown,
-        // option flags, angle-bracket placeholders, and prose.
+        if !in_fence || t.is_empty() {
+            continue;
+        }
+        let prog = t.split_whitespace().next()?.trim();
+        // A program token is a bare command name or a path. Skip option flags,
+        // angle-bracket placeholders, and markdown noise.
         if prog.is_empty()
             || prog.starts_with('#')
             || prog.starts_with('-')
@@ -460,26 +463,41 @@ pub fn is_meta_flag(flag: &str) -> bool {
 }
 
 /// Parse the subcommand names advertised in a top-level `--help` body.
-/// Recognizes the clap-standard section header (`Commands:` / `Subcommands:`,
-/// case-tolerant) and reads each following indented line's first token as the
-/// subcommand name. clap's auto-added `help` subcommand is filtered. Lines
-/// that aren't indented under the header (`Options:`, `Arguments:`, a blank
-/// gap, or the usage line) end the section.
+///
+/// Handles the three common help shapes, in order:
+/// 1. clap — `Commands:` / `Subcommands:` section header, indented names.
+/// 2. cobra (Go) — `Available Commands:` section header, indented names.
+/// 3. argparse (Python) — subcommands listed inline in the usage line as
+///    `{cmd1,cmd2}` (no dedicated section).
+///
+/// clap/cobra's auto-added `help` subcommand is filtered. Lines that aren't
+/// indented under the header (`Options:`, `Arguments:`, a blank gap, or the
+/// usage line) end a header section.
 ///
 /// Returns `[]` for CLIs with no subcommands — so a non-subcommand `--help`
 /// (a flat `Usage: chronicle [OPTIONS] ...`) yields nothing, and the
 /// subcommand-aware template/verify paths stay dormant (byte-identical
-/// snapshots, no extra checks). ponytail: one level deep — nested subcommands
-/// (`git remote add`) aren't recursed; upgrade by recursing on
-/// `<base> <sub> --help` when a fixture needs it.
+/// snapshots, no extra checks).
 pub fn extract_subcommands(help_output: &str) -> Vec<String> {
+    let out = extract_header_subcommands(help_output);
+    if out.is_empty() {
+        extract_usage_brace_subcommands(help_output)
+    } else {
+        out
+    }
+}
+
+/// Section-header subcommand parsing (clap `Commands:`/`Subcommands:` and
+/// cobra `Available Commands:`). Reads each following indented line's first
+/// token as the name; a blank line or an un-indented line ends the section.
+fn extract_header_subcommands(help_output: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut in_section = false;
     for line in help_output.lines() {
         let trimmed = line.trim();
         let is_header = matches!(
             trimmed.to_ascii_lowercase().as_str(),
-            "commands:" | "subcommands:"
+            "commands:" | "subcommands:" | "available commands:"
         );
         if is_header {
             in_section = true;
@@ -494,8 +512,8 @@ pub fn extract_subcommands(help_output: &str) -> Vec<String> {
             // blank line — end here so `Options:` entries aren't swept in.
             break;
         }
-        // Only count lines that are indented under the header (clap uses 2
-        // spaces). An un-indented line is the start of the next section.
+        // Only count lines that are indented under the header (clap/cobra use
+        // 2 spaces). An un-indented line is the start of the next section.
         if line == trimmed {
             break;
         }
@@ -510,6 +528,37 @@ pub fn extract_subcommands(help_output: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// argparse-style subcommand parsing: the top-level usage line lists
+/// subcommands inline as `{cmd1,cmd2}` (e.g. `usage: prog [-h] {foo,bar} ...`).
+/// argparse has no dedicated `Commands:` section, so this is the fallback when
+/// no section header matched. Only the FIRST `{...}` group on the usage line is
+/// read (argparse emits exactly one, the subparser group).
+fn extract_usage_brace_subcommands(help_output: &str) -> Vec<String> {
+    for line in help_output.lines() {
+        let t = line.trim();
+        if !(t.starts_with("usage:") || t.starts_with("Usage:")) {
+            continue;
+        }
+        let Some(inner) = t
+            .split_once('{')
+            .and_then(|(_, after)| after.split_once('}'))
+            .map(|(inner, _)| inner)
+        else {
+            continue;
+        };
+        let mut out = Vec::new();
+        for name in inner.split(',') {
+            let name = name.trim();
+            if name.is_empty() || name == "help" || out.contains(&name.to_string()) {
+                continue;
+            }
+            out.push(name.to_string());
+        }
+        return out;
+    }
+    Vec::new()
 }
 
 /// Pull the subcommand *paths* a SKILL.md documents (the `### Subcommands`
@@ -927,6 +976,27 @@ mod checks {
         assert!(extract_documented_invocation(skill).is_some());
     }
 
+    /// Regression: `command_from_documented` must extract the program from the
+    /// FENCED command line, never from the surrounding prose. The old code
+    /// returned "The" (the first word of "The exact command an agent should
+    /// run..."), which surfaced as "secondary skill documents CLI `The`".
+    #[test]
+    fn command_from_documented_skips_prose_and_reads_fence() {
+        let skill = "\
+## Invocation
+
+The exact command an agent should run to use this tool:
+
+```
+chronicle --new \"entry\"
+```
+";
+        assert_eq!(
+            command_from_documented(skill),
+            Some(vec!["chronicle".to_string(), "--help".to_string()])
+        );
+    }
+
     #[test]
     fn documented_invocation_none_for_pure_library() {
         // Pure-library ## Usage import block has no --flag => not a CLI.
@@ -991,6 +1061,59 @@ Options:
             Vec::<String>::new()
         );
         assert_eq!(extract_subcommands(""), Vec::<String>::new());
+    }
+
+    /// cobra (Go) help lists subcommands under `Available Commands:` — the
+    /// most common Go CLI framework. The parser must read it the same way it
+    /// reads clap's `Commands:` (indented names, `help` filtered, blank gap
+    /// ends the section).
+    #[test]
+    fn extract_subcommands_from_cobra_help() {
+        let help = "\
+A CLI for gophers.
+
+Usage:
+  gocli [command]
+
+Available Commands:
+  completion  Generate the autocompletion script for the specified shell
+  serve       Start the server
+  help        Help about any command
+
+Flags:
+  -h, --help   help for gocli
+";
+        assert_eq!(
+            extract_subcommands(help),
+            vec!["completion".to_string(), "serve".to_string()]
+        );
+    }
+
+    /// argparse (Python) has no dedicated `Commands:` section — subcommands
+    /// appear inline in the usage line as `{cmd1,cmd2}`. The parser's fallback
+    /// must read that group (and only the first one).
+    #[test]
+    fn extract_subcommands_from_argparse_usage() {
+        let help = "\
+usage: pycli [-h] {build,test,run} ...
+
+positional arguments:
+  command     subcommand to run
+";
+        assert_eq!(
+            extract_subcommands(help),
+            vec!["build".to_string(), "test".to_string(), "run".to_string()]
+        );
+    }
+
+    /// argparse with a single subcommand and `help` mixed in: `help` is
+    /// filtered, and the single real subcommand survives.
+    #[test]
+    fn extract_subcommands_from_argparse_usage_filters_help() {
+        assert_eq!(
+            extract_subcommands("usage: prog [-h] {serve,help}"),
+            vec!["serve".to_string()]
+        );
     }
 
     /// The subcommand section ends at the blank line before `Options:` — the

@@ -179,6 +179,21 @@ fn isolate_process_group(_cmd: &mut Command) {}
 /// block is the single audited exception to the crate's `unsafe_code = deny`;
 /// `killpg` is safe in practice (an invalid pgid just returns -1, which we
 /// ignore because the following `wait()` still reaps the direct child).
+/// Restore SIGPIPE to the default disposition on Unix so a closed stdout
+/// pipe (e.g. `skillpack init --target list | head`) terminates the process
+/// silently instead of panicking on a `Broken pipe` EPIPE from `println!`.
+/// Windows has no SIGPIPE, so this is a no-op there. Lives in the lib (not the
+/// bin) because the binary target denies `unsafe_code` entirely.
+pub fn reset_sigpipe() {
+    #[cfg(unix)]
+    {
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+    }
+}
+
 fn kill_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {

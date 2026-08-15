@@ -21,6 +21,13 @@ pub struct ProjectProfile {
     /// `php`, `csharp`, `jvm`, `zig`, `swift`, `c_cpp`, `elixir`, `deno`,
     /// or `unknown`.
     pub language: Language,
+    /// Any additional languages detected alongside the dominant one (a
+    /// polyglot monorepo, e.g. a Rust CLI with a TypeScript frontend). Empty
+    /// for single-language repos. Order mirrors [`detect_language`] priority.
+    /// Surfaced by `doctor` and `--verbose`, and used by `init --auto` to
+    /// emit one skill per detected language.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secondary_languages: Vec<Language>,
     /// True iff introspect detected an invokable CLI binary. The branching
     /// point for the pure-library path.
     pub has_cli: bool,
@@ -181,6 +188,23 @@ pub struct Intent {
     /// Optional project-specific footguns or gotchas to document for agents.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub footguns: Vec<String>,
+    /// Override the language-derived `allowed-tools` frontmatter value (e.g.
+    /// `Read, Bash`). `Some` replaces the hint entirely; an empty string
+    /// suppresses the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<String>,
+    /// Override the language-derived Cursor/Windsurf auto-attach `globs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub globs: Option<Vec<String>>,
+    /// Override the language-derived `category` prose (e.g. "the Rust tooling").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Override the language-derived OpenCode `mode` (`primary`/`subagent`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_mode: Option<String>,
+    /// Override the derived marketplace `keywords` list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keywords: Option<Vec<String>>,
 }
 
 impl Intent {
