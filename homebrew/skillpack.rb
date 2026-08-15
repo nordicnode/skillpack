@@ -18,22 +18,22 @@ class Skillpack < Formula
   desc "Generate and verify the agent-distribution layer for any OSS project"
   homepage "https://github.com/nordicnode/skillpack"
   license "MIT"
-  version "0.13.0"
+  version "0.13.1"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.0/skillpack-aarch64-apple-darwin.tar.gz"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.1/skillpack-aarch64-apple-darwin.tar.gz"
     else
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.0/skillpack-x86_64-apple-darwin.tar.gz"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.1/skillpack-x86_64-apple-darwin.tar.gz"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.0/skillpack-aarch64-unknown-linux-gnu.tar.gz"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.1/skillpack-aarch64-unknown-linux-gnu.tar.gz"
     else
       # Static musl build — no glibc dependency.
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.0/skillpack-x86_64-unknown-linux-musl.tar.gz"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.1/skillpack-x86_64-unknown-linux-musl.tar.gz"
     end
   end
 
