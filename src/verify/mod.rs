@@ -262,24 +262,48 @@ pub fn render_github_annotations(report: &VerifyReport) -> String {
             Severity::Warn => "warning",
             _ => continue,
         };
-        // Flatten the message + suggestion to one line (workflow commands
-        // cannot contain raw newlines).
+        // Build the property list as `key=value` pairs joined by commas, then
+        // escape the message. A workflow command is a single line: `::kind
+        // key=value,key=value::message`. The old code emitted a bare leading
+        // comma when a result had no file location (`::error,title=...`),
+        // which is malformed; properties are now only emitted when present.
+        let mut props: Vec<String> = Vec::new();
+        if let Some((file, line)) = &r.location {
+            props.push(format!("file={}", gh_escape(file)));
+            if let Some(n) = line {
+                props.push(format!("line={n}"));
+            }
+        }
+        // title is the human check label; the machine check_id stays available
+        // in the JSON/SARIF formats for pipelines that need it.
+        props.push(format!("title={}", gh_escape(&r.check_name)));
+
+        // Flatten newlines to spaces and %-escape the message so a raw `%` or
+        // embedded control char can't break the command grammar.
         let mut message = r.message.replace(['\r', '\n'], " ");
         if let Some(s) = &r.suggestion {
             message.push(' ');
             message.push_str(&s.replace(['\r', '\n'], " "));
         }
-        let file_prop = match &r.location {
-            Some((file, Some(line))) => format!(" file={file},line={line}"),
-            Some((file, None)) => format!(" file={file}"),
-            None => String::new(),
-        };
-        out.push_str(&format!(
-            "::{kind}{file_prop},title={}::{message}\n",
-            r.check_id
-        ));
+        message = gh_escape(&message);
+
+        out.push_str(&format!("::{kind} {}::{message}\n", props.join(",")));
     }
     out
+}
+
+/// Escape a value for a GitHub workflow command (properties and message).
+/// Per the Actions toolkit spec, `%`, `\r` and `\n` always need escaping, and
+/// `:`/`,` additionally need escaping inside a property *value* (they are the
+/// key/value and property separators). Escaping them in the message too is
+/// harmless (GitHub decodes uniformly).
+fn gh_escape(value: &str) -> String {
+    value
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+        .replace(':', "%3A")
+        .replace(',', "%2C")
 }
 
 /// Render the report as SARIF 2.1.0 for GitHub Code Scanning upload-sarif.
@@ -345,4 +369,70 @@ pub fn render_sarif(report: &VerifyReport) -> String {
     });
 
     serde_json::to_string_pretty(&body).expect("verify report serializes to SARIF JSON")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::verify::result::{CheckResult, Severity};
+
+    fn warn_with_location(loc: Option<(String, Option<usize>)>) -> CheckResult {
+        CheckResult {
+            check_id: "discovery.skill.when_to_use".to_string(),
+            check_name: "SKILL.md has non-empty `when_to_use` trigger phrases".to_string(),
+            severity: Severity::Warn,
+            message: "when_to_use is missing".to_string(),
+            suggestion: Some("list 2-5 trigger verbs".to_string()),
+            location: loc,
+        }
+    }
+
+    #[test]
+    fn github_annotations_have_no_leading_comma_without_location() {
+        let report = VerifyReport {
+            results: vec![warn_with_location(None)],
+        };
+        let out = render_github_annotations(&report);
+        assert!(
+            !out.contains("::warning,"),
+            "must not emit a leading comma before properties, got: {out}"
+        );
+        assert!(
+            out.starts_with("::warning title="),
+            "title should be the first property, got: {out}"
+        );
+    }
+
+    #[test]
+    fn github_annotations_include_file_and_line_when_present() {
+        let report = VerifyReport {
+            results: vec![warn_with_location(Some((
+                "skills/foo/SKILL.md".to_string(),
+                Some(3),
+            )))],
+        };
+        let out = render_github_annotations(&report);
+        assert!(
+            out.contains("file=skills/foo/SKILL.md,line=3"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn github_annotations_escape_percent_and_flatten_newlines() {
+        let mut r = warn_with_location(None);
+        r.message = "100% broken\nsecond line".to_string();
+        let report = VerifyReport { results: vec![r] };
+        let out = render_github_annotations(&report);
+        assert!(
+            !out.contains("100% broken"),
+            "raw % must be escaped, got: {out}"
+        );
+        assert!(out.contains("100%25"), "got: {out}");
+        assert_eq!(
+            out.matches('\n').count(),
+            1,
+            "only the line terminator may remain, got: {out:?}"
+        );
+    }
 }

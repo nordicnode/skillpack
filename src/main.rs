@@ -28,7 +28,7 @@ fn main() {
     let cli = Cli::parse();
     init_logging(cli.effective_log_filter(), cli.log_format);
 
-    let code = if let Ok(code) = std::panic::catch_unwind(|| match cli.command {
+    let code = match std::panic::catch_unwind(|| match cli.command {
         Commands::Init {
             root,
             non_interactive,
@@ -143,12 +143,31 @@ fn main() {
             exit::INIT_OK
         }
     }) {
-        code
-    } else {
-        eprintln!("fatal: skillpack crashed (panic)");
-        std::process::exit(exit::INIT_FATAL)
+        Ok(code) => code,
+        Err(payload) => {
+            eprintln!(
+                "fatal: skillpack crashed (panic): {}",
+                panic_message(&*payload)
+            );
+            std::process::exit(exit::INIT_FATAL)
+        }
     };
     std::process::exit(code);
+}
+
+/// Read a human message out of a caught panic payload so `main`'s
+/// `catch_unwind` can name the failure instead of printing a bare "crashed".
+/// Handles both `panic!("msg")` (payload `&str`) and `panic!("msg {}", x)`
+/// (payload `String`); anything else falls back to a hint to enable a
+/// backtrace.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic (re-run with RUST_BACKTRACE=1 for a backtrace)".to_string()
+    }
 }
 
 /// Configure the structured-diagnostics logger. Everything routed through it
@@ -446,6 +465,7 @@ fn run_init_inner(
     import: Option<String>,
     format: verify::OutputFormat,
 ) -> Result<i32> {
+    reject_report_format(format)?;
     let profile = introspect::introspect(root).context("introspecting repo")?;
     if verbose {
         print_profile(&profile, false);
@@ -657,10 +677,29 @@ fn run_init_inner(
     Ok(exit::INIT_OK)
 }
 
-/// True when an output format is machine-readable (JSON or SARIF — SARIF is
-/// not meaningful for init/update/diff, so it degrades to JSON).
+/// True when an output format is machine-readable (JSON). SARIF/Github are
+/// rejected before any init/update/diff path reaches this point (see
+/// [`reject_report_format`]), so only Human/Json survive.
 fn is_json(format: verify::OutputFormat) -> bool {
     !matches!(format, verify::OutputFormat::Human)
+}
+
+/// `--format sarif`/`--format github` only make sense for `verify` (which has
+/// file-level results to annotate or upload). init/update/diff accept
+/// `--format` for the human/json summary only; reject the report-only formats
+/// instead of silently degrading them to JSON (doctor already bails the same
+/// way).
+fn reject_report_format(format: verify::OutputFormat) -> Result<()> {
+    if matches!(
+        format,
+        verify::OutputFormat::Sarif | verify::OutputFormat::Github
+    ) {
+        bail!(
+            "--format sarif/github is only valid for `verify`; this command \
+             supports `human` or `json`"
+        );
+    }
+    Ok(())
 }
 
 /// Handle the special `--target list` value: print the canonical target names
@@ -1298,9 +1337,9 @@ fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool) {
     // check-id namespaces so the user knows what to expect after `init`.
     println!();
     println!("verify category preview (run `skillpack verify` after `init` for the real score):");
-    println!("  discovery.*: structural validation of generated files per ecosystem");
-    println!("    (marketplace.json, plugin.json, SKILL.md frontmatter, .mdc, AGENTS.md");
-    println!("     presence, copilot-instructions.md)");
+    println!("  discovery.*: structural validation of every generated file per ecosystem");
+    println!("    (Claude plugin + native skills, Codex, Cursor, OpenCode, Copilot, AGENTS.md,");
+    println!("     CLAUDE.md, GEMINI.md, Windsurf, Aider, Cline, Roo Code, Kilo Code, Goose)");
     if profile.has_cli {
         println!("  invocation.*: runs the CLI: --help, flag drift, subcommand drift");
         println!("    --version drift (advisory)");
@@ -1482,6 +1521,7 @@ fn run_update_inner(
     template_dir: Option<&Path>,
     format: verify::OutputFormat,
 ) -> Result<i32> {
+    reject_report_format(format)?;
     let (profile, skills, files) = render_from_config(root, &raw_targets, template_dir)?;
     if verbose {
         print_profile(&profile, false);
@@ -1597,6 +1637,7 @@ fn run_diff_inner(
     template_dir: Option<&Path>,
     format: verify::OutputFormat,
 ) -> Result<i32> {
+    reject_report_format(format)?;
     let (profile, _skills, files) = render_from_config(root, raw_targets, template_dir)?;
     if verbose {
         print_profile(&profile, false);
@@ -1804,7 +1845,7 @@ fn run_add_inner(
         );
     };
 
-    let skill_name = coerce_kebab(name);
+    let skill_name = coerce_add_name(name)?;
     let mut intents = cfg.to_intents();
     if intents.iter().any(|(n, _)| coerce_kebab(n) == skill_name) {
         bail!("skill `{skill_name}` already exists in skillpack.toml; pick a different name");
@@ -1838,6 +1879,26 @@ fn run_add_inner(
         template_dir,
         verify::OutputFormat::Human,
     )
+}
+
+/// Validate a user-supplied `skillpack add <name>` and coerce it to kebab-case.
+/// Rejects empty or letter-free input that would silently coerce to the `tool`
+/// fallback (`coerce_kebab("")` / `coerce_kebab("!!!")` / `coerce_kebab("123")`
+/// all yield `tool`) — or worse, collide with another garbage name that also
+/// coerces to `tool`. The user gets an actionable error instead of a surprise
+/// `tool` skill.
+fn coerce_add_name(name: &str) -> Result<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        bail!("skill name must not be empty (run `skillpack add <name>` with a kebab-case name)");
+    }
+    if !trimmed.chars().any(|c| c.is_ascii_alphabetic()) {
+        bail!(
+            "skill name `{trimmed}` contains no letters; use a name like `my-tool` \
+             (skillpack coerces it to kebab-case)"
+        );
+    }
+    Ok(coerce_kebab(name))
 }
 
 /// `skillpack config` — validate (or summarize) the committed `skillpack.toml`.
@@ -1961,5 +2022,44 @@ mod confirm_tests {
         };
         // Must not panic.
         print_profile(&profile, false);
+    }
+
+    // `skillpack add` must reject names that would silently coerce to the
+    // `tool` fallback (empty, punctuation-only, digits-only) instead of
+    // creating a surprise `tool` skill — or colliding with another garbage
+    // name that also coerces to `tool`.
+    #[test]
+    fn coerce_add_name_rejects_garbage_and_coerces_valid() {
+        assert!(coerce_add_name("").is_err());
+        assert!(coerce_add_name("   ").is_err());
+        assert!(coerce_add_name("!!!").is_err());
+        assert!(coerce_add_name("123").is_err());
+        assert!(coerce_add_name("123-456").is_err());
+
+        // Valid names coerce to kebab; the literal `tool` is allowed.
+        assert_eq!(coerce_add_name("My Tool").unwrap(), "my-tool");
+        assert_eq!(coerce_add_name("tool").unwrap(), "tool");
+        assert_eq!(coerce_add_name("123-foo").unwrap(), "foo");
+    }
+
+    // `--format sarif`/`--format github` only make sense for `verify`;
+    // init/update/diff must reject them rather than silently emit JSON.
+    #[test]
+    fn reject_report_format_allows_only_human_and_json() {
+        assert!(reject_report_format(verify::OutputFormat::Human).is_ok());
+        assert!(reject_report_format(verify::OutputFormat::Json).is_ok());
+        assert!(reject_report_format(verify::OutputFormat::Sarif).is_err());
+        assert!(reject_report_format(verify::OutputFormat::Github).is_err());
+    }
+
+    // `main`'s catch_unwind names the panic payload (`panic!("msg")` carries
+    // a `&str`, `panic!("msg {}", x)` a `String`) instead of printing a bare
+    // "crashed".
+    #[test]
+    fn panic_message_reads_str_and_string_payloads() {
+        let s: Box<dyn std::any::Any + Send> = Box::new("boom");
+        assert_eq!(panic_message(&*s), "boom");
+        let s: Box<dyn std::any::Any + Send> = Box::new("boom".to_string());
+        assert_eq!(panic_message(&*s), "boom");
     }
 }

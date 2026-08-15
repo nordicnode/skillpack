@@ -7,7 +7,7 @@
 //! matters, and `default(value=...)` keeps fields present rather than
 //! conditionally-present).
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use once_cell::sync::Lazy;
 use std::path::Path;
 use tera::{Context as TeraContext, Tera};
@@ -305,6 +305,9 @@ pub fn render_all(
     targets: &[Target],
     template_dir: Option<&Path>,
 ) -> Result<Vec<GeneratedFileOutput>> {
+    if skills.is_empty() {
+        bail!("cannot render an empty skill list (no [skill]/[[skills]] entries)");
+    }
     let tera = build_tera(template_dir)?;
     let mut out = Vec::new();
     let (primary_name, primary_intent) = &skills[0];
@@ -1210,6 +1213,20 @@ mod tests {
             .find(|f| f.rel_path == "skills/chronicle/SKILL.md")
             .unwrap();
         assert!(prim.contents.contains("name: chronicle"));
+    }
+
+    /// An empty skill list must be a clean error, not an index-out-of-bounds
+    /// panic (`&skills[0]`) that `main`'s catch_unwind would mask as a generic
+    /// crash. Callers guard today, but this is a public API.
+    #[test]
+    fn render_all_rejects_empty_skill_list() {
+        let p = cli_profile();
+        let err = render_all(&p, &[], &[Target::Claude], None).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("empty skill list"),
+            "expected a clear empty-skill error, got: {msg}"
+        );
     }
 
     /// The four new rule/instructions targets (Cline, Roo, Kilo, Goose)

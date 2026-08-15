@@ -813,20 +813,67 @@ fn check_version_drift(
         return;
     }
 
-    if !stdout.contains(&plugin_version) {
+    // Exact-match the first standalone version token when the CLI prints one
+    // (e.g. `skillpack 0.13.0` → `0.13.0`, `v0.13.0` → `0.13.0`). The old
+    // substring check made `plugin 0.1` "match" a CLI printing `0.1.0`, or
+    // `plugin 1` match a CLI printing `11.0` — a false pass is worse than a
+    // false warn. Substring containment remains only as the fallback for CLIs
+    // that embed the version inside a longer token with no standalone version.
+    let matches = extract_version_token(stdout)
+        .map(|tok| tok == plugin_version)
+        .unwrap_or_else(|| stdout.contains(&plugin_version));
+
+    if !matches {
         report.push(CheckResult::warn(
             "invocation.version_drift",
             "CLI --version matches plugin.json version",
-            format!("`--version` output `{stdout}` does not contain plugin.json version `{plugin_version}`"),
+            format!("`--version` output `{stdout}` does not match plugin.json version `{plugin_version}`"),
             "To fix: re-run `skillpack update` to sync plugin.json with the CLI's version, or pin the version intentionally.",
         ));
     } else {
         report.push(CheckResult::pass(
             "invocation.version_drift",
             "CLI --version matches plugin.json version",
-            format!("`{stdout}` contains plugin.json version `{plugin_version}`"),
+            format!("`{stdout}` matches plugin.json version `{plugin_version}`"),
         ));
     }
+}
+
+/// Pull the first standalone version-looking token from `--version` output.
+/// Handles `prog 0.13.0`, `v0.13.0`, `0.13.0 (build abc)`, and semver
+/// pre-release/build suffixes (`1.0.0-rc.1+build2`). Returns `None` when no
+/// digit-leading token is present (e.g. a CLI that prints only a git SHA or
+/// human prose), so the caller can fall back to substring containment.
+fn extract_version_token(stdout: &str) -> Option<String> {
+    for tok in stdout.split_whitespace() {
+        // Strip surrounding punctuation (parens, quotes, trailing comma) but
+        // keep interior version chars.
+        let t =
+            tok.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '+');
+        if t.is_empty() || !t.chars().any(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        // A single leading `v`/`V` is conventional; strip it for the compare.
+        let core = t
+            .strip_prefix('v')
+            .or_else(|| t.strip_prefix('V'))
+            .unwrap_or(t);
+        let first = core.chars().next()?;
+        if !first.is_ascii_digit() {
+            continue;
+        }
+        // Plausible version: digits, dots, hyphens, plus, and (for semver
+        // pre-release) ASCII letters. Anything else (e.g. a URL or sentence)
+        // is not a version token.
+        if core
+            .chars()
+            .any(|c| !(c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '+'))
+        {
+            continue;
+        }
+        return Some(core.to_string());
+    }
+    None
 }
 
 /// Extract the set of `--double-dash` and `-single-dash` flags from a blob.
@@ -1202,6 +1249,58 @@ x --new
     fn extract_documented_subcommands_empty_when_no_block() {
         let skill = "## Invocation\n\n```\nchronicle --new\n```\n";
         assert!(extract_documented_subcommands(skill).is_empty());
+    }
+
+    /// `extract_version_token` finds the first standalone version token and
+    /// normalizes the conventional `v`/`V` prefix away, so `check_version_drift`
+    /// compares versions exactly instead of via loose substring containment.
+    #[test]
+    fn extract_version_token_normalizes_common_shapes() {
+        assert_eq!(
+            extract_version_token("skillpack 0.13.0"),
+            Some("0.13.0".into())
+        );
+        assert_eq!(extract_version_token("v0.13.0"), Some("0.13.0".into()));
+        assert_eq!(extract_version_token("V1.2.3"), Some("1.2.3".into()));
+        assert_eq!(
+            extract_version_token("0.13.0 (build abc)"),
+            Some("0.13.0".into())
+        );
+        // Semver pre-release + build metadata survive intact.
+        assert_eq!(
+            extract_version_token("1.0.0-rc.1+build2"),
+            Some("1.0.0-rc.1+build2".into())
+        );
+        // Parenthesized/glued punctuation is stripped around the token.
+        assert_eq!(extract_version_token("(0.1.0)"), Some("0.1.0".into()));
+    }
+
+    /// Non-version tokens (a git SHA, a date-less word, prose) return `None`
+    /// so the caller falls back to substring containment rather than a bogus
+    /// exact compare.
+    #[test]
+    fn extract_version_token_returns_none_for_non_version_output() {
+        assert_eq!(extract_version_token("build abc123def"), None);
+        assert_eq!(extract_version_token(""), None);
+        assert_eq!(extract_version_token("unknown"), None);
+    }
+
+    /// The substring fallback's false positive is gone: `0.1` used to "match"
+    /// a CLI printing `0.1.0` (prefix), and `1` used to match `11.0`. Exact
+    /// token comparison distinguishes them.
+    #[test]
+    fn version_drift_exact_match_rejects_prefix_substrings() {
+        // A version token present but different → must NOT be considered equal.
+        assert_ne!(
+            extract_version_token("0.1.0").as_deref(),
+            Some("0.1"),
+            "0.1.0 must not equal 0.1 under exact token matching"
+        );
+        assert_ne!(
+            extract_version_token("11.0").as_deref(),
+            Some("1"),
+            "11.0 must not equal 1 under exact token matching"
+        );
     }
 
     /// Regression for ce2a892 + the `no`-inversion it shipped: the reverse-drift

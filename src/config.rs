@@ -202,11 +202,23 @@ impl Config {
     /// phrases are left to `verify`'s soft-checks (load stays lossless;
     /// empty triggers surface as a verify warning, not a load-time error).
     fn validate(&self) -> Result<()> {
+        let mut seen = std::collections::HashSet::new();
         for s in self.skill.iter().chain(self.skills.iter()) {
             if !crate::verify::discovery::is_valid_kebab(&s.name) {
                 bail!(
                     "skill name must be non-empty kebab-case (a-z, 0-9, single \
                      hyphens), got {:?}",
+                    s.name
+                );
+            }
+            // A duplicate name would make `render_all` emit the same output
+            // path twice and `write_files`/`update` silently overwrite the
+            // first copy with the second (last-wins). Reject it at load time
+            // so a hand-edited config can't corrupt the pack this way.
+            if !seen.insert(s.name.clone()) {
+                bail!(
+                    "duplicate skill name {:?} in skillpack.toml (every skill \
+                     needs a unique name)",
                     s.name
                 );
             }
@@ -376,6 +388,43 @@ mod tests {
                 footguns: Vec::new(),
                 ..Default::default()
             }],
+            defaults: Defaults::default(),
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_skill_names() {
+        // Two [[skills]] entries with the same name would make render_all emit
+        // the same rel_path twice (last-wins on write). Reject at load time.
+        let s = || SkillConfig {
+            name: "dupe".into(),
+            one_line_description: "d".into(),
+            when_to_use_phrases: vec!["x".into()],
+            invocation_command: None,
+            import_pattern: Some("import d".into()),
+            author: None,
+            license: None,
+            verify_stdin: None,
+            footguns: Vec::new(),
+            ..Default::default()
+        };
+        let cfg = Config {
+            skill: None,
+            skills: vec![s(), s()],
+            defaults: Defaults::default(),
+        };
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("duplicate skill name"), "got: {err}");
+
+        // A [skill] table colliding with a [[skills]] entry is the same defect.
+        let mut primary = s();
+        primary.name = "primary".into();
+        let mut dup = s();
+        dup.name = "primary".into();
+        let cfg = Config {
+            skill: Some(primary),
+            skills: vec![dup],
             defaults: Defaults::default(),
         };
         assert!(cfg.validate().is_err());
