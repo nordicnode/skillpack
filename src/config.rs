@@ -142,6 +142,14 @@ pub struct Defaults {
 }
 
 impl Default for Defaults {
+    // `license` deliberately defaults to MIT (not `None`): the generated
+    // plugin.json/marketplace.json both fall back to MIT when the intent
+    // carries no license, and the interview's license prompt defaults to MIT
+    // too — so an absent `[defaults]` table round-trips as the same MIT that
+    // every other path would produce. Note this makes "no [defaults] table"
+    // indistinguishable from an explicit `license = "MIT"`; that is the
+    // intent (MIT is the lowest-surprise default for OSS), just documented
+    // so the losslessness claim in the module doc stays honest.
     fn default() -> Self {
         Self {
             author: None,

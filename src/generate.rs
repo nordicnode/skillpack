@@ -259,13 +259,15 @@ fn keywords_for(profile: &ProjectProfile, intent: &Intent, has_cli: bool) -> Vec
 }
 
 /// Escape a string so it's safe to embed inside YAML double-quoted scalar.
-/// We escape backslash and double-quote, and normalize carriage returns and newlines
-/// to spaces so the scalar stays clean on a single line.
+/// We escape backslash and double-quote, and normalize carriage returns,
+/// newlines, and tabs to spaces so the scalar stays clean on a single line
+/// (a literal tab is invalid inside a YAML scalar, so it must not survive).
 fn escape_yaml(s: &str) -> String {
+    // Escape backslash and double-quote first (so the normalization below
+    // can't introduce raw ones), then normalize CR/LF/tab to a single space.
     s.replace('\\', "\\\\")
         .replace('"', "\\\"")
-        .replace('\r', "")
-        .replace('\n', " ")
+        .replace(['\r', '\n', '\t'], " ")
 }
 
 /// The one-line description can itself contain a colon; wrap it through the
@@ -627,11 +629,16 @@ pub fn cursor_globs_hint(lang: Language) -> Vec<String> {
 /// Format a glob list as a YAML flow-sequence string with quoted entries:
 /// `"*.rs", "*.go"`. Empty vec → empty string (template's `{% if globs %}`
 /// gates the line). The template wraps with `globs: [{{ globs }}]` →
-/// `globs: ["*.rs"]`.
+/// `globs: ["*.rs"]`. Backslashes and quotes inside a glob are escaped so
+/// the flow sequence stays valid YAML (a Windows-style `src\\**\\*.rs` glob
+/// or a glob containing `"` would otherwise break the quoted scalar).
 fn globs_to_yaml(globs: &[String]) -> String {
     globs
         .iter()
-        .map(|g| format!("\"{g}\""))
+        .map(|g| {
+            let escaped = g.replace('\\', "\\\\").replace('"', "\\\"");
+            format!("\"{escaped}\"")
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -645,6 +652,32 @@ pub fn opencode_mode_hint(lang: Language) -> &'static str {
     } else {
         "primary"
     }
+}
+
+/// Refuse to write through a symlink. `rel_path` is root-relative and the
+/// write targets `root.join(rel_path)`; if any ancestor directory (or the
+/// target itself, when it already exists) is a symlink, `create_dir_all` +
+/// `write` would follow it and write outside the project root. Returns an
+/// error naming the offending path instead of escaping the repo.
+///
+/// Shared by `init`/`update` (`commands::write_files`, `update::run_update_inner`)
+/// and `verify --fix` (`verify::fix`) so the symlink-escape hardening can't
+/// drift between the two write paths — a path `init` refuses is a path
+/// `--fix` must refuse too.
+pub fn ensure_no_symlink_ancestors(root: &Path, rel_path: &str) -> Result<()> {
+    let mut cur = root.to_path_buf();
+    for comp in Path::new(rel_path).components() {
+        cur.push(comp.as_os_str());
+        if let Ok(meta) = std::fs::symlink_metadata(&cur) {
+            if meta.file_type().is_symlink() {
+                bail!(
+                    "refusing to write through a symlink at {}; remove it or re-run in a non-symlinked checkout",
+                    cur.display()
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Coerce an arbitrary detected name into valid kebab-case for the plugin/skill
@@ -797,6 +830,25 @@ mod tests {
         assert_eq!(coerce_kebab("123"), "tool");
         assert_eq!(coerce_kebab("123-456"), "tool");
         assert_eq!(coerce_kebab("9"), "tool");
+    }
+
+    #[test]
+    fn escape_yaml_handles_tabs_and_quotes() {
+        assert_eq!(escape_yaml("a\tb"), "a b", "tab must become a space");
+        assert_eq!(escape_yaml("say \"hi\""), "say \\\"hi\\\"");
+        assert_eq!(escape_yaml("line1\nline2"), "line1 line2");
+        assert_eq!(escape_yaml("back\\slash"), "back\\\\slash");
+    }
+
+    #[test]
+    fn globs_to_yaml_escapes_quotes_and_backslashes() {
+        assert_eq!(globs_to_yaml(&["*.rs".into()]), "\"*.rs\"");
+        assert_eq!(
+            globs_to_yaml(&["src\\**\\*.rs".into()]),
+            "\"src\\\\**\\\\*.rs\""
+        );
+        assert_eq!(globs_to_yaml(&["a\"b".into()]), "\"a\\\"b\"");
+        assert!(globs_to_yaml(&[]).is_empty());
     }
 
     #[test]

@@ -63,13 +63,11 @@ fn run_verify_inner(
         .and_then(|opt| opt.and_then(|cfg| cfg.to_intent()))
         .and_then(|intent| intent.verify_stdin);
     if verbose {
-        print_profile(
-            &profile,
-            matches!(
-                format,
-                verify::OutputFormat::Json | verify::OutputFormat::Sarif
-            ),
-        );
+        // Every machine-readable format (json, sarif, github annotations,
+        // junit XML) owns stdout; the introspection block must go to stderr
+        // so `--verbose --format github` / `--format junit` output stays
+        // parseable, not just json/sarif. Human mode keeps it on stdout.
+        print_profile(&profile, format != verify::OutputFormat::Human);
     }
     let render = |report: &verify::VerifyReport| match format {
         verify::OutputFormat::Human => verify::render(report),
@@ -201,13 +199,27 @@ fn run_verify_watch(
     let debounce = Duration::from_secs(1);
     let mut last_event: Option<Instant> = None;
 
-    // Skip events from noisy paths (target/, .git/, node_modules/).
+    // Skip events from noisy paths: build/vendored/cache trees (the same set
+    // `introspect::is_noise_dir` skips — a watch re-run on `cargo build`
+    // churn is pure noise), plus the agent benchmark run artifacts, so editing
+    // benchmark results doesn't re-verify.
     let is_noise = |path: &std::path::Path| -> bool {
+        let s = path.to_string_lossy();
+        if s.contains("scripts/benchmark/results") {
+            return true;
+        }
         path.components().any(|c| {
             matches!(
                 c,
                 std::path::Component::Normal(s)
-                    if s == "target" || s == ".git" || s == "node_modules"
+                    if matches!(
+                        s.to_str(),
+                        Some(
+                            "target" | ".git" | "node_modules" | "dist" | "build" | "out"
+                                | "vendor" | "venv" | "__pycache__" | "coverage" | "Pods"
+                                | "bazel-bin" | "bazel-out" | ".freebuff"
+                        )
+                    )
             )
         })
     };

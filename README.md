@@ -1,7 +1,7 @@
 <div align="center">
   <img src="docs/logo.png" width="480" alt="skillpack logo">
   <p><strong>The agent-distribution layer for modern OSS tools and libraries.</strong></p>
-  <p>Generate, verify, and maintain agent instructions across Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, Freebuff, and 18 AI coding ecosystems.</p>
+  <p>Generate, verify, and maintain agent instructions across Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, Freebuff, and 19 AI coding ecosystems.</p>
 
   <p>
     <a href="https://github.com/nordicnode/skillpack/actions/workflows/ci.yml"><img src="https://github.com/nordicnode/skillpack/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
@@ -56,7 +56,7 @@ Without an agent guidance layer, AI coding agents frequently:
 
 ## Key Features
 
-* **Universal Multi-Ecosystem Generation**: Generates native guidance files for **18 agent formats** simultaneously (`AGENTS.md`, Claude Code (plugin + native `.claude/skills/`), Cursor `.mdc`, Codex, OpenCode, Copilot, `CLAUDE.md`, `GEMINI.md`, Windsurf, Aider, Cline, Roo Code, Kilo Code, Goose, Qoder, Continue, Augment, and Amazon Q). Freebuff and other AGENTS.md-native agents read the generated `AGENTS.md`.
+* **Universal Multi-Ecosystem Generation**: Generates native guidance files for **19 agent formats** simultaneously (`AGENTS.md`, Claude Code (plugin + native `.claude/skills/`), Cursor `.mdc`, Codex, OpenCode, Copilot, `CLAUDE.md`, `GEMINI.md`, Windsurf, Aider, Cline, Roo Code, Kilo Code, Goose, Qoder, Continue, Augment, Amazon Q, and Trae). Freebuff and other AGENTS.md-native agents read the generated `AGENTS.md`.
 * **Zero-Drift Verification**: Simulates agent invocations against your live CLI to verify that every documented flag and subcommand actually exists.
 * **Pre-Commit Safe**: `skillpack init` validates the complete surface before writing a single file to disk.
 * **Non-Destructive Updates**: `skillpack update` refreshes flags and versions while preserving your hand-written descriptions and notes.

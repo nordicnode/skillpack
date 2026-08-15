@@ -216,7 +216,9 @@ pub(crate) fn check_plugin_json(root: &Path, repo_url: &Option<String>) -> Resul
             "discovery.plugin.description",
             "plugin.json has a `description`",
             "plugin.json has no `description`",
-            "To fix: add a one-line `\"description\": \"...\"`; Claude shows this in the plugin manager.",
+            "To fix: set `one_line_description` in skillpack.toml (or re-run `skillpack init`), \
+             then `skillpack verify --fix` regenerates plugin.json from it; Claude shows \
+             this in the plugin manager.",
         ));
     }
 
@@ -243,7 +245,8 @@ pub(crate) fn check_plugin_json(root: &Path, repo_url: &Option<String>) -> Resul
                 "discovery.plugin.version_drift",
                 "plugin.json version matches the project manifest version",
                 format!("plugin.json version `{version}` != manifest version `{mv}`"),
-                "To fix: re-run `skillpack init` to regenerate plugin.json from the manifest, or intentionally pin the plugin version.",
+                "To fix: run `skillpack verify --fix` to regenerate plugin.json from the manifest \
+                 (or re-run `skillpack init`), or intentionally pin the plugin version.",
             ));
         }
     }
@@ -284,7 +287,8 @@ pub(crate) fn check_plugin_json(root: &Path, repo_url: &Option<String>) -> Resul
                     drifted.join("`, `")
                 ),
                 format!("plugin.json {detail} != git origin `{canonical}`"),
-                "To fix: re-run `skillpack init` to regenerate plugin.json from the current remote, or intentionally pin the URL.",
+                "To fix: run `skillpack verify --fix` to regenerate plugin.json from the current \
+                 remote (or re-run `skillpack init`), or intentionally pin the URL.",
             ));
         }
     }
@@ -299,7 +303,10 @@ pub(crate) fn check_plugin_json(root: &Path, repo_url: &Option<String>) -> Resul
             "discovery.plugin.author",
             "plugin.json has a real `author`",
             "plugin.json has no author (or defaults to \"Unspecified\")",
-            "To fix: set `authors` in your manifest (Cargo.toml [package].authors, package.json \"author\", pyproject.toml [project].authors, *.gemspec spec.authors), or pass --author; then re-run `skillpack init`.",
+            "To fix: set `author`/`defaults.author` in skillpack.toml, `authors` in your \
+             manifest (Cargo.toml [package].authors, package.json \"author\", pyproject.toml \
+             [project].authors, *.gemspec spec.authors), or pass --author on `init`; then run \
+             `skillpack verify --fix` to regenerate plugin.json from it.",
         ));
     }
 

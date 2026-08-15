@@ -103,11 +103,18 @@ fn run_inner(cmd: &mut Command, timeout: Duration, stdin_mode: StdinMode) -> Spa
         Err(e) => return SpawnOutcome::SpawnFailed(e.to_string()),
     };
 
-    // Write stdin payload then drop the handle so the child sees EOF.
-    if let Some(data) = &maybe_data {
+    // Write the stdin payload on a thread, then drop the handle so the child
+    // sees EOF once the write completes. Writing synchronously would let a
+    // child that never reads stdin block `write_all` forever on a full pipe
+    // buffer (bypassing the timeout) — on a thread, the probe keeps polling
+    // and can still kill on the deadline; the blocked writer is harmless
+    // (the process exits after the probe, and kill_tree closes the pipe,
+    // which unblocks the write with an EPIPE).
+    if let Some(data) = maybe_data {
         if let Some(mut child_stdin) = child.stdin.take() {
-            let _ = child_stdin.write_all(data);
-            drop(child_stdin);
+            thread::spawn(move || {
+                let _ = child_stdin.write_all(&data);
+            });
         }
     }
 
@@ -317,6 +324,25 @@ mod tests {
             s.contains("hello stdin"),
             "expected cat to echo fed stdin, got: {s}"
         );
+    }
+
+    /// Regression: a child that never reads stdin must not let the stdin write
+    /// block past the timeout. The old code wrote stdin synchronously — a
+    /// payload larger than the 64KB pipe buffer fed to a child that never
+    /// reads would deadlock `write_all` on the full buffer and hang the probe
+    /// forever. The write now runs on a thread, so the probe still fires the
+    /// deadline and returns TimedOut (kill_tree then closes the pipe, which
+    /// unblocks the writer with EPIPE).
+    #[cfg(unix)]
+    #[test]
+    fn uninterested_child_does_not_block_on_stdin_write() {
+        // `sleep` never reads stdin; 512KB exceeds the pipe buffer, so a
+        // synchronous write would block.
+        let mut cmd = Command::new("sleep");
+        cmd.arg("10");
+        let payload = vec![b'x'; 512 * 1024];
+        let out = run_with_stdin(&mut cmd, Duration::from_millis(500), Some(&payload));
+        assert_eq!(out, SpawnOutcome::TimedOut);
     }
 
     /// `run_with_stdin(None)` must behave identically to `run` — null stdin.

@@ -296,7 +296,7 @@ pub(crate) fn run_init(
     import: Option<String>,
     format: verify::OutputFormat,
 ) -> i32 {
-    if let Some(code) = handle_list_request(&raw_targets) {
+    if let Some(code) = handle_list_request("init", &raw_targets, format) {
         return code;
     }
     match run_init_inner(

@@ -11,7 +11,7 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 
 use skillpack::exit;
-use skillpack::generate::{coerce_kebab, GeneratedFileOutput};
+use skillpack::generate::{coerce_kebab, ensure_no_symlink_ancestors, GeneratedFileOutput};
 use skillpack::interview;
 use skillpack::types;
 use skillpack::verify;
@@ -49,11 +49,13 @@ fn trace_detected(profile: &types::ProjectProfile) {
     );
 }
 
-/// True when an output format is machine-readable (JSON). SARIF/Github are
-/// rejected before any init/update/diff path reaches this point (see
-/// [`reject_report_format`]), so only Human/Json survive.
+/// True when an output format is machine-readable JSON. SARIF/Github/Junit
+/// are rejected before any init/update/diff path reaches this point (see
+/// [`reject_report_format`]), so only Human/Json survive — keep the check
+/// strict so a future call site that forgets the reject can't get the wrong
+/// summary shape.
 fn is_json(format: verify::OutputFormat) -> bool {
-    !matches!(format, verify::OutputFormat::Human)
+    matches!(format, verify::OutputFormat::Json)
 }
 
 /// `--format sarif`/`--format github` only make sense for `verify` (which has
@@ -76,17 +78,29 @@ fn reject_report_format(format: verify::OutputFormat) -> Result<()> {
 
 /// Handle the special `--target list` value: print the canonical target names
 /// and return the exit code to return early with. Returns `None` when no
-/// `list` value was requested.
-fn handle_list_request(raw: &[String]) -> Option<i32> {
-    if raw.iter().any(|r| r == "list") {
+/// `list` value was requested. `command` is the subcommand name (it becomes
+/// the JSON envelope's `command` field) and `format` picks the output shape —
+/// `--target list --format json` emits a machine-readable array so CI scripts
+/// can stay on `--format json` for every invocation, not just the write paths.
+fn handle_list_request(command: &str, raw: &[String], format: verify::OutputFormat) -> Option<i32> {
+    if !raw.iter().any(|r| r == "list") {
+        return None;
+    }
+    if is_json(format) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "command": command,
+                "targets": skillpack::cli::target_names(),
+            })
+        );
+    } else {
         println!("supported --target values (repeat the flag; `all` = every target):");
         for name in skillpack::cli::target_names() {
             println!("  {name}");
         }
-        Some(exit::INIT_OK)
-    } else {
-        None
     }
+    Some(exit::INIT_OK)
 }
 
 fn interview_run(profile: &types::ProjectProfile) -> Result<types::Intent> {
@@ -94,27 +108,6 @@ fn interview_run(profile: &types::ProjectProfile) -> Result<types::Intent> {
     let prompter = interview::DialoguerPrompter;
     let intent = interview::run(profile, &prompter).context("during interview")?;
     Ok(intent)
-}
-
-/// Refuse to write through a symlink. `rel_path` is root-relative and the
-/// write targets `root.join(rel_path)`; if any ancestor directory (or the
-/// target itself, when it already exists) is a symlink, `create_dir_all` +
-/// `write` would follow it and write outside the project root. Returns an
-/// error naming the offending path instead of escaping the repo.
-fn ensure_no_symlink_ancestors(root: &Path, rel_path: &str) -> Result<()> {
-    let mut cur = root.to_path_buf();
-    for comp in Path::new(rel_path).components() {
-        cur.push(comp.as_os_str());
-        if let Ok(meta) = std::fs::symlink_metadata(&cur) {
-            if meta.file_type().is_symlink() {
-                bail!(
-                    "refusing to write through a symlink at {}; remove it or re-run in a non-symlinked checkout",
-                    cur.display()
-                );
-            }
-        }
-    }
-    Ok(())
 }
 
 fn write_files<'a>(

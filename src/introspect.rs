@@ -237,8 +237,13 @@ fn is_noise_dir(p: &Path) -> bool {
 /// nested subdirectories alike. `CCpp` deliberately omits the bare
 /// `Makefile` signal here (weak and shared across ecosystems), matching the
 /// pre-nested-walk behavior; `detect_language` still honors Makefile for the
-/// PRIMARY. Script-first ecosystems (`Shell`/`Powershell`) return false —
-/// a stray `*.sh` must not mint a secondary skill.
+/// PRIMARY.
+///
+/// Note: `Shell`/`Powershell` are NOT excluded here — their `present()` can
+/// return true for a shebang'd `*.sh` / `.ps1` repo. They never mint a
+/// secondary skill because `detect_all_languages`'s ORDER array omits them;
+/// this predicate is shared with `language_manifest_dir`, which may still
+/// resolve a shell/powershell repo when asked directly.
 fn language_present(dir: &Path, lang: Language) -> bool {
     language_spec(lang).present(dir)
 }

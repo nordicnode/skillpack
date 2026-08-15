@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand, ValueEnum};
     name = "skillpack",
     bin_name = "skillpack",
     version,
-    about = "Generate and verify the agent-distribution layer for any OSS project (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, AGENTS.md, CLAUDE.md, GEMINI.md, Windsurf, Aider, Cline, Roo Code, Kilo Code, Goose, Qoder, Continue, Augment, Amazon Q)."
+    about = "Generate and verify the agent-distribution layer for any OSS project (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, AGENTS.md, CLAUDE.md, GEMINI.md, Windsurf, Aider, Cline, Roo Code, Kilo Code, Goose, Qoder, Continue, Augment, Amazon Q, Trae)."
 )]
 pub struct Cli {
     #[command(subcommand)]

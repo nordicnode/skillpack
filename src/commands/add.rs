@@ -34,7 +34,7 @@ pub(crate) fn run_add(
     template_dir: Option<&Path>,
     format: verify::OutputFormat,
 ) -> i32 {
-    if let Some(code) = handle_list_request(&raw_targets) {
+    if let Some(code) = handle_list_request("add", &raw_targets, format) {
         return code;
     }
     match run_add_inner(
