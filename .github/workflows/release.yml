@@ -25,7 +25,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: '1.95.0'
-      - uses: Swatinem/rust-cache@v2
+      # No rust-cache here: `cargo publish` stages the package under
+      # `target/package/<crate>-<ver>/`, whose `tests/` directory trips
+      # rust-cache's post-job cleanup (it opendir()s `tests/target` and
+      # `tests/trybuild`, which don't exist in this crate, and logs two
+      # unhandled-ENOENT `##[error]` annotations on an otherwise green job).
+      # The publish job runs once per version and its cache key changes with
+      # every bump anyway, so caching buys nothing and only adds the noise.
       - name: Verify the tag version matches Cargo.toml
         # Read `version` only from the `[package]` table (not a bare `^version`
         # grep, which would break if a workspace-level `version` line ever
