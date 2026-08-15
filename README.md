@@ -162,6 +162,8 @@ Guided (With skillpack):    [Verified Flags, Anchored in Repo] ─────�
 | **Task Accuracy** | 4.0 / 4 (median) | **4.0 / 4 (every run)** | Guided perfect in all runs |
 
 > *Full benchmark methodology, repeatable test suites (`fd`, `ripgrep`, `bat`), and replay harness documentation are available in [`docs/benchmark.md`](docs/benchmark.md). Want to see it happen? Read the step-by-step [`docs/agent-demo.md`](docs/agent-demo.md), or reproduce the A/B run yourself from the committed transcripts.*
+>
+> *For the emitted file formats per target and what a format change would break, see [`docs/format-compat.md`](docs/format-compat.md).*
 
 ---
 
@@ -199,6 +201,12 @@ jobs:
 For a stricter gate that fails on *any* warning (not just critical failures),
 call `skillpack verify --min-score 100` directly — that is the bar skillpack
 holds itself to in its own CI.
+
+Before cutting a release tag, rehearse the release pipeline without
+publishing: `gh workflow run release-rehearsal.yml` runs `cargo publish
+--dry-run`, the full 6-platform binary build matrix, the version/URL
+invariants across the Homebrew formula, and a binary smoke test — so a
+packaging or build problem surfaces before the tag, not after.
 
 ### Pre-Commit Hook
 

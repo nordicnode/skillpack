@@ -4,7 +4,7 @@ A repeatable, honest A/B evaluation suite measuring the quantitative and qualita
 
 ```sh
 # Run the benchmark (or test with dry-run)
-scripts/benchmark/run.sh --suite fd --runs 3 --html
+scripts/benchmark/run.sh --suite fd --runs 5 --html
 
 # Analyze transcripts in multiple formats
 python3 scripts/benchmark/analyze.py scripts/benchmark/results --format table
@@ -87,13 +87,13 @@ Benchmarking your own CLI or OSS project is simple:
 
 ```sh
 # Run with a pre-configured suite
-scripts/benchmark/run.sh --suite ripgrep --runs 2 --html
+scripts/benchmark/run.sh --suite ripgrep --runs 5 --html
 
 # Or run against any custom repository URL
 scripts/benchmark/run.sh \
   --repo https://github.com/your-org/your-cli.git \
   --target-bin your-cli \
-  --runs 2 \
+  --runs 5 \
   --html
 ```
 
@@ -118,12 +118,20 @@ conditions is the guidance content. The agent wrapper, model, and questions are
 identical. agy's stream-json output does not expose command exit codes, so tool
 failures are inferred from error-shaped tool output (documented in `analyze.py`).
 
+**Sample size (`n`)**: both conditions are stochastic (model sampling), so a
+single run per condition cannot separate signal from noise. Use `--runs 5` per
+condition (the default) or more; `analyze.py` reports **medians** across the
+runs precisely because they are robust to the occasional outlier run (e.g.
+`a-plain-r3`'s 30-round / 3/4 outlier above barely moves the median). The
+committed `fd` results below used `--runs 3`; any re-run should use ≥5 to keep
+median deltas stable.
+
 ### CLI Options Reference
 
 | Option | Env Variable | Default | Description |
 |---|---|---|---|
 | `--suite S` | `SKILLPACK_BENCH_SUITE` | `fd` | Suite name (`fd`, `ripgrep`, `bat`) or path to JSON |
-| `--runs N` | `SKILLPACK_BENCH_RUNS` | `1` | Runs per condition |
+| `--runs N` | `SKILLPACK_BENCH_RUNS` | `5` | Runs per condition (≥5 recommended — see methodology note) |
 | `--model M` | `SKILLPACK_BENCH_MODEL` | agy default | Specific model identifier to pin (passed to `agy --model`) |
 | `--format FMT` | `SKILLPACK_BENCH_FORMAT` | `table` | Output format: `table`, `markdown`, `json`, `csv`, `html` |
 | `--html` | (none) | `false` | Automatically generate interactive `report.html` |
