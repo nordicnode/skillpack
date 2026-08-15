@@ -20,6 +20,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `skillpack remove <name>` — the symmetric counterpart to `add`: drops a
   skill from `skillpack.toml`, deletes its orphaned per-skill files, and
   regenerates the remaining targets.
+- Four new agent ecosystems: **Qoder** (`.qoder/rules/`), **Continue**
+  (`.continue/rules/`), **Augment Code** (`.augment/rules/`), and **Amazon Q
+  Developer** (`.amazonq/rules/`) — plain-markdown workspace-rule targets,
+  taking the supported agent count from 14 to 18.
 - `verify --format json` now self-identifies with `$schema` and
   `schemaVersion` fields (matched by `verify-report.schema.json`), and
   `doctor --format json` gained a `verify_category_preview` field.

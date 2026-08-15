@@ -56,7 +56,7 @@ Without an agent guidance layer, AI coding agents frequently:
 
 ## Key Features
 
-* **Universal Multi-Ecosystem Generation**: Generates native guidance files for **14 agent formats** simultaneously (`AGENTS.md`, Claude Code (plugin + native `.claude/skills/`), Cursor `.mdc`, Codex, OpenCode, Copilot, `CLAUDE.md`, `GEMINI.md`, Windsurf, Aider, Cline, Roo Code, Kilo Code, and Goose). Freebuff and other AGENTS.md-native agents read the generated `AGENTS.md`.
+* **Universal Multi-Ecosystem Generation**: Generates native guidance files for **18 agent formats** simultaneously (`AGENTS.md`, Claude Code (plugin + native `.claude/skills/`), Cursor `.mdc`, Codex, OpenCode, Copilot, `CLAUDE.md`, `GEMINI.md`, Windsurf, Aider, Cline, Roo Code, Kilo Code, Goose, Qoder, Continue, Augment, and Amazon Q). Freebuff and other AGENTS.md-native agents read the generated `AGENTS.md`.
 * **Zero-Drift Verification**: Simulates agent invocations against your live CLI to verify that every documented flag and subcommand actually exists.
 * **Pre-Commit Safe**: `skillpack init` validates the complete surface before writing a single file to disk.
 * **Non-Destructive Updates**: `skillpack update` refreshes flags and versions while preserving your hand-written descriptions and notes.
@@ -132,6 +132,10 @@ Running `skillpack init --target all` generates a clean, non-intrusive distribut
 | **Cline** | `.clinerules/<tool>.md` | Workspace rules for the Cline coding agent (optional `paths:` conditional frontmatter). |
 | **Roo Code** | `.roo/rules/<tool>.md` | Workspace rules for Roo Code. |
 | **Kilo Code** | `.kilocode/rules/<tool>.md` | Workspace rules for Kilo Code (auto-included directory). |
+| **Qoder** | `.qoder/rules/<tool>.md` | Workspace rules for Qoder (`.qoder/rules/` markdown files). |
+| **Continue** | `.continue/rules/<tool>.md` | Rule files for Continue.dev. |
+| **Augment Code** | `.augment/rules/<tool>.md` | Project instruction files for Augment Code. |
+| **Amazon Q Developer** | `.amazonq/rules/<tool>.md` | Project rules for AWS's Amazon Q Developer. |
 | **Goose** | `.goose/instructions.md` | Project instructions for Block's Goose agent. |
 | **Deterministic Config** | `skillpack.toml` | Committed configuration making future updates and CI checks deterministic (JSON Schema at `skillpack.schema.json`). |
 

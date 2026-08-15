@@ -52,9 +52,11 @@ Other ecosystems:
   non-empty, first non-blank line starts with a `#` heading.
 - **AGENTS.md** — plain markdown at the repo root: non-empty, `#` heading.
 - **Cline** (`.clinerules/<name>.md`), **Roo Code** (`.roo/rules/<name>.md`),
-  and **Kilo Code** (`.kilocode/rules/<name>.md`) — plain-markdown workspace
-  rules (an optional `---` frontmatter block is tolerated; a missing `#`
-  heading warns).
+  **Kilo Code** (`.kilocode/rules/<name>.md`), **Qoder** (`.qoder/rules/<name>.md`),
+  **Continue** (`.continue/rules/<name>.md`), **Augment Code**
+  (`.augment/rules/<name>.md`), and **Amazon Q Developer**
+  (`.amazonq/rules/<name>.md`) — plain-markdown workspace rules (an optional
+  `---` frontmatter block is tolerated; a missing `#` heading warns).
 - **Goose** (`.goose/instructions.md`) — plain markdown at the repo root:
   non-empty, `#` heading.
 
