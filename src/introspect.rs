@@ -74,7 +74,8 @@ pub fn introspect(root: &Path) -> Result<ProjectProfile> {
     // and `doctor` can fill plugin.json's author without a prompt.
     let authors =
         manifest::project_manifest_authors(root, language).or_else(|| repo::detect_author(root));
-    let description_hint = repo::read_readme_hint(root);
+    let description_hint =
+        repo::read_readme_hint(root).or_else(|| manifest::manifest_description(root, language));
     let d = cli_probe::detect_cli(root, language, manifest_name.clone(), &mut diag);
     let has_cli = d.has_cli;
     let cli_command = d.command;
@@ -172,6 +173,34 @@ pub(crate) fn detect_all_languages(root: &Path) -> Vec<Language> {
                 || root.join("cabal.project").exists()
                 || cli_probe::has_cabal_file(root),
         ),
+        (
+            Language::Lua,
+            cli_probe::has_file_with_ext(root, "rockspec"),
+        ),
+        (Language::Julia, root.join("Project.toml").exists()),
+        (Language::Crystal, root.join("shard.yml").exists()),
+        (
+            Language::Clojure,
+            root.join("deps.edn").exists() || root.join("project.clj").exists(),
+        ),
+        (
+            Language::Ocaml,
+            root.join("dune-project").exists() || cli_probe::has_file_with_ext(root, "opam"),
+        ),
+        (
+            Language::Erlang,
+            root.join("rebar.config").exists() || cli_probe::has_file_ending_with(root, ".app.src"),
+        ),
+        (
+            Language::R,
+            cli_probe::root_file_contains(root, "DESCRIPTION", "Package:"),
+        ),
+        (
+            Language::Perl,
+            root.join("cpanfile").exists()
+                || root.join("Makefile.PL").exists()
+                || root.join("META.json").exists(),
+        ),
     ];
     for (lang, present) in signals {
         if *present {
@@ -259,6 +288,27 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
         || cli_probe::has_cabal_file(root)
     {
         Language::Haskell
+    } else if cli_probe::has_file_with_ext(root, "rockspec") {
+        Language::Lua
+    } else if root.join("Project.toml").exists() {
+        Language::Julia
+    } else if root.join("shard.yml").exists() {
+        Language::Crystal
+    } else if root.join("deps.edn").exists() || root.join("project.clj").exists() {
+        Language::Clojure
+    } else if root.join("dune-project").exists() || cli_probe::has_file_with_ext(root, "opam") {
+        Language::Ocaml
+    } else if root.join("rebar.config").exists()
+        || cli_probe::has_file_ending_with(root, ".app.src")
+    {
+        Language::Erlang
+    } else if cli_probe::root_file_contains(root, "DESCRIPTION", "Package:") {
+        Language::R
+    } else if root.join("cpanfile").exists()
+        || root.join("Makefile.PL").exists()
+        || root.join("META.json").exists()
+    {
+        Language::Perl
     } else {
         diag.push(
             "detect_language",
@@ -266,7 +316,9 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
                 + "pyproject.toml, setup.py, setup.cfg, go.mod, composer.json, "
                 + "pom.xml, build.gradle, build.gradle.kts, Gemfile, *.gemspec, "
                 + "*.csproj, build.zig, Package.swift, CMakeLists.txt, meson.build, Makefile, mix.exs, deno.json, "
-                + "flake.nix, shell.nix, pubspec.yaml, stack.yaml, *.cabal); "
+                + "flake.nix, shell.nix, pubspec.yaml, stack.yaml, *.cabal, *.rockspec, Project.toml, "
+                + "shard.yml, deps.edn, project.clj, dune-project, *.opam, rebar.config, *.app.src, "
+                + "DESCRIPTION, cpanfile, Makefile.PL, META.json); "
                 + "language detected as Unknown",
         );
         Language::Unknown
@@ -384,6 +436,37 @@ mod parse_tests {
         let haskell = scratch(&[("stack.yaml", "resolver: lts")]);
         assert_eq!(detect_language(&haskell, &mut diag), Language::Haskell);
         cleanup(&haskell);
+    }
+
+    #[test]
+    fn detect_language_recognizes_eight_new_languages() {
+        let mut diag = DiagTrace::default();
+        let cases: &[(&[(&str, &str)], Language)] = &[
+            (
+                &[("mylua-1.0-1.rockspec", "package = \"x\"")],
+                Language::Lua,
+            ),
+            (&[("Project.toml", "name = \"x\"")], Language::Julia),
+            (&[("shard.yml", "name: x")], Language::Crystal),
+            (&[("deps.edn", "{:paths [\"src\"]}")], Language::Clojure),
+            (&[("dune-project", "(lang dune 3.0)")], Language::Ocaml),
+            (&[("rebar.config", "{deps, []}.")], Language::Erlang),
+            (
+                &[("DESCRIPTION", "Package: mypkg\nVersion: 1.0\n")],
+                Language::R,
+            ),
+            (&[("cpanfile", "requires 'Foo';")], Language::Perl),
+        ];
+        for (files, expected) in cases {
+            let root = scratch(files);
+            assert_eq!(
+                detect_language(&root, &mut diag),
+                *expected,
+                "detect_language for {:?} failed",
+                files
+            );
+            cleanup(&root);
+        }
     }
 
     #[test]

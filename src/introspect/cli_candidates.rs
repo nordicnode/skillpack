@@ -99,7 +99,17 @@ pub(crate) fn primary_cli_candidate(
         Language::CCpp => c_cpp_cli_candidate(root, name),
         Language::Elixir => elixir_cli_candidate(root, name),
         Language::Deno => deno_cli_candidate(root, name),
-        Language::Nix | Language::Dart | Language::Haskell => None,
+        Language::Dart => dart_cli_candidate(root, name),
+        Language::Haskell => haskell_cli_candidate(root, name),
+        Language::Lua => lua_cli_candidate(root, name),
+        Language::Julia => julia_cli_candidate(root, name),
+        Language::Crystal => crystal_cli_candidate(root, name),
+        Language::Clojure => clojure_cli_candidate(root, name),
+        Language::Ocaml => ocaml_cli_candidate(root, name),
+        Language::Erlang => erlang_cli_candidate(root, name),
+        Language::R => r_cli_candidate(root, name),
+        Language::Perl => perl_cli_candidate(root, name),
+        Language::Nix => None,
         Language::Unknown => which_on_path(name).map(|_| CliCandidate {
             argv: vec![name.to_string()],
             spawn_cwd: root.to_path_buf(),
@@ -627,6 +637,237 @@ fn deno_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
         argv: vec![p.to_string_lossy().to_string()],
         spawn_cwd: root.to_path_buf(),
     })
+}
+
+/// Dart: `dart run <entry>` from the project root (the canonical uninstalled
+/// invocation). Prefers a concrete `bin/<name>.dart` / `bin/main.dart` /
+/// `bin/cli.dart` entry point, then falls back to `dart run <name>` (resolves
+/// a `pubspec.yaml` `executables` entry or the default executable). Requires
+/// `dart` on PATH (honest `None` otherwise).
+fn dart_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    which_on_path("dart")?;
+    for script in &[
+        format!("bin/{name}.dart"),
+        "bin/main.dart".to_string(),
+        "bin/cli.dart".to_string(),
+    ] {
+        if root.join(script).is_file() {
+            return Some(CliCandidate {
+                argv: vec!["dart".to_string(), "run".to_string(), script.clone()],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    Some(CliCandidate {
+        argv: vec!["dart".to_string(), "run".to_string(), name.to_string()],
+        spawn_cwd: root.to_path_buf(),
+    })
+}
+
+/// Haskell: `stack run <name> --` (when a `stack.yaml` exists) else
+/// `cabal run <name> --`. The trailing `--` separates the build tool's own
+/// flags from the program's argv so the appended `--help` reaches the
+/// executable. Requires the runtime on PATH (honest `None` otherwise).
+fn haskell_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    if root.join("stack.yaml").exists() {
+        if let Some(stack) = which_on_path("stack") {
+            return Some(CliCandidate {
+                argv: vec![
+                    stack.to_string_lossy().to_string(),
+                    "run".to_string(),
+                    name.to_string(),
+                    "--".to_string(),
+                ],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    if let Some(cabal) = which_on_path("cabal") {
+        return Some(CliCandidate {
+            argv: vec![
+                cabal.to_string_lossy().to_string(),
+                "run".to_string(),
+                name.to_string(),
+                "--".to_string(),
+            ],
+            spawn_cwd: root.to_path_buf(),
+        });
+    }
+    None
+}
+
+/// Lua: `lua <script>` against a conventional entry point. Requires `lua`
+/// (or `luajit`) on PATH; honest `None` when no script/runtime is present.
+fn lua_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let lua = which_on_path("lua")
+        .or_else(|| which_on_path("luajit"))?
+        .to_string_lossy()
+        .to_string();
+    for script in &[
+        format!("bin/{name}.lua"),
+        format!("bin/{name}"),
+        "main.lua".to_string(),
+        "cli.lua".to_string(),
+        format!("src/{name}.lua"),
+    ] {
+        if root.join(script).is_file() {
+            return Some(CliCandidate {
+                argv: vec![lua, script.clone()],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    None
+}
+
+/// Julia: `julia --project=. <script>` against a conventional entry point.
+/// Requires `julia` on PATH; honest `None` when no script/runtime is present.
+fn julia_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let julia = which_on_path("julia")?.to_string_lossy().to_string();
+    for script in &[
+        format!("bin/{name}.jl"),
+        "main.jl".to_string(),
+        "src/cli.jl".to_string(),
+        format!("src/{name}.jl"),
+    ] {
+        if root.join(script).is_file() {
+            return Some(CliCandidate {
+                argv: vec![julia, "--project=.".to_string(), script.clone()],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    None
+}
+
+/// Crystal: a pre-built `bin/<name>` (from `shards build`), else
+/// `crystal run src/<name>.cr`. Requires the runtime or artifact; honest
+/// `None` otherwise.
+fn crystal_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    let bin = root.join("bin").join(format!("{name}{suffix}"));
+    if bin.is_file() {
+        return Some(CliCandidate {
+            argv: vec![canonicalize_for_argv(&bin)],
+            spawn_cwd: root.to_path_buf(),
+        });
+    }
+    if let Some(crystal) = which_on_path("crystal") {
+        for script in &[format!("src/{name}.cr"), "src/main.cr".to_string()] {
+            if root.join(script).is_file() {
+                return Some(CliCandidate {
+                    argv: vec![
+                        crystal.to_string_lossy().to_string(),
+                        "run".to_string(),
+                        script.clone(),
+                    ],
+                    spawn_cwd: root.to_path_buf(),
+                });
+            }
+        }
+    }
+    which_on_path(name).map(|p| CliCandidate {
+        argv: vec![p.to_string_lossy().to_string()],
+        spawn_cwd: root.to_path_buf(),
+    })
+}
+
+/// Clojure: `lein run` (Leiningen `project.clj`), else `clojure -M -m <name>`
+/// (deps.edn). The deps.edn form assumes the main namespace matches the
+/// detected name — a reasonable default for the common single-namespace CLI.
+/// Requires the runtime on PATH; honest `None` otherwise.
+fn clojure_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    if root.join("project.clj").is_file() {
+        if let Some(lein) = which_on_path("lein") {
+            return Some(CliCandidate {
+                argv: vec![lein.to_string_lossy().to_string(), "run".to_string()],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    if root.join("deps.edn").is_file() {
+        if let Some(clj) = which_on_path("clojure") {
+            return Some(CliCandidate {
+                argv: vec![
+                    clj.to_string_lossy().to_string(),
+                    "-M".to_string(),
+                    "-m".to_string(),
+                    name.to_string(),
+                ],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    None
+}
+
+/// OCaml: `dune exec <name>` from a dune project. Requires `dune` on PATH;
+/// honest `None` otherwise.
+fn ocaml_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    if !root.join("dune-project").is_file() && !root.join("dune").is_dir() {
+        return None;
+    }
+    which_on_path("dune").map(|dune| CliCandidate {
+        argv: vec![
+            dune.to_string_lossy().to_string(),
+            "exec".to_string(),
+            name.to_string(),
+        ],
+        spawn_cwd: root.to_path_buf(),
+    })
+}
+
+/// Erlang: no clean uninstalled invocation (rebar3 shell/escript require
+/// a release to already be built). Fall back to a PATH probe for an
+/// installed escript/binary; honest `None` when absent.
+fn erlang_cli_candidate(_root: &Path, name: &str) -> Option<CliCandidate> {
+    which_on_path(name).map(|p| CliCandidate {
+        argv: vec![p.to_string_lossy().to_string()],
+        spawn_cwd: _root.to_path_buf(),
+    })
+}
+
+/// R: `Rscript <script>` against a conventional entry point (R packages ship
+/// CLIs under `inst/` or `exec/`). Requires `Rscript` on PATH; honest `None`
+/// otherwise.
+fn r_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let rscript = which_on_path("Rscript")?.to_string_lossy().to_string();
+    for script in &[
+        "inst/cli.R".to_string(),
+        format!("inst/{name}.R"),
+        "exec/cli.R".to_string(),
+        "cli.R".to_string(),
+        "main.R".to_string(),
+    ] {
+        if root.join(script).is_file() {
+            return Some(CliCandidate {
+                argv: vec![rscript, script.clone()],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    None
+}
+
+/// Perl: `perl <script>` against a conventional entry point. Requires `perl`
+/// on PATH; honest `None` otherwise.
+fn perl_cli_candidate(root: &Path, name: &str) -> Option<CliCandidate> {
+    let perl = which_on_path("perl")?.to_string_lossy().to_string();
+    for script in &[
+        format!("bin/{name}"),
+        format!("bin/{name}.pl"),
+        "script/main.pl".to_string(),
+        "script/cli.pl".to_string(),
+        format!("{name}.pl"),
+    ] {
+        if root.join(script).is_file() {
+            return Some(CliCandidate {
+                argv: vec![perl, script.clone()],
+                spawn_cwd: root.to_path_buf(),
+            });
+        }
+    }
+    None
 }
 
 /// Canonicalize a path and strip the `\\?\` verbatim-UNC prefix that

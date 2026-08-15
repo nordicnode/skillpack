@@ -5,8 +5,19 @@
   "description": "Machine-readable output of `skillpack verify --format json`. Mirrors VerifyReport::render_json.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["ok", "discoverability_score", "counts", "results"],
+  "required": ["$schema", "schemaVersion", "ok", "discoverability_score", "counts", "results"],
   "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri",
+      "const": "https://raw.githubusercontent.com/nordicnode/skillpack/main/verify-report.schema.json",
+      "description": "Self-pointer to this schema, for consumers that auto-discover the validating schema."
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Monotonic version of the report shape; bumped only on breaking changes."
+    },
     "ok": {
       "type": "boolean",
       "description": "True when no check has Error severity (critical failure)."

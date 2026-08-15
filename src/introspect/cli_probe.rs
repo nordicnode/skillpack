@@ -218,11 +218,40 @@ pub(crate) fn has_csproj(root: &Path) -> bool {
 
 /// True if the root contains any `*.cabal` file (Haskell package manifest).
 pub(crate) fn has_cabal_file(root: &Path) -> bool {
+    has_file_with_ext(root, "cabal")
+}
+
+/// True if the root contains any file with the given extension (case-sensitive).
+pub(crate) fn has_file_with_ext(root: &Path, ext: &str) -> bool {
     fs::read_dir(root).is_ok_and(|entries| {
         entries
             .flatten()
-            .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("cabal"))
+            .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some(ext))
     })
+}
+
+/// True if the root contains any file whose name ends with `suffix` (for
+/// double-extension manifests like `.app.src`, which `has_file_with_ext`
+/// can't match because `Path::extension` returns only the last segment).
+pub(crate) fn has_file_ending_with(root: &Path, suffix: &str) -> bool {
+    fs::read_dir(root).is_ok_and(|entries| {
+        entries.flatten().any(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(suffix))
+        })
+    })
+}
+
+/// True if a top-level `name` file exists and contains `needle` as a
+/// whole-line prefix (or anywhere on a line, for a loose `contains` match).
+/// Used to distinguish R's `DESCRIPTION` (DCF `Package:` header) from an
+/// unrelated file that happens to share the name.
+pub(crate) fn root_file_contains(root: &Path, name: &str, needle: &str) -> bool {
+    fs::read_to_string(root.join(name))
+        .ok()
+        .is_some_and(|raw| raw.lines().any(|l| l.contains(needle)))
 }
 
 /// Detect whether the project ships an invokable CLI, and if so capture its

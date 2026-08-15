@@ -1,7 +1,7 @@
 <div align="center">
   <img src="docs/logo.png" width="480" alt="skillpack logo">
   <p><strong>The agent-distribution layer for modern OSS tools and libraries.</strong></p>
-  <p>Generate, verify, and maintain agent instructions across Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, Freebuff, and 14 AI coding ecosystems.</p>
+  <p>Generate, verify, and maintain agent instructions across Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, Freebuff, and 18 AI coding ecosystems.</p>
 
   <p>
     <a href="https://github.com/nordicnode/skillpack/actions/workflows/ci.yml"><img src="https://github.com/nordicnode/skillpack/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
@@ -226,6 +226,17 @@ repos:
 * **C / C++**: `CMakeLists.txt`, `meson.build`, `Makefile` and `build/` / `bin/` binaries.
 * **Elixir**: `mix.exs` and `_build/{dev,prod}/rel/` releases or `mix escript`.
 * **Deno**: `deno.json` / `deno.jsonc` and `deno run` script entrypoints.
+* **Nix**: `flake.nix` / `shell.nix` / `default.nix` (description capture; flakes are libraries/devshells).
+* **Dart / Flutter**: `pubspec.yaml` and `dart run` entrypoints.
+* **Haskell**: `*.cabal`, `cabal.project`, `stack.yaml` and `cabal run` / `stack run`.
+* **Lua**: `*.rockspec` and `lua` / `luajit` script entrypoints.
+* **Julia**: `Project.toml` and `julia --project` entrypoints.
+* **Crystal**: `shard.yml`, `crystal run`, and `shards build` binaries.
+* **Clojure**: `deps.edn` / `project.clj` and `lein run` / `clojure -M`.
+* **OCaml**: `dune-project` / `*.opam` and `dune exec`.
+* **Erlang**: `rebar.config` / `*.app.src` (name/version detection).
+* **R**: `DESCRIPTION` / `NAMESPACE` and `Rscript` entrypoints.
+* **Perl**: `cpanfile` / `Makefile.PL` / `META.json` and `perl` script entrypoints.
 
 ---
 

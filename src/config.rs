@@ -232,6 +232,21 @@ impl Config {
                     s.name
                 );
             }
+            // The marketplace `owner.type` field is restricted to two values
+            // by the JSON Schema, but the renderer would previously emit any
+            // string the user typed. Reject invalid values at load time so a
+            // hand-edited config can't produce a marketplace entry consumers
+            // reject.
+            if let Some(ot) = &s.owner_type {
+                if ot != "individual" && ot != "organization" {
+                    bail!(
+                        "skill {:?} has owner_type {:?}; expected \"individual\" \
+                         or \"organization\"",
+                        s.name,
+                        ot
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -438,6 +453,34 @@ mod tests {
             defaults: Defaults::default(),
         };
         assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_owner_type() {
+        let mut cfg = Config {
+            skill: Some(SkillConfig {
+                name: "mytool".into(),
+                one_line_description: "d".into(),
+                when_to_use_phrases: vec!["x".into()],
+                invocation_command: None,
+                import_pattern: Some("import d".into()),
+                author: None,
+                license: None,
+                verify_stdin: None,
+                footguns: Vec::new(),
+                ..Default::default()
+            }),
+            skills: Vec::new(),
+            defaults: Defaults::default(),
+        };
+        cfg.skill.as_mut().unwrap().owner_type = Some("collective".into());
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("owner_type"), "got: {err}");
+
+        for ok in ["individual", "organization"] {
+            cfg.skill.as_mut().unwrap().owner_type = Some(ok.into());
+            assert!(cfg.validate().is_ok(), "{ok} must be accepted");
+        }
     }
 
     #[test]

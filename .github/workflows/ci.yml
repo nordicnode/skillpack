@@ -194,6 +194,24 @@ jobs:
           if [ "$fail" = "1" ]; then exit 1; fi
           echo "version sync OK: $cargo_ver"
 
+  # The two committed JSON Schemas (skillpack.schema.json for the config, and
+  # verify-report.schema.json for `verify --format json`) must stay valid
+  # draft-07 and in sync with the renderer. Meta-validate both and check a
+  # representative report instance so a field drift (e.g. the `$schema`/
+  # `schemaVersion` self-pointer added to render_json) fails CI rather than
+  # shipping a schema consumers can't validate against.
+  schemas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: install jsonschema
+        run: pip install 'jsonschema>=4,<5'
+      - name: validate JSON schemas + report instance
+        run: python3 scripts/validate_schemas.py
+
   # Code coverage via cargo-llvm-cov (prebuilt, faster and less flaky than
   # tarpaulin) uploaded to Codecov. `fail_ci_if_error: false` keeps a missing
   # CODECOV_TOKEN or a transient upload failure from blocking a merge.

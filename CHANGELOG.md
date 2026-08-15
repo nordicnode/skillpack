@@ -6,11 +6,35 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.13.2](https://github.com/nordicnode/skillpack/compare/v0.13.1...v0.13.2) - 2026-08-15
-
 ### Added
 
-- expand languages, output formats, and distribution hardening
+- Eight new language ecosystems: **Lua** (`*.rockspec`), **Julia**
+  (`Project.toml`), **Crystal** (`shard.yml`), **Clojure** (`deps.edn` /
+  `project.clj`), **OCaml** (`dune-project` / `*.opam`), **Erlang**
+  (`rebar.config` / `*.app.src`), **R** (`DESCRIPTION`), and **Perl**
+  (`cpanfile` / `Makefile.PL` / `META.json`) — with manifest name/version/
+  author/license parsing, category/globs hints, and CLI candidates.
+- Expanded Dart (CLI detection + `pubspec.yaml` name/version/authors) and
+  Haskell (CLI detection + `.cabal` name/version), and Nix `flake.nix`
+  `description` capture as a description-hint fallback.
+- `skillpack remove <name>` — the symmetric counterpart to `add`: drops a
+  skill from `skillpack.toml`, deletes its orphaned per-skill files, and
+  regenerates the remaining targets.
+- `verify --format json` now self-identifies with `$schema` and
+  `schemaVersion` fields (matched by `verify-report.schema.json`), and
+  `doctor --format json` gained a `verify_category_preview` field.
+- A `schemas` CI job meta-validates both committed JSON Schemas and checks a
+  representative report instance (via `scripts/validate_schemas.py`).
+
+### Fixed
+
+- `owner_type` is now validated at config-load time (only `individual` or
+  `organization`) instead of letting the renderer emit any string.
+- `allowed_tools` hint is now keyed off `has_cli` (pure-library skills no
+  longer get a `Bash` hint), and derived marketplace keywords are capped at
+  16 so a deep CLI subcommand tree can't bloat the marketplace entry.
+
+## [0.13.2](https://github.com/nordicnode/skillpack/compare/v0.13.1...v0.13.2) - 2026-08-15
 
 ### Added
 

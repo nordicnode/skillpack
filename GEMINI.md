@@ -45,12 +45,13 @@ Run `skillpack --help` to discover the available flags. Documented flags (verifi
 
 This CLI uses subcommands. Each one has its own flags (verified by `skillpack verify`):
 
-- `init` — flags: `--root`, `--non-interactive`, `--author`, `--invocation`, `--import`, `--accept-warnings`, `--auto`, `--license`, `--trigger`, `--description`, `--verbose`, `--debug`, `--log-level`, `--target`, `--force`, `--log-format`, `--dry-run`, `--template-dir`, `--format`
+- `init` — flags: `--root`, `--non-interactive`, `--author`, `--invocation`, `--import`, `--accept-warnings`, `--auto`, `--license`, `--trigger`, `--description`, `--verbose`, `--debug`, `--log-level`, `--target`, `--force`, `--dry-run`, `--log-format`, `--template-dir`, `--format`
 - `verify` — flags: `--root`, `--format`, `--fix`, `--min-score`, `--watch`, `--template-dir`, `--verbose`, `--debug`, `--log-level`, `--log-format`
 - `doctor` — flags: `--root`, `--format`, `--verbose`, `--debug`, `--log-level`, `--log-format`
 - `update` — flags: `--root`, `--target`, `--force`, `--template-dir`, `--format`, `--verbose`, `--debug`, `--log-level`, `--log-format`
 - `diff` — flags: `--root`, `--target`, `--force`, `--template-dir`, `--format`, `--verbose`, `--debug`, `--log-level`, `--log-format`
-- `add` — flags: `--non-interactive`, `--root`, `--description`, `--trigger`, `--author`, `--invocation`, `--import`, `--license`, `--target`, `--verbose`, `--debug`, `--log-level`, `--force`, `--template-dir`, `--format`, `--log-format`
+- `add` — flags: `--non-interactive`, `--root`, `--description`, `--trigger`, `--author`, `--invocation`, `--import`, `--license`, `--target`, `--force`, `--verbose`, `--debug`, `--log-level`, `--template-dir`, `--format`, `--log-format`
+- `remove` — flags: `--root`, `--target`, `--force`, `--template-dir`, `--format`, `--verbose`, `--debug`, `--log-level`, `--log-format`
 - `completions` — flags: `--verbose`, `--debug`, `--log-level`, `--log-format`
 - `config` — flags: `--root`, `--validate`, `--verbose`, `--debug`, `--log-level`, `--log-format`
 

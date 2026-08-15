@@ -122,7 +122,7 @@ No-op when there's no fixable drift.
 | `init --import <PATTERN>` | import pattern for library projects — pass exactly one of `--invocation`/`--import` (bootstrap) |
 | `init --accept-warnings` | write files even when `verify` flags warnings (critical still blocks). Without it, warnings prompt before writing in interactive mode |
 | `init --license <SPDX>` | override the license for this run                              |
-| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, `claude-md`, `gemini`, `windsurf`, `aider`, `cline`, `roo`, `kilo`, `goose`, `freebuff`, or `all` (all 14). Repeatable; the special value `list` prints the canonical names. |
+| `init --target <ecosystem>` | agent ecosystem(s) to generate for: `claude` (default), `cursor`, `codex`, `opencode`, `copilot`, `agentsmd`, `claude-md`, `gemini`, `windsurf`, `aider`, `cline`, `roo`, `kilo`, `goose`, `qoder`, `continue`, `augment`, `amazonq`, `freebuff`, or `all` (all 18). Repeatable; the special value `list` prints the canonical names. |
 | `init --dry-run` | render + verify + preview without writing any files (or `skillpack.toml`); exits 0 |
 | `init --format human\|json` | human summary (default) or a machine-readable JSON object (`written`/`skipped`/`would_write`) for CI |
 | `init --force` | overwrite an existing `AGENTS.md` at repo root (skip+warn otherwise). Has no effect on other targets, which write to skillpack-owned paths. |
@@ -139,6 +139,9 @@ No-op when there's no fixable drift.
 | `diff --template-dir <DIR>` | same override semantics — use when checking a pack generated with custom templates (avoids spurious drift) |
 | `add <name>` | append a new skill to an existing `skillpack.toml` pack (then regenerate). Same bootstrap flags as `init --non-interactive` (`--description`/`--trigger`/`--author`/`--invocation`/`--import`/`--license`); interactive interview by default. |
 | `add --format human\|json` | human summary (default) or a machine-readable JSON object |
+| `remove <name>` | drop a skill from the pack: edits `skillpack.toml`, deletes the orphaned per-skill files, and regenerates the remaining targets (the symmetric counterpart to `add`). |
+| `remove --target <ecosystem>` | same target syntax as `update --target`; which ecosystems to regenerate after removal |
+| `remove --format human\|json` | human summary (default) or a machine-readable JSON object |
 | `config` | print a summary of the committed `skillpack.toml` (skills + defaults) |
 | `config --validate` | validate `skillpack.toml` against the structural invariants; exit non-zero when invalid |
 | `verify --format human\|json\|sarif\|github\|junit` | human report (default), machine-readable JSON for CI, SARIF 2.1.0 for GitHub Code Scanning upload-sarif, GitHub Actions `::error`/`::warning` annotations for inline PR-diff comments, or JUnit XML for xUnit-consuming CI (GitLab/Jenkins/CircleCI) |
@@ -147,7 +150,7 @@ No-op when there's no fixable drift.
 | `verify --watch` | re-run verify on every file change (debounced); iterative feedback during SKILL.md / skillpack.toml edits. Only valid with `--format human` (Ctrl-C stops). |
 | `verify --template-dir <DIR>` | use custom templates when `--fix` re-renders drifted files; pass the same dir used at `init` to avoid a drift loop |
 | `doctor` | read-only diagnosis: print detected language, CLI, diag trace, and verify-category preview (exit 0) |
-| `doctor --format human\|json` | read-only diagnosis as serialized `ProjectProfile` for CI (default: human) — JSON form does not include category preview |
+| `doctor --format human\|json` | read-only diagnosis as serialized `ProjectProfile` for CI (default: human); the JSON form adds a `verify_category_preview` field listing the target ecosystems and check categories |
 | `--root <DIR>`           | project root to operate on (default: current dir); available on `init`, `verify`, `doctor`, `update`, `diff`      |
 | `--verbose`             | print what `skillpack` detected in the repo (introspection)      |
 | `--debug`             | print every subprocess call (alias for `--log-level debug`)       |
@@ -200,7 +203,8 @@ A multi-skill pack's marketplace entry merges every skill's `keywords`
 
 Polyglot monorepos: `introspect` detects every language manifest (Rust, Node,
 Python, Go, Ruby, PHP, JVM, C#, Zig, Swift, C/C++, Elixir, Deno, Nix,
-Dart/Flutter, Haskell) and records all but the primary as
+Dart/Flutter, Haskell, Lua, Julia, Crystal, Clojure, OCaml, Erlang, R, Perl)
+and records all but the primary as
 `secondary_languages`. `init --auto` on a monorepo with no committed config
 emits one skill per detected language — the primary keeps the project name,
 each secondary becomes `{name}-{lang}` with a library-style intent you can

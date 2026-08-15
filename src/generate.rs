@@ -165,7 +165,7 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
     let allowed_tools = intent
         .allowed_tools
         .clone()
-        .or_else(|| allowed_tools_hint(profile.language).map(str::to_string));
+        .or_else(|| allowed_tools_hint(profile.language, has_cli).map(str::to_string));
     let globs_list = intent
         .globs
         .clone()
@@ -567,6 +567,19 @@ fn render_one_target(
                 contents: rule,
             });
         }
+        Target::Qoder | Target::Continue | Target::Augment | Target::AmazonQ => {
+            // The four rules-directory targets share one shape: plain markdown
+            // (no frontmatter) under a per-ecosystem directory.
+            let mut c = ctx.clone();
+            c.insert("noun", "rule");
+            let rule = tera
+                .render("CLAUDE.md", &c)
+                .context("rendering rules-directory rule")?;
+            out.push(GeneratedFileOutput {
+                rel_path: format!("{}/{name}.md", rule_dir(target)),
+                contents: rule,
+            });
+        }
         Target::Goose => {
             // Goose: `.goose/instructions.md`, root-level plain markdown.
             let mut c = ctx.clone();
@@ -649,17 +662,19 @@ fn render_skill_file_only(
                 contents: agent,
             }])
         }
-        Target::Cline | Target::Roo | Target::Kilo => {
+        Target::Cline
+        | Target::Roo
+        | Target::Kilo
+        | Target::Qoder
+        | Target::Continue
+        | Target::Augment
+        | Target::AmazonQ => {
             let mut c = ctx.clone();
             c.insert("noun", "rule");
             let rule = tera
                 .render("CLAUDE.md", &c)
                 .context("rendering rule file")?;
-            let rel_path = match target {
-                Target::Cline => format!(".clinerules/{name}.md"),
-                Target::Roo => format!(".roo/rules/{name}.md"),
-                _ => format!(".kilocode/rules/{name}.md"),
-            };
+            let rel_path = format!("{}/{name}.md", rule_dir(target));
             Ok(vec![GeneratedFileOutput {
                 rel_path,
                 contents: rule,
@@ -671,6 +686,46 @@ fn render_skill_file_only(
         | Target::Gemini
         | Target::Aider
         | Target::Goose => Ok(Vec::new()),
+    }
+}
+
+/// The rules directory for a plain-markdown rule target. Cline uses a flat
+/// `.clinerules/`; the rest nest under `<ecosystem>/rules/`. Only valid for
+/// Every per-skill distribution path a skill named `name` would own (the
+/// files `render_all` emits for a secondary `[[skills]]` entry, plus the
+/// Claude/Codex primary-skill copies). `skillpack remove <name>` deletes
+/// these to clean up an orphaned skill — the pack-level single-file targets
+/// (AGENTS.md, Copilot, Goose, …) are shared across skills and are NOT here,
+/// since `update` regenerates them from the remaining config.
+pub fn orphaned_skill_rel_paths(name: &str) -> Vec<String> {
+    vec![
+        format!("skills/{name}/SKILL.md"),
+        format!(".claude/skills/{name}/SKILL.md"),
+        format!(".codex/skills/{name}/SKILL.md"),
+        format!(".cursor/rules/{name}.mdc"),
+        format!(".windsurf/rules/{name}.md"),
+        format!(".opencode/agents/{name}.md"),
+        format!(".clinerules/{name}.md"),
+        format!(".roo/rules/{name}.md"),
+        format!(".kilocode/rules/{name}.md"),
+        format!(".qoder/rules/{name}.md"),
+        format!(".continue/rules/{name}.md"),
+        format!(".augment/rules/{name}.md"),
+        format!(".amazonq/rules/{name}.md"),
+    ]
+}
+
+/// the rule targets (Cline, Roo, Kilo, Qoder, Continue, Augment, Amazon Q).
+fn rule_dir(target: Target) -> &'static str {
+    match target {
+        Target::Cline => ".clinerules",
+        Target::Roo => ".roo/rules",
+        Target::Kilo => ".kilocode/rules",
+        Target::Qoder => ".qoder/rules",
+        Target::Continue => ".continue/rules",
+        Target::Augment => ".augment/rules",
+        Target::AmazonQ => ".amazonq/rules",
+        _ => unreachable!("not a rules-directory target"),
     }
 }
 
@@ -749,6 +804,14 @@ fn collect_subcommand_names(nodes: &[SubcommandNode], out: &mut Vec<String>) {
     }
 }
 
+/// Cap on derived marketplace keywords.
+///
+/// A CLI with dozens of subcommands would otherwise inject one keyword per
+/// subcommand and bloat the marketplace entry. The seed (language +
+/// cli/library) always survives; everything after is best-effort and
+/// truncated at the cap.
+const MAX_DERIVED_KEYWORDS: usize = 16;
+
 /// Derive a small, stable keyword list from language + intent + CLI surface
 /// so the generated marketplace entry is discoverable without the maintainer
 /// hand-curating it. Always seeded with language + cli/library, then enriched:
@@ -801,6 +864,7 @@ fn derive_keywords(profile: &ProjectProfile, intent: &Intent) -> Vec<String> {
         }
     }
 
+    kws.truncate(MAX_DERIVED_KEYWORDS);
     kws
 }
 
@@ -866,20 +930,31 @@ fn category_hint(lang: Language) -> &'static str {
         Language::Nix => "the Nix tooling",
         Language::Dart => "the Dart/Flutter tooling",
         Language::Haskell => "the Haskell tooling",
+        Language::Lua => "the Lua tooling",
+        Language::Julia => "the Julia tooling",
+        Language::Crystal => "the Crystal tooling",
+        Language::Clojure => "the Clojure tooling",
+        Language::Ocaml => "the OCaml tooling",
+        Language::Erlang => "the Erlang/OTP tooling",
+        Language::R => "the R tooling",
+        Language::Perl => "the Perl tooling",
         Language::Unknown => "the tooling",
     }
 }
 
-fn allowed_tools_hint(lang: Language) -> Option<&'static str> {
-    // The skill describes a CLI a user runs; it can use Bash to run the CLI
-    // and Read to consult output. We keep this conservative — a library skill
-    // leans on the host project's tooling, so we leave it blank. Comma-
-    // separated per the Anthropic `allowed-tools` grammar (matches
-    // `verify`'s discovery.skill.allowed_tools grammar check).
+fn allowed_tools_hint(lang: Language, has_cli: bool) -> Option<&'static str> {
+    // A CLI skill can use Bash to run the CLI and Read to consult its output.
+    // A pure-library skill leans on the host project's tooling (no Bash of
+    // its own), so we leave the hint blank — the maintainer can override via
+    // `allowed_tools` in skillpack.toml. Unknown languages get no hint
+    // regardless. Comma-separated per the Anthropic `allowed-tools` grammar
+    // (matches `verify`'s discovery.skill.allowed_tools grammar check).
     if let Language::Unknown = lang {
         None
-    } else {
+    } else if has_cli {
         Some("Read, Bash")
+    } else {
+        None
     }
 }
 
@@ -945,6 +1020,42 @@ fn cursor_globs_hint(lang: Language) -> Vec<String> {
             "*.cabal".into(),
             "cabal.project".into(),
             "stack.yaml".into(),
+        ],
+        Language::Lua => vec!["*.lua".into(), "*.rockspec".into()],
+        Language::Julia => vec!["*.jl".into(), "Project.toml".into(), "Manifest.toml".into()],
+        Language::Crystal => vec!["*.cr".into(), "shard.yml".into()],
+        Language::Clojure => vec![
+            "*.clj".into(),
+            "*.cljs".into(),
+            "*.cljc".into(),
+            "deps.edn".into(),
+            "project.clj".into(),
+        ],
+        Language::Ocaml => vec![
+            "*.ml".into(),
+            "*.mli".into(),
+            "dune-project".into(),
+            "*.opam".into(),
+            "dune".into(),
+        ],
+        Language::Erlang => vec![
+            "*.erl".into(),
+            "*.hrl".into(),
+            "*.app.src".into(),
+            "rebar.config".into(),
+        ],
+        Language::R => vec![
+            "*.R".into(),
+            "*.r".into(),
+            "DESCRIPTION".into(),
+            "NAMESPACE".into(),
+        ],
+        Language::Perl => vec![
+            "*.pm".into(),
+            "*.pl".into(),
+            "cpanfile".into(),
+            "Makefile.PL".into(),
+            "META.json".into(),
         ],
         Language::Unknown => vec![],
     }

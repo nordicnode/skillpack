@@ -235,8 +235,67 @@ pub(crate) fn project_manifest_name(root: &Path, language: Language) -> Option<S
             }
             None
         }
-        Language::Nix | Language::Dart | Language::Haskell => None,
-        Language::Unknown => None,
+        Language::Dart => {
+            let raw = fs::read_to_string(root.join("pubspec.yaml")).ok()?;
+            extract_yaml_scalar(&raw, "name")
+        }
+        Language::Haskell => {
+            let cabal = first_file_with_ext(root, "cabal")?;
+            let raw = fs::read_to_string(&cabal).ok()?;
+            extract_key_colon_value(&raw, "name")
+        }
+        Language::Lua => {
+            let rockspec = first_file_with_ext(root, "rockspec")?;
+            let raw = fs::read_to_string(&rockspec).ok()?;
+            extract_rockspec_field(&raw, "package")
+        }
+        Language::Julia => {
+            let raw = fs::read_to_string(root.join("Project.toml")).ok()?;
+            let v = toml::from_str::<toml::Value>(&raw).ok()?;
+            v.get("name")
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
+        }
+        Language::Crystal => {
+            let raw = fs::read_to_string(root.join("shard.yml")).ok()?;
+            extract_yaml_scalar(&raw, "name")
+        }
+        Language::Clojure => {
+            let raw = fs::read_to_string(root.join("project.clj")).ok()?;
+            extract_clojure_defproject(&raw).map(|(n, _)| n)
+        }
+        Language::Ocaml => {
+            if let Some(opam) = first_file_with_ext(root, "opam") {
+                if let Ok(raw) = fs::read_to_string(&opam) {
+                    if let Some(n) = extract_key_colon_value(&raw, "name") {
+                        return Some(n);
+                    }
+                }
+            }
+            let raw = fs::read_to_string(root.join("dune-project")).ok()?;
+            extract_dune_field(&raw, "name")
+        }
+        Language::Erlang => {
+            let app_src = first_file_ending_with(root, ".app.src")?;
+            let raw = fs::read_to_string(&app_src).ok()?;
+            extract_app_src_name(&raw)
+        }
+        Language::R => {
+            let raw = fs::read_to_string(root.join("DESCRIPTION")).ok()?;
+            extract_key_colon_value(&raw, "Package")
+        }
+        Language::Perl => {
+            if let Ok(raw) = fs::read_to_string(root.join("META.json")) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    if let Some(n) = v.get("name").and_then(|n| n.as_str()) {
+                        return Some(n.to_string());
+                    }
+                }
+            }
+            let raw = fs::read_to_string(root.join("Makefile.PL")).ok()?;
+            extract_makefile_pl_field(&raw, "NAME")
+        }
+        Language::Nix | Language::Unknown => None,
     }
 }
 
@@ -386,12 +445,67 @@ pub(crate) fn project_manifest_version(root: &Path, language: Language) -> Optio
             }
             None
         }
-        Language::Swift
-        | Language::Go
-        | Language::Nix
-        | Language::Dart
-        | Language::Haskell
-        | Language::Unknown => None,
+        Language::Dart => {
+            let raw = fs::read_to_string(root.join("pubspec.yaml")).ok()?;
+            extract_yaml_scalar(&raw, "version")
+        }
+        Language::Haskell => {
+            let cabal = first_file_with_ext(root, "cabal")?;
+            let raw = fs::read_to_string(&cabal).ok()?;
+            extract_key_colon_value(&raw, "version")
+        }
+        Language::Lua => {
+            let rockspec = first_file_with_ext(root, "rockspec")?;
+            let raw = fs::read_to_string(&rockspec).ok()?;
+            extract_rockspec_field(&raw, "version")
+        }
+        Language::Julia => {
+            let raw = fs::read_to_string(root.join("Project.toml")).ok()?;
+            let v = toml::from_str::<toml::Value>(&raw).ok()?;
+            v.get("version")
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
+        }
+        Language::Crystal => {
+            let raw = fs::read_to_string(root.join("shard.yml")).ok()?;
+            extract_yaml_scalar(&raw, "version")
+        }
+        Language::Clojure => {
+            let raw = fs::read_to_string(root.join("project.clj")).ok()?;
+            extract_clojure_defproject(&raw).map(|(_, v)| v)
+        }
+        Language::Ocaml => {
+            if let Some(opam) = first_file_with_ext(root, "opam") {
+                if let Ok(raw) = fs::read_to_string(&opam) {
+                    if let Some(v) = extract_key_colon_value(&raw, "version") {
+                        return Some(v);
+                    }
+                }
+            }
+            let raw = fs::read_to_string(root.join("dune-project")).ok()?;
+            extract_dune_field(&raw, "version")
+        }
+        Language::Erlang => {
+            let app_src = first_file_ending_with(root, ".app.src")?;
+            let raw = fs::read_to_string(&app_src).ok()?;
+            extract_app_src_vsn(&raw)
+        }
+        Language::R => {
+            let raw = fs::read_to_string(root.join("DESCRIPTION")).ok()?;
+            extract_key_colon_value(&raw, "Version")
+        }
+        Language::Perl => {
+            if let Ok(raw) = fs::read_to_string(root.join("META.json")) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    if let Some(ver) = v.get("version").and_then(|n| n.as_str()) {
+                        return Some(ver.to_string());
+                    }
+                }
+            }
+            let raw = fs::read_to_string(root.join("Makefile.PL")).ok()?;
+            extract_makefile_pl_field(&raw, "VERSION")
+        }
+        Language::Swift | Language::Go | Language::Nix | Language::Unknown => None,
     }
 }
 
@@ -508,6 +622,50 @@ fn project_manifest_authors_raw(root: &Path, language: Language) -> Option<Strin
             .and_then(|p| fs::read_to_string(&p).ok())
             .and_then(|raw| extract_xml_tag(&raw, "Authors"))
             .and_then(|a| a.split(',').next().map(|s| s.trim().to_string())),
+        Language::Julia => {
+            let raw = fs::read_to_string(root.join("Project.toml")).ok()?;
+            let v = toml::from_str::<toml::Value>(&raw).ok()?;
+            v.get("authors")
+                .and_then(|a| a.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string())
+        }
+        Language::Crystal => {
+            let raw = fs::read_to_string(root.join("shard.yml")).ok()?;
+            extract_yaml_list_first(&raw, "authors")
+        }
+        Language::Ocaml => {
+            if let Some(opam) = first_file_with_ext(root, "opam") {
+                if let Ok(raw) = fs::read_to_string(&opam) {
+                    if let Some(a) = extract_key_colon_value(&raw, "authors") {
+                        return Some(a);
+                    }
+                }
+            }
+            None
+        }
+        Language::R => {
+            let raw = fs::read_to_string(root.join("DESCRIPTION")).ok()?;
+            extract_key_colon_value(&raw, "Author")
+        }
+        Language::Perl => {
+            if let Ok(raw) = fs::read_to_string(root.join("META.json")) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    if let Some(a) = v.get("author") {
+                        if let Some(s) = a.as_str() {
+                            return Some(s.to_string());
+                        }
+                        if let Some(arr) = a.as_array() {
+                            if let Some(first) = arr.first().and_then(|s| s.as_str()) {
+                                return Some(first.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
         _ => None,
     }
 }
@@ -610,6 +768,54 @@ pub(crate) fn manifest_license(root: &Path, language: Language) -> Option<String
                 }
             }
             None
+        }
+        Language::Crystal => {
+            let raw = fs::read_to_string(root.join("shard.yml")).ok()?;
+            extract_yaml_scalar(&raw, "license")
+        }
+        Language::R => {
+            let raw = fs::read_to_string(root.join("DESCRIPTION")).ok()?;
+            extract_key_colon_value(&raw, "License")
+        }
+        Language::Perl => {
+            if let Ok(raw) = fs::read_to_string(root.join("META.json")) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    // CPAN META.json spells the license as a list of SPDX ids.
+                    if let Some(lic) = v.get("license") {
+                        if let Some(s) = lic.as_str() {
+                            return Some(s.to_string());
+                        }
+                        if let Some(arr) = lic.as_array() {
+                            if let Some(first) = arr.first().and_then(|s| s.as_str()) {
+                                return Some(first.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Fallback description hint for languages whose manifest carries a top-level
+/// `description` (Nix `flake.nix`, Dart `pubspec.yaml`, Crystal `shard.yml`).
+/// Used when the README has no extractable prose — so `--auto`/`doctor` still
+/// surface something for a flake-only repo.
+pub(crate) fn manifest_description(root: &Path, language: Language) -> Option<String> {
+    match language {
+        Language::Nix => {
+            let raw = fs::read_to_string(root.join("flake.nix")).ok()?;
+            extract_flake_description(&raw)
+        }
+        Language::Dart => {
+            let raw = fs::read_to_string(root.join("pubspec.yaml")).ok()?;
+            extract_yaml_scalar(&raw, "description")
+        }
+        Language::Crystal => {
+            let raw = fs::read_to_string(root.join("shard.yml")).ok()?;
+            extract_yaml_scalar(&raw, "description")
         }
         _ => None,
     }
@@ -791,6 +997,255 @@ fn extract_elixir_version(raw: &str) -> Option<String> {
     None
 }
 
+/// First top-level file with the given extension (case-sensitive), or `None`.
+pub(crate) fn first_file_with_ext(root: &Path, ext: &str) -> Option<PathBuf> {
+    let mut files: Vec<PathBuf> = fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(ext))
+        .collect();
+    files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    files.into_iter().next()
+}
+
+/// First top-level file whose name ends with `suffix` (e.g. `.app.src` — a
+/// double extension that [`first_file_with_ext`] can't match because
+/// `Path::extension` returns only the last segment). Deterministic (sorted).
+pub(crate) fn first_file_ending_with(root: &Path, suffix: &str) -> Option<PathBuf> {
+    let mut files: Vec<PathBuf> = fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(suffix))
+        })
+        .collect();
+    files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    files.into_iter().next()
+}
+
+/// Extract a top-level `key: value` scalar from a YAML manifest (pubspec.yaml,
+/// shard.yml). A line starting with `key:` at column 0 whose value is a bare
+/// scalar (not a nested map/list) is returned with quotes trimmed. Nested keys
+/// (indented `key:`) are skipped so `flutter:` doesn't shadow `name:`.
+pub(crate) fn extract_yaml_scalar(raw: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}:");
+    for line in raw.lines() {
+        if !line.starts_with(&prefix) {
+            continue;
+        }
+        let value = line[prefix.len()..].trim();
+        // A `key:` with nothing after it (or a trailing `|` block) is not a
+        // scalar — the value continues on later lines. Skip it.
+        if value.is_empty() || value == "|" || value == ">" {
+            continue;
+        }
+        let clean =
+            value.trim_matches(|c: char| c == '"' || c == '\'' || c == ',' || c.is_whitespace());
+        if !clean.is_empty() {
+            return Some(clean.to_string());
+        }
+    }
+    None
+}
+
+/// First entry of a top-level `key:` YAML list (e.g. Crystal `authors:`).
+/// Handles inline flow lists (`authors: [A, B]`) and the first indented
+/// `- item` of a block list. Returns the bare item with quotes/dashes trimmed.
+pub(crate) fn extract_yaml_list_first(raw: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}:");
+    let mut lines = raw.lines();
+    while let Some(line) = lines.next() {
+        if !line.starts_with(&prefix) {
+            continue;
+        }
+        let value = line[prefix.len()..].trim();
+        // Inline flow list: authors: ["A <a@b>", "B"]
+        if let Some(rest) = value.strip_prefix('[') {
+            let first = rest
+                .split([',', ']'])
+                .next()?
+                .trim()
+                .trim_matches(|c: char| c == '"' || c == '\'' || c.is_whitespace());
+            if !first.is_empty() {
+                return Some(first.to_string());
+            }
+        }
+        // Block list: the next indented `- item` line(s).
+        for next in lines.by_ref() {
+            let t = next.trim();
+            if let Some(item) = t.strip_prefix('-') {
+                let first = item.trim_matches(|c: char| c == '"' || c == '\'' || c.is_whitespace());
+                if !first.is_empty() {
+                    return Some(first.to_string());
+                }
+                return None;
+            }
+            if !t.is_empty() && !next.starts_with(char::is_whitespace) {
+                break;
+            }
+        }
+        return None;
+    }
+    None
+}
+
+/// Extract a `field = "value"` scalar from a Lua rockspec (Lua table syntax).
+pub(crate) fn extract_rockspec_field(raw: &str, field: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix(field) {
+            let rest = rest.trim_start();
+            if let Some(rest) = rest.strip_prefix('=') {
+                let rest = rest.trim();
+                if let Some(s) = rest
+                    .strip_prefix('"')
+                    .and_then(|r| r.strip_suffix('"'))
+                    .or_else(|| rest.strip_prefix('\'').and_then(|r| r.strip_suffix('\'')))
+                {
+                    if !s.is_empty() {
+                        return Some(s.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Parse the `(defproject name "version" ...)` head of a Leiningen `project.clj`.
+/// Returns `(name, version)`.
+pub(crate) fn extract_clojure_defproject(raw: &str) -> Option<(String, String)> {
+    let line = raw
+        .lines()
+        .find(|l| l.trim_start().starts_with("(defproject"))?;
+    let after = line.trim_start().strip_prefix("(defproject")?;
+    let mut toks = after.split_whitespace().filter(|t| !t.is_empty());
+    let name = toks.next()?.to_string();
+    let version = toks
+        .next()?
+        .trim_matches(|c: char| c == '"' || c == '\'')
+        .to_string();
+    if name.is_empty() || version.is_empty() {
+        return None;
+    }
+    Some((name, version))
+}
+
+/// Extract a `key: value` scalar from an OCaml `.opam` file (or an R DCF
+/// `Key: Value` file — both share the `Key:` line-prefix shape).
+pub(crate) fn extract_key_colon_value(raw: &str, key: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix(key) {
+            let rest = rest.trim_start();
+            if let Some(rest) = rest.strip_prefix(':') {
+                let value = rest.trim().trim_matches(|c| c == '"' || c == '\'');
+                if !value.is_empty() {
+                    return Some(value.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract a `(name <value>)` s-expression field from a `dune-project` file.
+pub(crate) fn extract_dune_field(raw: &str, key: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix(key) {
+            let value = rest.trim().trim_matches(|c| c == ')' || c == '(');
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extract the application name from an Erlang `.app.src`
+/// `{application, my_app, [...]}` term.
+pub(crate) fn extract_app_src_name(raw: &str) -> Option<String> {
+    let line = raw
+        .lines()
+        .find(|l| l.trim().starts_with("{application,"))?;
+    let after = line.trim().strip_prefix("{application,")?;
+    let name = after.split(',').next()?.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    Some(name)
+}
+
+/// Extract the `vsn` value from an Erlang `.app.src` term.
+pub(crate) fn extract_app_src_vsn(raw: &str) -> Option<String> {
+    let line = raw.lines().find(|l| {
+        let t = l.trim();
+        t.starts_with("vsn") || t.starts_with("{vsn")
+    })?;
+    let t = line.trim().trim_start_matches('{');
+    let after = t.strip_prefix("vsn")?.trim_start();
+    let value = after
+        .trim_start_matches(',')
+        .split([',', '}', ']', ')'])
+        .next()?
+        .trim()
+        .trim_matches(|c: char| c == '"' || c == '\'');
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+/// Extract the `description = "..."` scalar from a Nix flake. A Nix attribute
+/// value is terminated by a `;` (e.g. `description = "...";`), which must be
+/// stripped before unquoting.
+pub(crate) fn extract_flake_description(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("description") {
+            let rest = rest.trim_start();
+            if let Some(rest) = rest.strip_prefix('=') {
+                // Strip the trailing `;` (and any whitespace) before unquoting.
+                let rest = rest.trim().trim_end_matches(';').trim();
+                if let Some(s) = rest
+                    .strip_prefix('"')
+                    .and_then(|r| r.strip_suffix('"'))
+                    .or_else(|| rest.strip_prefix('\'').and_then(|r| r.strip_suffix('\'')))
+                {
+                    if !s.is_empty() {
+                        return Some(s.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract a `WriteMakefile(NAME => 'Foo-Bar', ...)` key/value pair from a
+/// Perl `Makefile.PL`.
+pub(crate) fn extract_makefile_pl_field(raw: &str, key: &str) -> Option<String> {
+    let needle = format!("{key} =>");
+    let line = raw.lines().find(|l| l.contains(&needle))?;
+    let after = line.split(&needle).nth(1)?.trim();
+    let value = after
+        .split([',', ')'])
+        .next()?
+        .trim()
+        .trim_matches(|c: char| c == '\'' || c == '"' || c.is_whitespace());
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     //! Bug #1 + #2: the Rust manifest name/license parsers used to hand-scan
@@ -965,6 +1420,222 @@ mod tests {
         assert_eq!(
             manifest_license(&root, Language::Deno).as_deref(),
             Some("MIT")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn dart_pubspec_parses_name_version_and_description() {
+        let root = scratch(&[(
+            "pubspec.yaml",
+            "name: my_dart_tool\nversion: 2.1.0\ndescription: A Dart CLI.\nenvironment:\n  sdk: '>=3.0.0 <4.0.0'\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Dart).as_deref(),
+            Some("my_dart_tool")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Dart).as_deref(),
+            Some("2.1.0")
+        );
+        assert_eq!(
+            manifest_description(&root, Language::Dart).as_deref(),
+            Some("A Dart CLI.")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn haskell_cabal_parses_name_and_version() {
+        let root = scratch(&[(
+            "mytool.cabal",
+            "name:                mytool\nversion:             0.4.1\nbuild-type:          Simple\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Haskell).as_deref(),
+            Some("mytool")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Haskell).as_deref(),
+            Some("0.4.1")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn lua_rockspec_parses_package_and_version() {
+        let root = scratch(&[(
+            "mylua-1.0-1.rockspec",
+            "package = \"mylua\"\nversion = \"1.0-1\"\ndescription = { summary = \"x\" }\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Lua).as_deref(),
+            Some("mylua")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Lua).as_deref(),
+            Some("1.0-1")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn julia_project_toml_parses_name_version_and_authors() {
+        let root = scratch(&[(
+            "Project.toml",
+            "name = \"MyJuliaTool\"\nuuid = \"...\"\nversion = \"0.3.0\"\nauthors = [\"Ada Lovelace <ada@x.io>\"]\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Julia).as_deref(),
+            Some("MyJuliaTool")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Julia).as_deref(),
+            Some("0.3.0")
+        );
+        assert_eq!(
+            project_manifest_authors(&root, Language::Julia).as_deref(),
+            Some("Ada Lovelace")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn crystal_shard_yml_parses_name_version_and_license() {
+        let root = scratch(&[(
+            "shard.yml",
+            "name: mycrystal\nversion: 1.2.0\nlicense: MIT\nauthors:\n  - Grace Hopper <grace@x.io>\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Crystal).as_deref(),
+            Some("mycrystal")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Crystal).as_deref(),
+            Some("1.2.0")
+        );
+        assert_eq!(
+            manifest_license(&root, Language::Crystal).as_deref(),
+            Some("MIT")
+        );
+        assert_eq!(
+            project_manifest_authors(&root, Language::Crystal).as_deref(),
+            Some("Grace Hopper")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn clojure_project_clj_parses_defproject() {
+        let root = scratch(&[(
+            "project.clj",
+            "(defproject myclj \"0.9.0\"\n  :description \"A Clojure CLI\"\n  :dependencies [[org.clojure/clojure \"1.11.1\"]])\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Clojure).as_deref(),
+            Some("myclj")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Clojure).as_deref(),
+            Some("0.9.0")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn ocaml_opam_parses_name_version_authors() {
+        let root = scratch(&[(
+            "myocaml.opam",
+            "opam-version: \"2.0\"\nname: \"myocaml\"\nversion: \"0.2.0\"\nauthors: \"A. Turing\"\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Ocaml).as_deref(),
+            Some("myocaml")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Ocaml).as_deref(),
+            Some("0.2.0")
+        );
+        assert_eq!(
+            project_manifest_authors(&root, Language::Ocaml).as_deref(),
+            Some("A. Turing")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn erlang_app_src_parses_name_and_vsn() {
+        let root = scratch(&[(
+            "myerlang.app.src",
+            "{application, myerlang,\n  [{description, \"x\"},\n   {vsn, \"2.1.0\"}]}.\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Erlang).as_deref(),
+            Some("myerlang")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Erlang).as_deref(),
+            Some("2.1.0")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn r_description_parses_package_version_license() {
+        let root = scratch(&[(
+            "DESCRIPTION",
+            "Package: myrtool\nVersion: 0.5.1\nLicense: MIT\nAuthor: K. Pearson\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::R).as_deref(),
+            Some("myrtool")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::R).as_deref(),
+            Some("0.5.1")
+        );
+        assert_eq!(manifest_license(&root, Language::R).as_deref(), Some("MIT"));
+        assert_eq!(
+            project_manifest_authors(&root, Language::R).as_deref(),
+            Some("K. Pearson")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn perl_meta_json_parses_name_version_license() {
+        let root = scratch(&[(
+            "META.json",
+            "{\"name\":\"MyPerlTool\",\"version\":\"0.7.0\",\"license\":[\"perl_5\"],\"author\":[\"L. Wall\"]}\n",
+        )]);
+        assert_eq!(
+            project_manifest_name(&root, Language::Perl).as_deref(),
+            Some("MyPerlTool")
+        );
+        assert_eq!(
+            project_manifest_version(&root, Language::Perl).as_deref(),
+            Some("0.7.0")
+        );
+        assert_eq!(
+            manifest_license(&root, Language::Perl).as_deref(),
+            Some("perl_5")
+        );
+        assert_eq!(
+            project_manifest_authors(&root, Language::Perl).as_deref(),
+            Some("L. Wall")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn nix_flake_description_is_captured() {
+        let root = scratch(&[(
+            "flake.nix",
+            "{\n  description = \"A reproducible dev environment\";\n  inputs = {};\n}\n",
+        )]);
+        assert_eq!(
+            manifest_description(&root, Language::Nix).as_deref(),
+            Some("A reproducible dev environment")
         );
         cleanup(&root);
     }

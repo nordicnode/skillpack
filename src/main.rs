@@ -138,6 +138,22 @@ fn main() {
             template_dir.as_deref(),
             format,
         ),
+        Commands::Remove {
+            name,
+            root,
+            target,
+            force,
+            template_dir,
+            format,
+        } => run_remove(
+            &root,
+            cli.verbose,
+            &name,
+            target,
+            force,
+            template_dir.as_deref(),
+            format,
+        ),
         Commands::Config { root, validate } => run_config(&root, validate),
         Commands::Completions { shell } => {
             let mut cmd = <Cli as CommandFactory>::command();
@@ -1274,10 +1290,28 @@ fn run_doctor_inner(
             // exactly what a consumer wants to scrape. No envelope wrapping;
             // the consumer reads fields by name. Exits 0 (doctor is
             // read-only diagnostic, non-gating — matches human form).
+            //
+            // A `verify_category_preview` field mirrors the human-mode
+            // category/target preview so JSON consumers get the same "what
+            // would `verify` check" signal without parsing prose.
+            let mut v =
+                serde_json::to_value(&profile).context("serializing doctor profile to JSON")?;
+            let targets: Vec<String> = Target::value_variants()
+                .iter()
+                .filter_map(|t| t.to_possible_value())
+                .map(|pv| pv.get_name().to_string())
+                .collect();
+            v["verify_category_preview"] = serde_json::json!({
+                "targets": targets,
+                "categories": if profile.has_cli {
+                    vec!["discovery", "invocation"]
+                } else {
+                    vec!["discovery"]
+                },
+            });
             println!(
                 "{}",
-                serde_json::to_string_pretty(&profile)
-                    .context("serializing doctor profile to JSON")?
+                serde_json::to_string_pretty(&v).context("serializing doctor profile to JSON")?
             );
         }
         crate::verify::OutputFormat::Human => render_doctor_human(&profile, verbose),
@@ -1348,7 +1382,8 @@ fn render_doctor_human(profile: &types::ProjectProfile, verbose: bool) {
     println!("verify category preview (run `skillpack verify` after `init` for the real score):");
     println!("  discovery.*: structural validation of every generated file per ecosystem");
     println!("    (Claude plugin + native skills, Codex, Cursor, OpenCode, Copilot, AGENTS.md,");
-    println!("     CLAUDE.md, GEMINI.md, Windsurf, Aider, Cline, Roo Code, Kilo Code, Goose)");
+    println!("     CLAUDE.md, GEMINI.md, Windsurf, Aider, Cline, Roo Code, Kilo Code, Goose,");
+    println!("     Qoder, Continue, Augment, Amazon Q)");
     if profile.has_cli {
         println!("  invocation.*: runs the CLI: --help, flag drift, subcommand drift");
         println!("    --version drift (advisory)");
@@ -1510,6 +1545,10 @@ fn detect_present_targets(root: &Path) -> Vec<Target> {
         (Target::Cline, ".clinerules"),
         (Target::Roo, ".roo/rules"),
         (Target::Kilo, ".kilocode/rules"),
+        (Target::Qoder, ".qoder/rules"),
+        (Target::Continue, ".continue/rules"),
+        (Target::Augment, ".augment/rules"),
+        (Target::AmazonQ, ".amazonq/rules"),
         (
             Target::Copilot,
             crate::verify::schema::COPILOT_INSTRUCTIONS_PATH,
@@ -1819,6 +1858,10 @@ fn is_frontmatter_target(rel_path: &str) -> bool {
     if rel_path.starts_with(".clinerules/")
         || rel_path.starts_with(".roo/rules/")
         || rel_path.starts_with(".kilocode/rules/")
+        || rel_path.starts_with(".qoder/rules/")
+        || rel_path.starts_with(".continue/rules/")
+        || rel_path.starts_with(".augment/rules/")
+        || rel_path.starts_with(".amazonq/rules/")
     {
         return false;
     }
@@ -1972,6 +2015,108 @@ fn coerce_add_name(name: &str) -> Result<String> {
         );
     }
     Ok(coerce_kebab(name))
+}
+
+/// `skillpack remove <name>` — drop a skill from the pack. Edits the
+/// committed `skillpack.toml`, deletes the orphaned per-skill distribution
+/// files, and regenerates the remaining targets. Symmetric with `add`.
+fn run_remove(
+    root: &Path,
+    verbose: bool,
+    name: &str,
+    raw_targets: Vec<String>,
+    force: bool,
+    template_dir: Option<&Path>,
+    format: verify::OutputFormat,
+) -> i32 {
+    if let Some(code) = handle_list_request(&raw_targets) {
+        return code;
+    }
+    match run_remove_inner(
+        root,
+        verbose,
+        name,
+        raw_targets,
+        force,
+        template_dir,
+        format,
+    ) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("fatal: {e:#}");
+            exit::INIT_FATAL
+        }
+    }
+}
+
+fn run_remove_inner(
+    root: &Path,
+    verbose: bool,
+    name: &str,
+    raw_targets: Vec<String>,
+    force: bool,
+    template_dir: Option<&Path>,
+    format: verify::OutputFormat,
+) -> Result<i32> {
+    reject_report_format(format)?;
+    let Some(cfg) = Config::load(root)? else {
+        bail!(
+            "no skillpack.toml at {}: `remove` drops a skill from an existing pack.\n\
+             To fix: run `skillpack init` first to seed the pack, then `skillpack remove <name>`.",
+            root.display()
+        );
+    };
+
+    let skill_name = coerce_add_name(name)?;
+    let intents = cfg.to_intents();
+    if intents.is_empty() {
+        bail!("skillpack.toml has no skills to remove");
+    }
+    let original_len = intents.len();
+    let remaining: Vec<(String, types::Intent)> = intents
+        .into_iter()
+        .filter(|(n, _)| coerce_kebab(n) != skill_name)
+        .collect();
+    if remaining.len() == original_len {
+        bail!("skill `{skill_name}` not found in skillpack.toml; nothing removed");
+    }
+
+    // Persist the shrunken pack first (so a failure later doesn't leave the
+    // config claiming a skill whose files are gone), then delete the
+    // orphaned per-skill files, then regenerate the remaining targets.
+    Config::from_intents(&remaining).save(root)?;
+
+    let mut removed = Vec::new();
+    for rel in skillpack::generate::orphaned_skill_rel_paths(&skill_name) {
+        let disk = root.join(&rel);
+        if disk.is_file() {
+            std::fs::remove_file(&disk).with_context(|| format!("removing {rel}"))?;
+            removed.push(rel.clone());
+            // Best-effort: drop the now-empty parent dirs (`skills/<name>/`,
+            // `.claude/skills/<name>/`, rule dirs are shared and stay).
+            if let Some(parent) = disk.parent() {
+                let _ = std::fs::remove_dir(parent);
+            }
+        }
+    }
+
+    if is_json(format) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "command": "remove",
+                "skill": skill_name,
+                "removed_files": removed,
+            })
+        );
+        return Ok(exit::INIT_OK);
+    }
+    println!(
+        "✓ removed skill `{skill_name}` ({} file(s) deleted)",
+        removed.len()
+    );
+
+    run_update_inner(root, verbose, raw_targets, force, template_dir, format)
 }
 
 /// `skillpack config` — validate (or summarize) the committed `skillpack.toml`.
@@ -2215,9 +2360,11 @@ mod confirm_tests {
     fn default_refresh_targets_falls_back_to_all_when_nothing_present() {
         let root = scratch_dir("empty");
         let targets = default_refresh_targets(&root).unwrap();
-        assert_eq!(targets.len(), 14, "fallback must be the full target set");
+        assert_eq!(targets.len(), 18, "fallback must be the full target set");
         assert!(targets.contains(&Target::Claude));
         assert!(targets.contains(&Target::Goose));
+        assert!(targets.contains(&Target::Qoder));
+        assert!(targets.contains(&Target::AmazonQ));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

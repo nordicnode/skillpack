@@ -19,6 +19,14 @@ use self::result::CheckResult;
 // Re-export the pieces the rest of the crate touches.
 pub use self::result::VerifyReport;
 
+/// `$id` of the published report schema (see `verify-report.schema.json`).
+/// Emitted as the report's `$schema` pointer so a consumer can validate the
+/// JSON against the schema without out-of-band knowledge.
+pub const REPORT_SCHEMA_ID: &str =
+    "https://raw.githubusercontent.com/nordicnode/skillpack/main/verify-report.schema.json";
+/// Monotonic version of the report shape; bumped only on breaking changes.
+pub const REPORT_SCHEMA_VERSION: u8 = 1;
+
 /// Where the invocation stage should look for skill text. Passed in so the
 /// dispatcher owns the single `find_skill_file` call.
 ///
@@ -236,6 +244,10 @@ pub fn render_json(report: &VerifyReport) -> String {
         })
         .collect();
     let body = serde_json::json!({
+        // Self-identifying pointer so a consumer can validate the report
+        // against the published JSON Schema without out-of-band knowledge.
+        "$schema": REPORT_SCHEMA_ID,
+        "schemaVersion": REPORT_SCHEMA_VERSION,
         "ok": !report.has_critical_failure(),
         "discoverability_score": report.discoverability_score(),
         "counts": {
@@ -535,5 +547,19 @@ mod tests {
             1,
             "only the line terminator may remain, got: {out:?}"
         );
+    }
+
+    #[test]
+    fn json_report_self_identifies_schema_and_version() {
+        let report = VerifyReport::default();
+        let out = render_json(&report);
+        let v: serde_json::Value = serde_json::from_str(&out).expect("report is valid JSON");
+        assert_eq!(v["$schema"].as_str(), Some(REPORT_SCHEMA_ID));
+        assert_eq!(
+            v["schemaVersion"].as_u64(),
+            Some(REPORT_SCHEMA_VERSION as u64)
+        );
+        assert!(v["ok"].is_boolean());
+        assert!(v["results"].is_array());
     }
 }

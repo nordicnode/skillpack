@@ -138,6 +138,14 @@ pub enum Language {
     Nix,
     Dart,
     Haskell,
+    Lua,
+    Julia,
+    Crystal,
+    Clojure,
+    Ocaml,
+    Erlang,
+    R,
+    Perl,
     Unknown,
 }
 
@@ -160,6 +168,14 @@ impl Language {
             Self::Nix => "nix",
             Self::Dart => "dart",
             Self::Haskell => "haskell",
+            Self::Lua => "lua",
+            Self::Julia => "julia",
+            Self::Crystal => "crystal",
+            Self::Clojure => "clojure",
+            Self::Ocaml => "ocaml",
+            Self::Erlang => "erlang",
+            Self::R => "r",
+            Self::Perl => "perl",
             Self::Unknown => "unknown",
         }
     }

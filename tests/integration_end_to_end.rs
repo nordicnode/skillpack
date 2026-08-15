@@ -3632,6 +3632,10 @@ fn self_dogfood_regenerated_artifacts_match_committed_byte_identical() {
         ".clinerules/skillpack.md",
         ".roo/rules/skillpack.md",
         ".kilocode/rules/skillpack.md",
+        ".qoder/rules/skillpack.md",
+        ".continue/rules/skillpack.md",
+        ".augment/rules/skillpack.md",
+        ".amazonq/rules/skillpack.md",
         ".goose/instructions.md",
     ] {
         let regen = fs::read_to_string(dest.join(rel)).unwrap_or_default();
@@ -4416,13 +4420,13 @@ fn target_all_with_dup_does_not_double_write() {
     // content. The marketplace.json is a single plugin entry; if Claude ran
     // twice, render would push duplicate GeneratedFileOutputs with the same
     // rel_path and write_files would write twice. Assert the summary line says
-    // 17: the Claude target emits 4 files (marketplace.json, plugin.json,
-    // skills/<name>/SKILL.md, .claude/skills/<name>/SKILL.md) + 13 more
-    // single-file targets = 17.
+    // 21: the Claude target emits 4 files (marketplace.json, plugin.json,
+    // skills/<name>/SKILL.md, .claude/skills/<name>/SKILL.md) + 17 more
+    // single-file targets = 21.
     let s = String::from_utf8_lossy(&out.stdout);
     assert!(
-        s.contains("wrote 17 file(s)"),
-        "dedup must reduce all+claude to 14 targets (17 files), got:\n{s}"
+        s.contains("wrote 21 file(s)"),
+        "dedup must reduce all+claude to 18 targets (21 files), got:\n{s}"
     );
 
     // Verify still passes — no corruption from the dedup path.
@@ -5433,4 +5437,79 @@ fn add_skill_appends_second_skill_to_existing_pack() {
         .current_dir(&root)
         .assert()
         .success();
+}
+
+#[test]
+fn remove_skill_drops_entry_files_and_config() {
+    let root = copy_fixture("rust-cli");
+    Command::new("cargo")
+        .args(["build", "--quiet"])
+        .current_dir(&root)
+        .assert()
+        .success();
+    write_skillpack_toml(&root, "sample-rust");
+
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "init",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--accept-warnings",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args([
+            "add",
+            "sidekick",
+            "--root",
+            ".",
+            "--non-interactive",
+            "--description",
+            "Handle auxiliary chores",
+            "--trigger",
+            "aux task",
+            "--invocation",
+            "sample-rust sidekick",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success();
+    assert!(root.join("skills/sidekick/SKILL.md").exists());
+
+    // Remove the secondary skill.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["remove", "sidekick", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .success();
+
+    assert!(
+        !root.join("skills/sidekick/SKILL.md").exists(),
+        "sidekick per-skill file must be removed"
+    );
+    assert!(!root.join(".claude/skills/sidekick/SKILL.md").exists());
+    assert!(!root.join(".cursor/rules/sidekick.mdc").exists());
+    assert!(
+        root.join("skills/sample-rust/SKILL.md").exists(),
+        "the primary skill must survive removal"
+    );
+    let cfg = fs::read_to_string(root.join("skillpack.toml")).unwrap();
+    assert!(
+        !cfg.contains("sidekick"),
+        "skillpack.toml must no longer list sidekick, got:\n{cfg}"
+    );
+
+    // Removing a name that doesn't exist is an error.
+    Command::cargo_bin("skillpack")
+        .unwrap()
+        .args(["remove", "nope", "--root", "."])
+        .current_dir(&root)
+        .assert()
+        .failure();
 }

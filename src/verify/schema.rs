@@ -147,6 +147,28 @@ pub const ROO_RULES_DIR: &str = ".roo/rules";
 /// Verified August 2026.
 pub const KILOCODE_RULES_DIR: &str = ".kilocode/rules";
 
+/// Qoder workspace rules live in `.qoder/rules/` (markdown). Source:
+/// docs.qoder.com/user-guide/rules — "By creating configuration files in the
+/// .qoder/rules directory, you can instruct Qoder on your project's specific
+/// conventions." Verified August 2026.
+pub const QODER_RULES_DIR: &str = ".qoder/rules";
+
+/// Continue.dev workspace rules live in `.continue/rules/` (markdown). Source:
+/// docs.continue.dev/customize/rules — "Create files in .continue/rules."
+/// Verified August 2026.
+pub const CONTINUE_RULES_DIR: &str = ".continue/rules";
+
+/// Augment Code rules live in `.augment/rules/` (markdown instruction files).
+/// Source: docs.augmentcode.com "Introducing Augment Rules" — "add instruction
+/// files to .augment/rules/". Verified August 2026.
+pub const AUGMENT_RULES_DIR: &str = ".augment/rules";
+
+/// Amazon Q Developer project rules live in `.amazonq/rules/` (markdown).
+/// Source: AWS Q Developer docs — "Rules must be written in Markdown format
+/// (.md files); They should be placed in the .amazonq/rules directory."
+/// Verified August 2026.
+pub const AMAZONQ_RULES_DIR: &str = ".amazonq/rules";
+
 /// Goose (Block's open-source agent) reads a project-wide
 /// `.goose/instructions.md`. Plain markdown, no frontmatter. Verified August
 /// 2026 against the Goose docs + the ctxlint context-file registry.

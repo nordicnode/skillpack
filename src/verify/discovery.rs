@@ -258,6 +258,26 @@ pub fn run(
             "discovery.kilocode.rule",
             "skillpack init --target kilo",
         ),
+        (
+            schema::QODER_RULES_DIR,
+            "discovery.qoder.rule",
+            "skillpack init --target qoder",
+        ),
+        (
+            schema::CONTINUE_RULES_DIR,
+            "discovery.continue.rule",
+            "skillpack init --target continue",
+        ),
+        (
+            schema::AUGMENT_RULES_DIR,
+            "discovery.augment.rule",
+            "skillpack init --target augment",
+        ),
+        (
+            schema::AMAZONQ_RULES_DIR,
+            "discovery.amazonq.rule",
+            "skillpack init --target amazonq",
+        ),
     ] {
         let rules = plainmd::find_rule_files(root, dir);
         if rules.is_empty() && root.join(dir).is_dir() {
@@ -285,8 +305,8 @@ pub fn run(
     if out.is_empty() {
         out.push(CheckResult::fail(
             "discovery.empty",
-            "at least one ecosystem is present (Claude / Codex / Cursor / OpenCode / Copilot / AGENTS.md / CLAUDE.md / GEMINI.md / Windsurf / Aider / Cline / Roo / Kilo / Goose)",
-            "no distribution files found (none of: .claude-plugin/, .claude/skills/, .codex/skills/, .cursor/rules/, .windsurf/rules/, .opencode/agents/, .github/copilot-instructions.md, AGENTS.md, CLAUDE.md, GEMINI.md, CONVENTIONS.md, .clinerules/, .roo/rules/, .kilocode/rules/, .goose/instructions.md)",
+            "at least one ecosystem is present (Claude / Codex / Cursor / OpenCode / Copilot / AGENTS.md / CLAUDE.md / GEMINI.md / Windsurf / Aider / Cline / Roo / Kilo / Goose / Qoder / Continue / Augment / Amazon Q)",
+            "no distribution files found (none of: .claude-plugin/, .claude/skills/, .codex/skills/, .cursor/rules/, .windsurf/rules/, .opencode/agents/, .github/copilot-instructions.md, AGENTS.md, CLAUDE.md, GEMINI.md, CONVENTIONS.md, .clinerules/, .roo/rules/, .kilocode/rules/, .goose/instructions.md, .qoder/rules/, .continue/rules/, .augment/rules/, .amazonq/rules/)",
             "To fix: run `skillpack init --target <ecosystem>` first.",
         ));
     }

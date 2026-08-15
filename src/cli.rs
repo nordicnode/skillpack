@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand, ValueEnum};
     name = "skillpack",
     bin_name = "skillpack",
     version,
-    about = "Generate and verify the agent-distribution layer for any OSS project (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, AGENTS.md, CLAUDE.md, GEMINI.md, Windsurf, Aider, Cline, Roo Code, Kilo Code, Goose)."
+    about = "Generate and verify the agent-distribution layer for any OSS project (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, AGENTS.md, CLAUDE.md, GEMINI.md, Windsurf, Aider, Cline, Roo Code, Kilo Code, Goose, Qoder, Continue, Augment, Amazon Q)."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -390,6 +390,36 @@ pub enum Commands {
         #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
         format: crate::verify::OutputFormat,
     },
+    /// Remove a skill from the pack by name: edits `skillpack.toml`, deletes
+    /// the orphaned per-skill distribution files, and regenerates the
+    /// remaining targets. The symmetric counterpart to `skillpack add`.
+    Remove {
+        /// Kebab-case name of the skill to remove.
+        name: String,
+
+        /// Project root to operate on. Defaults to the current directory.
+        #[arg(long, value_name = "DIR", default_value = ".")]
+        root: PathBuf,
+
+        /// Agent ecosystem(s) to regenerate after removal. Defaults to the
+        /// ecosystems already present in the repo; `all` refreshes every
+        /// target. Repeats.
+        #[arg(long, num_args = 1.., value_name = "ECOSYSTEM")]
+        target: Vec<String>,
+
+        /// Overwrite an existing root-level AGENTS.md (collision guard).
+        #[arg(long)]
+        force: bool,
+
+        /// Override one or more Tera templates (same semantics as `init`).
+        #[arg(long, value_name = "DIR")]
+        template_dir: Option<PathBuf>,
+
+        /// Output format. `human` (default) prints the interactive summary;
+        /// `json` prints a machine-readable object to stdout.
+        #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
+        format: crate::verify::OutputFormat,
+    },
     /// Print shell completions to stdout for the given shell, so users can
     /// tab-complete `skillpack` flags and subcommands. Pipe the output into
     /// your shell's completion directory, e.g.
@@ -464,6 +494,19 @@ pub enum Target {
     /// Kilo Code: `.kilocode/rules/<name>.md` rule files (auto-included via
     /// the backward-compatible directory). Per kilo.ai/docs/customize/custom-rules.
     Kilo,
+    /// Qoder: `.qoder/rules/<name>.md` workspace rule files (plain markdown).
+    /// Per docs.qoder.com/user-guide/rules.
+    Qoder,
+    /// Continue.dev: `.continue/rules/<name>.md` rule files (plain markdown).
+    /// Per docs.continue.dev/customize/rules.
+    Continue,
+    /// Augment Code: `.augment/rules/<name>.md` rule files (plain markdown).
+    /// Per docs.augmentcode.com.
+    Augment,
+    /// Amazon Q Developer: `.amazonq/rules/<name>.md` rule files (plain
+    /// markdown). Per the AWS Q Developer docs.
+    #[clap(name = "amazonq")]
+    AmazonQ,
     /// Goose: a root-level `.goose/instructions.md` instructions file read by
     /// Block's Goose agent. Plain markdown, no frontmatter.
     Goose,
@@ -487,6 +530,10 @@ pub fn target_names() -> Vec<&'static str> {
         "roo",
         "kilo",
         "goose",
+        "qoder",
+        "continue",
+        "augment",
+        "amazonq",
         "freebuff",
         "all",
     ]
@@ -516,13 +563,17 @@ pub fn resolve_targets(raw: &[String]) -> anyhow::Result<Vec<Target>> {
                 Target::Roo,
                 Target::Kilo,
                 Target::Goose,
+                Target::Qoder,
+                Target::Continue,
+                Target::Augment,
+                Target::AmazonQ,
             ]);
         } else if r == "freebuff" || r == "agents.md" || r == "agents-md" {
             out.push(Target::AgentsMd);
         } else {
             out.push(Target::from_str(r, true).map_err(|s| {
                 anyhow::anyhow!(
-                    "invalid --target `{s}`; expected claude|cursor|codex|opencode|copilot|agentsmd|claude-md|gemini|windsurf|aider|cline|roo|kilo|goose|freebuff|all"
+                    "invalid --target `{s}`; expected claude|cursor|codex|opencode|copilot|agentsmd|claude-md|gemini|windsurf|aider|cline|roo|kilo|goose|qoder|continue|augment|amazonq|freebuff|all"
                 )
             })?);
         }
@@ -548,10 +599,12 @@ mod tests {
         assert_eq!(targets, vec![Target::AgentsMd]);
 
         let all = resolve_targets(&["all".to_string()]).unwrap();
-        assert_eq!(all.len(), 14);
+        assert_eq!(all.len(), 18);
         assert!(all.contains(&Target::AgentsMd));
         assert!(all.contains(&Target::Cline));
         assert!(all.contains(&Target::Goose));
+        assert!(all.contains(&Target::Qoder));
+        assert!(all.contains(&Target::AmazonQ));
     }
 
     #[test]
