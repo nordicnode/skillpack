@@ -92,24 +92,18 @@ jobs:
         if: steps.release-plz.outputs.prs_created == 'true'
         run: |
           set -euo pipefail
-          # The PR was created milliseconds ago; GitHub's search index (used by
-          # `gh pr list --label`) is eventually consistent, so a single query
-          # can miss the just-opened PR (observed: "no pull requests found").
-          # Retry briefly before giving up; `// empty` maps a missing list to
-          # an empty string so the loop keeps trying instead of parsing null.
-          pr_number=""
-          for _ in $(seq 1 12); do
-            pr_number=$(gh pr list --label release --state open --limit 1 --json number -q '.[0].number // empty')
-            if [ -n "$pr_number" ]; then
-              break
-            fi
-            sleep 5
-          done
-          if [ -z "$pr_number" ]; then
-            echo "could not find the release PR (label 'release'); skipping version-file sync"
+          # Use the action's `pr` output (the exact PR release-plz just
+          # opened) instead of searching by the `release` label. GitHub's
+          # search index is eventually consistent, and a previous release PR
+          # that still carries the label can be returned, causing the sync to
+          # land on a stale branch (observed in the field). The `pr` output is
+          # authoritative JSON: {"number":N,"head_branch":"..."}.
+          pr_number=$(printf '%s' '${{ steps.release-plz.outputs.pr }}' | jq -r '.number')
+          branch=$(printf '%s' '${{ steps.release-plz.outputs.pr }}' | jq -r '.head_branch')
+          if [ -z "$pr_number" ] || [ "$pr_number" = "null" ]; then
+            echo "release-plz reported no PR; skipping version-file sync"
             exit 0
           fi
-          branch=$(gh pr view "$pr_number" --json headRefName -q '.headRefName')
           echo "release PR #$pr_number on branch '$branch'"
           git fetch origin "$branch"
           git checkout -f -B "$branch" "origin/$branch"
