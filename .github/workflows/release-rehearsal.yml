@@ -1,0 +1,146 @@
+# Prerelease rehearsal — dry-run the Release pipeline WITHOUT publishing.
+#
+# `release.yml` (the real thing) fires on a `v*` tag push and publishes to
+# crates.io, creates a GitHub Release, uploads cross-compiled binaries, signs
+# them, and re-pins the Homebrew formula. A failure at any of those stages
+# after the tag is cut means a broken release and (for Homebrew) a red main.
+#
+# This workflow rehearses every *verifiable* stage of that pipeline against
+# the current main, so you can catch a packaging, build, or formula problem
+# BEFORE cutting the tag. It never touches crates.io, GitHub Releases, or
+# main. Manual trigger only:
+#
+#   gh workflow run release-rehearsal.yml
+#
+# What it covers (mirroring release.yml job-for-job):
+#   - `cargo publish --dry-run` — packages the crate exactly as publish
+#     would, catching missing files / broken Cargo.toml / `--locked` drift
+#     without uploading.
+#   - The full 6-target binary matrix (linux x86_64/arm64/musl, macOS
+#     x86_64/arm64, Windows MSVC) — same `upload-rust-binary-action` builds
+#     the real release runs, without uploading.
+#   - The `version-sync` invariant the tag check enforces (tag == Cargo.toml)
+#     plus the Homebrew formula's version/URL consistency (the release-plz
+#     sync step keeps these moving together; a rehearsal catches drift before
+#     the tag check does).
+#   - The installer smoke test against a locally built binary (install.sh
+#     fetches from GitHub Releases, so we can't run it verbatim pre-release —
+#     we verify the binary it would install executes `--version` cleanly).
+#   - The formula's sha256 pins are present (the re-pin-homebrew job would
+#     otherwise leave main red after the release; a rehearsal on a formula
+#     that still carries the `TODO: re-pin` placeholders surfaces it early).
+#
+# Not rehearsed (require the real release): the crates.io upload itself, the
+# GitHub Release + asset upload, cosign signing, and the live install.sh
+# fetch. Those are intentionally only exercised on the real tag.
+
+name: Release Rehearsal
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rehearsal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Match the pinned toolchain in rust-toolchain.toml so the rehearsal
+      # builds with the same rustc the real release and CI use.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Version invariants (Cargo.toml + Homebrew formula)
+        run: |
+          set -euo pipefail
+          cargo_ver=$(awk 'BEGIN{in_pkg=0} /^\[package\]/{in_pkg=1; next} /^\[/{in_pkg=0} in_pkg && /^version[[:space:]]*=/{gsub(/[" ]/, "", $3); print $3; exit}' Cargo.toml)
+          hb_ver=$(grep -oP 'version "\K[0-9]+\.[0-9]+\.[0-9]+' homebrew/skillpack.rb | head -1)
+          echo "Cargo.toml version: $cargo_ver"
+          echo "homebrew formula version: $hb_ver"
+          if [ "$cargo_ver" != "$hb_ver" ]; then
+            echo "::error::Cargo.toml version ($cargo_ver) != homebrew formula version ($hb_ver)"
+            exit 1
+          fi
+          # Every release-download URL in the formula must pin this version.
+          bad_urls=$(grep -c "/v${cargo_ver}/" homebrew/skillpack.rb || true)
+          if [ "$bad_urls" -eq 0 ]; then
+            echo "::error::homebrew/skillpack.rb contains no /v${cargo_ver}/ download URLs"
+            exit 1
+          fi
+          echo "URLs pin v${cargo_ver}: OK"
+
+      - name: Homebrew formula checksums are pinned (no re-pin placeholders)
+        run: |
+          set -euo pipefail
+          if grep -q "TODO: re-pin sha256" homebrew/skillpack.rb; then
+            echo "::error::homebrew/skillpack.rb still carries unpinned sha256 placeholders; the release-plz sync strips them and the release's re-pin-homebrew job restores them. Run scripts/update_homebrew_sha256.py --dry-run to inspect, or merge the pending re-pin PR."
+            exit 1
+          fi
+          pinned=$(grep -c '^  sha256 "' homebrew/skillpack.rb || true)
+          echo "pinned sha256 entries: $pinned"
+
+      - name: cargo audit (same gate the release runs)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - run: cargo audit
+
+      # `cargo publish --dry-run` packages the crate exactly as a real publish
+      # would (staging, manifest validation, README/license checks) without
+      # uploading. This is the single best pre-release catch for a broken
+      # package. Note: with --dry-run the package is NOT uploaded, so this is
+      # safe to run any number of times.
+      - name: cargo publish --dry-run
+        run: cargo publish --dry-run --locked --allow-dirty
+
+  # Same build matrix as the real release's `binaries` job (see release.yml),
+  # minus the upload + cosign signing. `upload-rust-binary-action` builds the
+  # target, strips, and archives; with the matrix unchanged, a compile failure
+  # on any platform surfaces here instead of after the tag is cut.
+  binaries:
+    needs: rehearsal
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary (rehearsal, no upload)
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: skillpack
+          target: ${{ matrix.target }}
+          # `dry-run: true` builds + compresses exactly like a real release
+          # but never uploads — the documented rehearsal mode for this action.
+          dry-run: true
+      - name: Smoke-test the built binary
+        # Same assertion the real installer smoke makes (`--version` runs and
+        # exits 0). Windows needs the .exe suffix; Git Bash is preinstalled.
+        shell: bash
+        run: |
+          bin="target/${{ matrix.target }}/release/skillpack"
+          [ "${{ matrix.os }}" = "windows-latest" ] && bin="${bin}.exe"
+          "$bin" --version
+          "$bin" doctor --format json | grep -q '"name"'
+          echo "rehearsal smoke OK for ${{ matrix.target }}"

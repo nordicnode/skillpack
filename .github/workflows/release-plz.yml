@@ -132,3 +132,35 @@ jobs:
             git commit -m "chore: sync plugin.json, skillpack.yml, homebrew formula and README pins to $ver"
             git push origin "$branch"
           fi
+
+      # Hygiene: every run of this workflow opens a new `release-plz-*`
+      # branch, and merged/closed release PRs leave their branches behind
+      # forever (12 accumulated before this step existed). Delete every
+      # `release-plz-*` branch whose PR is no longer open, keeping only the
+      # PR this run just opened/reopened.
+      - name: Prune stale release-plz branches
+        # Note: GitHub's expression grammar rejects property access on a
+        # parenthesized filter chain like `(x | fromJSON).head_branch` (the
+        # workflow fails to load with 0 jobs), so pass the raw JSON through an
+        # env var and parse it with jq instead.
+        env:
+          PR_JSON: ${{ steps.release-plz.outputs.pr }}
+        run: |
+          set -euo pipefail
+          keep=""
+          if [ -n "$PR_JSON" ] && [ "$PR_JSON" != "null" ]; then
+            keep=$(printf '%s' "$PR_JSON" | jq -r '.head_branch')
+          fi
+          for b in $(gh api "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name' | grep '^release-plz-' || true); do
+            if [ "$b" = "$keep" ]; then
+              echo "keeping $b (this run's PR)"
+              continue
+            fi
+            state=$(gh pr list --head "$b" --state all --json state --jq '.[0].state' 2>/dev/null || echo "")
+            if [ "$state" = "OPEN" ]; then
+              echo "keeping $b (open PR)"
+              continue
+            fi
+            echo "deleting stale branch $b (state=${state:-unknown})"
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/$b" || echo "  (delete failed; branch may already be gone)"
+          done
