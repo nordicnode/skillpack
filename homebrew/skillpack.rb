@@ -23,25 +23,25 @@ class Skillpack < Formula
   desc "Generate and verify the agent-distribution layer for any OSS project"
   homepage "https://github.com/nordicnode/skillpack"
   license "MIT"
-  version "0.13.2"
+  version "0.13.3"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.2/skillpack-aarch64-apple-darwin.tar.gz"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-aarch64-apple-darwin.tar.gz"
 # TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
     else
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.2/skillpack-x86_64-apple-darwin.tar.gz"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-x86_64-apple-darwin.tar.gz"
 # TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.2/skillpack-aarch64-unknown-linux-gnu.tar.gz"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-aarch64-unknown-linux-gnu.tar.gz"
 # TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
     else
       # Static musl build - no glibc dependency.
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.2/skillpack-x86_64-unknown-linux-musl.tar.gz"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-x86_64-unknown-linux-musl.tar.gz"
 # TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
     end
   end
