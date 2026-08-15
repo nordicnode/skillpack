@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/nordicnode/skillpack/main/verify-report.schema.json",
+  "title": "skillpack verify report",
+  "description": "Machine-readable output of `skillpack verify --format json`. Mirrors VerifyReport::render_json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "discoverability_score", "counts", "results"],
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "True when no check has Error severity (critical failure)."
+    },
+    "discoverability_score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "0-100 agent-discoverability score (Pass=1.0, Warn=0.5, Error=0.0; Skipped excluded)."
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pass", "warn", "fail", "skip"],
+      "properties": {
+        "pass": { "type": "integer", "minimum": 0 },
+        "warn": { "type": "integer", "minimum": 0 },
+        "fail": { "type": "integer", "minimum": 0 },
+        "skip": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/checkResult" }
+    }
+  },
+  "definitions": {
+    "checkResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check_id", "check_name", "severity", "message"],
+      "properties": {
+        "check_id": {
+          "type": "string",
+          "description": "Machine-readable check id, e.g. discovery.description_length."
+        },
+        "check_name": {
+          "type": "string",
+          "description": "Human label for the check."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["pass", "warn", "fail", "skip"]
+        },
+        "message": {
+          "type": "string",
+          "description": "Short status line; for failures, what is wrong."
+        },
+        "suggestion": {
+          "type": "string",
+          "description": "Actionable one-line fix (present on warn/error)."
+        },
+        "location": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file"],
+          "properties": {
+            "file": { "type": "string" },
+            "line": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    }
+  }
+}

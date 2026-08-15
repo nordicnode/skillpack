@@ -165,3 +165,20 @@ jobs:
         run: gh release upload --clobber "${{ github.ref_name }}" "skillpack-${{ matrix.target }}.bundle"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # End-to-end smoke test of the one-command installer. After the binaries
+  # are uploaded, run install.sh against the just-created release and confirm
+  # the installed binary executes. Catches a missing or mismapped asset (the
+  # Linux ARM musl 404 fixed in 0.13.0) before a user hits it. install.sh
+  # already runs `skillpack --version` on the installed binary and exits
+  # non-zero on any failure (`set -eu`), so this step IS the assertion.
+  smoke:
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: smoke-test install.sh
+        env:
+          VERSION: ${{ github.ref_name }}
+          SKILLPACK_INSTALL_DIR: ${{ runner.temp }}/skillpack-bin
+        run: sh install.sh

@@ -159,6 +159,10 @@ pub enum OutputFormat {
     /// GitHub Actions workflow commands: one `::error`/`::warning` annotation
     /// per failed/warned check, so CI failures surface inline on the PR diff.
     Github,
+    /// JUnit XML for CI dashboards that consume xUnit-style reports (GitLab
+    /// CI, Jenkins, CircleCI). Errors map to `<failure>`; warnings are
+    /// attached as `<system-out>` notes on a passing case.
+    Junit,
 }
 
 /// Pretty-print a report as the human-facing output (design §5.2 step 4).
@@ -306,6 +310,71 @@ fn gh_escape(value: &str) -> String {
         .replace(',', "%2C")
 }
 
+/// Render the report as JUnit XML (xUnit-style) for CI dashboards that
+/// consume test-report artifacts (GitLab CI, Jenkins, CircleCI). Each result
+/// becomes a `<testcase name="<check_id>">`; `Error` severities are
+/// `<failure>` elements (counted in `failures`), `Warn` severities attach the
+/// message + suggestion as a `<system-out>` note on an otherwise-passing case,
+/// and `Skipped` emit a `<skipped/>` marker.
+pub fn render_junit(report: &VerifyReport) -> String {
+    use self::result::Severity;
+
+    let mut failures = 0usize;
+    let mut cases = String::new();
+    for r in &report.results {
+        cases.push_str(&format!(
+            "    <testcase name=\"{}\" classname=\"skillpack.verify\">",
+            xml_escape(&r.check_id)
+        ));
+        match r.severity {
+            Severity::Error => {
+                failures += 1;
+                let mut body = r.message.clone();
+                if let Some(s) = &r.suggestion {
+                    body.push_str("\nSuggestion: ");
+                    body.push_str(s);
+                }
+                cases.push_str(&format!(
+                    "<failure message=\"{}\">{}</failure>",
+                    xml_escape(&r.message),
+                    xml_escape(&body)
+                ));
+            }
+            Severity::Warn => {
+                let mut body = r.message.clone();
+                if let Some(s) = &r.suggestion {
+                    body.push_str("\nSuggestion: ");
+                    body.push_str(s);
+                }
+                cases.push_str(&format!("<system-out>{}</system-out>", xml_escape(&body)));
+            }
+            Severity::Pass => {}
+            Severity::Skipped => cases.push_str("<skipped/>"),
+        }
+        cases.push_str("</testcase>\n");
+    }
+
+    let total = report.results.len();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <testsuites tests=\"{total}\" failures=\"{failures}\">\n\
+         \x20 <testsuite name=\"skillpack verify\" tests=\"{total}\" failures=\"{failures}\">\n\
+         {cases}  </testsuite>\n\
+         </testsuites>\n"
+    )
+}
+
+/// Escape a string for XML text/attribute content. Covers the five XML
+/// predefined entities; control characters are not escaped (verify messages
+/// are already newline-safe and lack NULs).
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 /// Render the report as SARIF 2.1.0 for GitHub Code Scanning upload-sarif.
 /// Only `Warn` and `Error` results are emitted (SARIF reports failures, not
 /// passes). Each result maps `ruleId` → `check_id`, `level` → `"warning"` or
@@ -416,6 +485,38 @@ mod tests {
             out.contains("file=skills/foo/SKILL.md,line=3"),
             "got: {out}"
         );
+    }
+
+    #[test]
+    fn junit_counts_failures_and_escapes_xml() {
+        let mut report = VerifyReport::default();
+        report.push(CheckResult {
+            check_id: "a&b".to_string(),
+            check_name: "name".to_string(),
+            severity: Severity::Error,
+            message: "msg <x>".to_string(),
+            suggestion: Some("s&s".to_string()),
+            location: None,
+        });
+        report.push(CheckResult::pass("c", "name", "ok"));
+        report.push(CheckResult::skipped("d", "name", "skip"));
+
+        let out = render_junit(&report);
+        assert!(
+            out.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
+            "got: {out}"
+        );
+        assert!(out.contains("tests=\"3\" failures=\"1\""), "got: {out}");
+        assert!(out.contains("name=\"a&amp;b\""), "got: {out}");
+        assert!(
+            out.contains("<failure message=\"msg &lt;x&gt;\">"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("s&amp;s"),
+            "suggestion must be escaped, got: {out}"
+        );
+        assert!(out.contains("<skipped/>"), "got: {out}");
     }
 
     #[test]

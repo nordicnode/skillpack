@@ -76,10 +76,7 @@ pub const OUTPUT_PATHS: [&str; 4] = [
 pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
     let name = coerce_kebab(&profile.name);
     let keywords = Keywords {
-        inner: intent
-            .keywords
-            .clone()
-            .unwrap_or_else(|| derive_keywords(profile, intent)),
+        inner: keywords_for(profile, intent),
     };
     // `display_name` is the human label for the tool in prose ("Do not use
     // this skill if the user only wants to *read* {{ display_name }}"). It is
@@ -202,9 +199,27 @@ pub fn build_context(profile: &ProjectProfile, intent: &Intent) -> TeraContext {
         "allowed_tools": allowed_tools,
         "globs": globs_yaml,
         "opencode_mode": opencode_mode,
+        "marketplace_category": intent
+            .marketplace_category
+            .clone()
+            .unwrap_or_else(|| "developer-tools".to_string()),
+        "owner_type": intent
+            .owner_type
+            .clone()
+            .unwrap_or_else(|| "individual".to_string()),
         "footguns": &intent.footguns,
     }))
     .expect("Tera context serializes from JSON literal")
+}
+
+/// Resolve a skill's marketplace keywords: its explicit `keywords` override, or
+/// the derived list when the config doesn't pin one. Exposed so `render_all`
+/// can merge every skill's keywords into the pack-level marketplace entry.
+fn keywords_for(profile: &ProjectProfile, intent: &Intent) -> Vec<String> {
+    intent
+        .keywords
+        .clone()
+        .unwrap_or_else(|| derive_keywords(profile, intent))
 }
 
 /// Escape a string so it's safe to embed inside YAML double-quoted scalar.
@@ -311,7 +326,22 @@ pub fn render_all(
     let tera = build_tera(template_dir)?;
     let mut out = Vec::new();
     let (primary_name, primary_intent) = &skills[0];
-    let primary_ctx = build_context(profile, primary_intent);
+    let mut primary_ctx = build_context(profile, primary_intent);
+    // A multi-skill pack's marketplace entry should be discoverable under
+    // every skill's keywords, not just the primary's. Merge them (deduped,
+    // order-preserving) into the pack-level context — `keywords` only feeds
+    // marketplace.json, so this does not affect any per-skill file.
+    if skills.len() > 1 {
+        let mut merged: Vec<String> = Vec::new();
+        for (_, intent) in skills {
+            for kw in keywords_for(profile, intent) {
+                if !merged.contains(&kw) {
+                    merged.push(kw);
+                }
+            }
+        }
+        primary_ctx.insert("keywords", &merged);
+    }
     let primary_dir = coerce_kebab(primary_name);
 
     let mut seen = std::collections::HashSet::new();
@@ -833,6 +863,9 @@ fn category_hint(lang: Language) -> &'static str {
         Language::CCpp => "the C/C++ tooling",
         Language::Elixir => "the Elixir tooling",
         Language::Deno => "the Deno tooling",
+        Language::Nix => "the Nix tooling",
+        Language::Dart => "the Dart/Flutter tooling",
+        Language::Haskell => "the Haskell tooling",
         Language::Unknown => "the tooling",
     }
 }
@@ -894,6 +927,24 @@ fn cursor_globs_hint(lang: Language) -> Vec<String> {
             "*.js".into(),
             "deno.json".into(),
             "deno.jsonc".into(),
+        ],
+        Language::Nix => vec![
+            "*.nix".into(),
+            "flake.nix".into(),
+            "shell.nix".into(),
+            "default.nix".into(),
+        ],
+        Language::Dart => vec![
+            "*.dart".into(),
+            "pubspec.yaml".into(),
+            "analysis_options.yaml".into(),
+        ],
+        Language::Haskell => vec![
+            "*.hs".into(),
+            "*.lhs".into(),
+            "*.cabal".into(),
+            "cabal.project".into(),
+            "stack.yaml".into(),
         ],
         Language::Unknown => vec![],
     }
@@ -1213,6 +1264,40 @@ mod tests {
             .find(|f| f.rel_path == "skills/chronicle/SKILL.md")
             .unwrap();
         assert!(prim.contents.contains("name: chronicle"));
+    }
+
+    /// A multi-skill pack's marketplace entry must be discoverable under
+    /// every skill's keywords (deduped), not just the primary's derived list.
+    #[test]
+    fn render_all_merges_keywords_across_skills() {
+        let p = cli_profile();
+        let secondary = Intent {
+            one_line_description: "Manage deployments".into(),
+            when_to_use_phrases: vec!["deploy a release".into()],
+            invocation_command: Some("chronicle deploy".into()),
+            import_pattern: None,
+            author: None,
+            license: None,
+            ..Default::default()
+        };
+        let skills = vec![
+            ("chronicle".to_string(), cli_intent()),
+            ("ship".to_string(), secondary),
+        ];
+        let files = render_all(&p, &skills, &[Target::Claude], None).unwrap();
+        let mp = files
+            .iter()
+            .find(|f| f.rel_path == ".claude-plugin/marketplace.json")
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&mp.contents).unwrap();
+        let kws = v["plugins"][0]["keywords"]
+            .as_array()
+            .expect("keywords array");
+        let has = |s: &str| kws.iter().any(|k| k.as_str() == Some(s));
+        // Primary trigger first-word (`log`) + secondary trigger first-word
+        // (`deploy`) both appear in the merged list.
+        assert!(has("log"), "primary keywords missing: {kws:?}");
+        assert!(has("deploy"), "secondary keywords not merged: {kws:?}");
     }
 
     /// An empty skill list must be a clean error, not an index-out-of-bounds

@@ -121,6 +121,7 @@ fn main() {
             target,
             force,
             template_dir,
+            format,
         } => run_add(
             &root,
             cli.verbose,
@@ -135,6 +136,7 @@ fn main() {
             target,
             force,
             template_dir.as_deref(),
+            format,
         ),
         Commands::Config { root, validate } => run_config(&root, validate),
         Commands::Completions { shell } => {
@@ -692,10 +694,10 @@ fn is_json(format: verify::OutputFormat) -> bool {
 fn reject_report_format(format: verify::OutputFormat) -> Result<()> {
     if matches!(
         format,
-        verify::OutputFormat::Sarif | verify::OutputFormat::Github
+        verify::OutputFormat::Sarif | verify::OutputFormat::Github | verify::OutputFormat::Junit
     ) {
         bail!(
-            "--format sarif/github is only valid for `verify`; this command \
+            "--format sarif/github/junit is only valid for `verify`; this command \
              supports `human` or `json`"
         );
     }
@@ -1045,6 +1047,7 @@ fn run_verify_inner(
         verify::OutputFormat::Json => format!("{}\n", verify::render_json(report)),
         verify::OutputFormat::Sarif => format!("{}\n", verify::render_sarif(report)),
         verify::OutputFormat::Github => verify::render_github_annotations(report),
+        verify::OutputFormat::Junit => verify::render_junit(report),
     };
     let run_verify = || -> Result<verify::VerifyReport> {
         let input = VerifyInput {
@@ -1230,11 +1233,15 @@ fn run_verify_single(
     min_score: Option<u8>,
     template_dir: Option<&Path>,
 ) -> i32 {
+    // Exit-code parity with the non-watch `run_verify`: an unrecoverable
+    // introspect/render error is INIT_FATAL (3), not VERIFY_FAIL (1). The
+    // watcher loop discards this per-cycle code (it re-runs on each change),
+    // but the mapping must not silently disagree with a standalone run.
     match run_verify_inner(root, verbose, format, fix, min_score, template_dir) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {e:#}");
-            exit::VERIFY_FAIL
+            exit::INIT_FATAL
         }
     }
 }
@@ -1274,7 +1281,9 @@ fn run_doctor_inner(
             );
         }
         crate::verify::OutputFormat::Human => render_doctor_human(&profile, verbose),
-        crate::verify::OutputFormat::Sarif | crate::verify::OutputFormat::Github => {
+        crate::verify::OutputFormat::Sarif
+        | crate::verify::OutputFormat::Github
+        | crate::verify::OutputFormat::Junit => {
             bail!("doctor does not support this format; use `verify` for machine-readable reports")
         }
     }
@@ -1393,7 +1402,7 @@ struct CandidateResult<'a> {
     held: bool,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum CandidateStatus {
     /// File not on disk — would be created.
     Missing,
@@ -1416,39 +1425,25 @@ fn compute_candidates<'f>(
     for file in files {
         let disk_path = root.join(&file.rel_path);
 
-        // Root-level plain instructions collision guard.
-        if is_collision_guarded(&file.rel_path) && disk_path.exists() && !force {
-            results.push(CandidateResult {
-                file,
-                candidate: file.contents.clone(),
-                committed: None,
-                status: CandidateStatus::Clean,
-                held: true,
-            });
-            continue;
-        }
-
-        if !disk_path.exists() {
-            results.push(CandidateResult {
-                file,
-                candidate: file.contents.clone(),
-                committed: None,
-                status: CandidateStatus::Missing,
-                held: false,
-            });
-            continue;
-        }
-
-        let committed = std::fs::read_to_string(&disk_path)
-            .with_context(|| format!("reading {}", disk_path.display()))?
-            .replace("\r\n", "\n");
-        let committed = skillpack::verify::discovery::strip_bom(&committed).to_string();
+        // Read the committed content (normalized: CRLF -> LF, BOM stripped) so
+        // both the frontmatter splice and the collision guard compare against
+        // the same bytes the agent actually reads.
+        let committed = if disk_path.exists() {
+            let raw = std::fs::read_to_string(&disk_path)
+                .with_context(|| format!("reading {}", disk_path.display()))?
+                .replace("\r\n", "\n");
+            Some(skillpack::verify::discovery::strip_bom(&raw).to_string())
+        } else {
+            None
+        };
 
         let candidate = if is_frontmatter_target(&file.rel_path) {
             let fresh_fm = skillpack::verify::fix::split_frontmatter(&file.contents)
                 .map(|(fm, _body)| fm)
                 .unwrap_or_else(|| file.contents.clone());
-            let preserved_body = skillpack::verify::fix::split_frontmatter(&committed)
+            let preserved_body = committed
+                .as_deref()
+                .and_then(skillpack::verify::fix::split_frontmatter)
                 .map(|(_fm, body)| body)
                 .unwrap_or_default();
             format!("{fresh_fm}\n{preserved_body}")
@@ -1456,15 +1451,32 @@ fn compute_candidates<'f>(
             file.contents.clone()
         };
 
-        let status = if committed == candidate {
-            CandidateStatus::Clean
-        } else {
-            CandidateStatus::Drifted
+        // Root-level plain instruction files are guarded: without --force, a
+        // file that differs from the fresh render is HELD (it may be
+        // hand-written). A file that already matches is left clean — this is
+        // what lets a skillpack-generated AGENTS.md be tracked without noise
+        // while still protecting a hand-written one.
+        if is_collision_guarded(&file.rel_path) && committed.is_some() && !force {
+            let held = committed.as_deref() != Some(candidate.as_str());
+            results.push(CandidateResult {
+                file,
+                candidate,
+                committed,
+                status: CandidateStatus::Clean,
+                held,
+            });
+            continue;
+        }
+
+        let status = match &committed {
+            None => CandidateStatus::Missing,
+            Some(c) if *c == candidate => CandidateStatus::Clean,
+            Some(_) => CandidateStatus::Drifted,
         };
         results.push(CandidateResult {
             file,
             candidate,
-            committed: Some(committed),
+            committed,
             status,
             held: false,
         });
@@ -1479,12 +1491,14 @@ fn compute_candidates<'f>(
 /// themselves to the Claude target (the old default) and leaving every other
 /// ecosystem stale.
 ///
-/// Only UNAMBIGUOUS skillpack-owned markers are probed: the per-ecosystem
-/// directories. The collision-guarded single files (AGENTS.md, CLAUDE.md,
-/// GEMINI.md, CONVENTIONS.md, .goose/instructions.md, and Copilot's
-/// `.github/copilot-instructions.md`) are deliberately EXCLUDED — they are
-/// commonly hand-written, and `update`/`diff` hold them without `--force`
-/// anyway, so probing them would only add "held" noise to the default run.
+/// Both the per-ecosystem directory markers and the root-level single-file
+/// targets (AGENTS.md, CLAUDE.md, GEMINI.md, CONVENTIONS.md,
+/// `.goose/instructions.md`, `.github/copilot-instructions.md`) are probed by
+/// existence. Probing the single files no longer means they are silently
+/// dropped from the default run: `update`/`diff` hold a hand-written copy (or
+/// one that drifted) via the collision guard, and report a clean
+/// skillpack-generated copy as unchanged — so a generated root file is
+/// tracked instead of ignored.
 fn detect_present_targets(root: &Path) -> Vec<Target> {
     let mut present = Vec::new();
     for (target, marker) in [
@@ -1496,6 +1510,18 @@ fn detect_present_targets(root: &Path) -> Vec<Target> {
         (Target::Cline, ".clinerules"),
         (Target::Roo, ".roo/rules"),
         (Target::Kilo, ".kilocode/rules"),
+        (
+            Target::Copilot,
+            crate::verify::schema::COPILOT_INSTRUCTIONS_PATH,
+        ),
+        (Target::AgentsMd, crate::verify::schema::AGENTS_MD_PATH),
+        (Target::ClaudeMd, crate::verify::schema::CLAUDE_MD_PATH),
+        (Target::Gemini, crate::verify::schema::GEMINI_MD_PATH),
+        (Target::Aider, crate::verify::schema::CONVENTIONS_MD_PATH),
+        (
+            Target::Goose,
+            crate::verify::schema::GOOSE_INSTRUCTIONS_PATH,
+        ),
     ] {
         if root.join(marker).exists() {
             present.push(target);
@@ -1843,6 +1869,7 @@ fn run_add(
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
+    format: verify::OutputFormat,
 ) -> i32 {
     if let Some(code) = handle_list_request(&raw_targets) {
         return code;
@@ -1861,6 +1888,7 @@ fn run_add(
         raw_targets,
         force,
         template_dir,
+        format,
     ) {
         Ok(code) => code,
         Err(e) => {
@@ -1885,7 +1913,9 @@ fn run_add_inner(
     raw_targets: Vec<String>,
     force: bool,
     template_dir: Option<&Path>,
+    format: verify::OutputFormat,
 ) -> Result<i32> {
+    reject_report_format(format)?;
     let profile = introspect::introspect(root).context("introspecting repo for add")?;
     let Some(cfg) = Config::load(root)? else {
         bail!(
@@ -1921,14 +1951,7 @@ fn run_add_inner(
     // Persist the expanded pack, then delegate to `update` — which re-loads
     // the (now larger) config and re-renders every target.
     Config::from_intents(&intents).save_if_changed(root)?;
-    run_update_inner(
-        root,
-        verbose,
-        raw_targets,
-        force,
-        template_dir,
-        verify::OutputFormat::Human,
-    )
+    run_update_inner(root, verbose, raw_targets, force, template_dir, format)
 }
 
 /// Validate a user-supplied `skillpack add <name>` and coerce it to kebab-case.
@@ -2074,6 +2097,39 @@ mod confirm_tests {
         print_profile(&profile, false);
     }
 
+    // The root-file collision guard is content-aware: an on-disk root file
+    // that already matches the fresh render is clean (not held), while one
+    // that differs is held without --force (protected as hand-written) and
+    // becomes drifted with --force.
+    #[test]
+    fn compute_candidates_holds_divergent_root_file_and_passes_clean() {
+        let root = scratch_dir("guard");
+        let clean = GeneratedFileOutput {
+            rel_path: "AGENTS.md".to_string(),
+            contents: "# skillpack\n\ngenerated\n".to_string(),
+        };
+
+        std::fs::write(root.join("AGENTS.md"), "# skillpack\n\ngenerated\n").unwrap();
+        let results = compute_candidates(&root, std::slice::from_ref(&clean), false).unwrap();
+        assert!(
+            !results[0].held,
+            "identical AGENTS.md must be clean, not held"
+        );
+        assert_eq!(results[0].status, CandidateStatus::Clean);
+
+        std::fs::write(root.join("AGENTS.md"), "# hand-written\n\ncustom\n").unwrap();
+        let results = compute_candidates(&root, std::slice::from_ref(&clean), false).unwrap();
+        assert!(
+            results[0].held,
+            "divergent AGENTS.md must be held without --force"
+        );
+
+        let results = compute_candidates(&root, std::slice::from_ref(&clean), true).unwrap();
+        assert!(!results[0].held, "--force must release the guard");
+        assert_eq!(results[0].status, CandidateStatus::Drifted);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     // `skillpack add` must reject names that would silently coerce to the
     // `tool` fallback (empty, punctuation-only, digits-only) instead of
     // creating a surprise `tool` skill — or colliding with another garbage
@@ -2126,10 +2182,11 @@ mod confirm_tests {
     }
 
     // `update`/`diff` default to the ecosystems already generated, not just
-    // Claude. Directory markers are detected; the collision-guarded root files
-    // (here a hand-written AGENTS.md) must NOT be probed as "present".
+    // Claude. Directory markers AND the root-level single-file targets are
+    // probed by existence, so a generated AGENTS.md is tracked (and later
+    // held-or-refreshed by the collision guard) instead of silently dropped.
     #[test]
-    fn detect_present_targets_finds_generated_ecosystems_only() {
+    fn detect_present_targets_finds_directory_and_single_file_targets() {
         let root = scratch_dir("present");
         for d in [".claude-plugin", ".cursor/rules", ".codex/skills"] {
             std::fs::create_dir_all(root.join(d)).unwrap();
@@ -2141,10 +2198,13 @@ mod confirm_tests {
         assert!(present.contains(&Target::Cursor));
         assert!(present.contains(&Target::Codex));
         assert!(
-            !present.contains(&Target::AgentsMd),
-            "collision-guarded AGENTS.md must not be probed as present"
+            present.contains(&Target::AgentsMd),
+            "an existing AGENTS.md must be probed as present"
         );
-        assert!(!present.contains(&Target::Copilot));
+        assert!(
+            !present.contains(&Target::Copilot),
+            "an absent copilot-instructions.md must not be probed as present"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

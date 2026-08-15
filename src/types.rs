@@ -135,6 +135,9 @@ pub enum Language {
     CCpp,
     Elixir,
     Deno,
+    Nix,
+    Dart,
+    Haskell,
     Unknown,
 }
 
@@ -154,6 +157,9 @@ impl Language {
             Self::CCpp => "c_cpp",
             Self::Elixir => "elixir",
             Self::Deno => "deno",
+            Self::Nix => "nix",
+            Self::Dart => "dart",
+            Self::Haskell => "haskell",
             Self::Unknown => "unknown",
         }
     }
@@ -205,6 +211,13 @@ pub struct Intent {
     /// Override the derived marketplace `keywords` list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keywords: Option<Vec<String>>,
+    /// Override the marketplace `category` field (default `developer-tools`).
+    /// Distinct from [`Intent::category`], which is body prose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marketplace_category: Option<String>,
+    /// Override the marketplace `owner.type` field (default `individual`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_type: Option<String>,
 }
 
 impl Intent {

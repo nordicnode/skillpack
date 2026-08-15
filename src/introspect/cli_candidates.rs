@@ -99,6 +99,7 @@ pub(crate) fn primary_cli_candidate(
         Language::CCpp => c_cpp_cli_candidate(root, name),
         Language::Elixir => elixir_cli_candidate(root, name),
         Language::Deno => deno_cli_candidate(root, name),
+        Language::Nix | Language::Dart | Language::Haskell => None,
         Language::Unknown => which_on_path(name).map(|_| CliCandidate {
             argv: vec![name.to_string()],
             spawn_cwd: root.to_path_buf(),

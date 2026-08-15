@@ -108,6 +108,15 @@
             "type": "string"
           },
           "description": "Override the derived marketplace `keywords` list."
+        },
+        "marketplace_category": {
+          "type": "string",
+          "description": "Override the marketplace `category` field (default `developer-tools`)."
+        },
+        "owner_type": {
+          "type": "string",
+          "enum": ["individual", "organization"],
+          "description": "Override the marketplace `owner.type` field (default `individual`)."
         }
       }
     }

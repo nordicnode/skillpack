@@ -159,6 +159,19 @@ pub(crate) fn detect_all_languages(root: &Path) -> Vec<Language> {
             Language::Deno,
             root.join("deno.json").exists() || root.join("deno.jsonc").exists(),
         ),
+        (
+            Language::Nix,
+            root.join("flake.nix").exists()
+                || root.join("shell.nix").exists()
+                || root.join("default.nix").exists(),
+        ),
+        (Language::Dart, root.join("pubspec.yaml").exists()),
+        (
+            Language::Haskell,
+            root.join("stack.yaml").exists()
+                || root.join("cabal.project").exists()
+                || cli_probe::has_cabal_file(root),
+        ),
     ];
     for (lang, present) in signals {
         if *present {
@@ -234,13 +247,26 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
         Language::Elixir
     } else if root.join("deno.json").exists() || root.join("deno.jsonc").exists() {
         Language::Deno
+    } else if root.join("flake.nix").exists()
+        || root.join("shell.nix").exists()
+        || root.join("default.nix").exists()
+    {
+        Language::Nix
+    } else if root.join("pubspec.yaml").exists() {
+        Language::Dart
+    } else if root.join("stack.yaml").exists()
+        || root.join("cabal.project").exists()
+        || cli_probe::has_cabal_file(root)
+    {
+        Language::Haskell
     } else {
         diag.push(
             "detect_language",
             "no known manifest found (none of: Cargo.toml, package.json, ".to_string()
                 + "pyproject.toml, setup.py, setup.cfg, go.mod, composer.json, "
                 + "pom.xml, build.gradle, build.gradle.kts, Gemfile, *.gemspec, "
-                + "*.csproj, build.zig, Package.swift, CMakeLists.txt, meson.build, Makefile, mix.exs, deno.json); "
+                + "*.csproj, build.zig, Package.swift, CMakeLists.txt, meson.build, Makefile, mix.exs, deno.json, "
+                + "flake.nix, shell.nix, pubspec.yaml, stack.yaml, *.cabal); "
                 + "language detected as Unknown",
         );
         Language::Unknown
@@ -340,6 +366,37 @@ mod parse_tests {
     fn detect_all_languages_empty_for_no_manifests() {
         let root = scratch(&[]);
         assert!(detect_all_languages(&root).is_empty());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn detect_language_recognizes_nix_dart_haskell() {
+        let mut diag = DiagTrace::default();
+
+        let nix = scratch(&[("flake.nix", "{}")]);
+        assert_eq!(detect_language(&nix, &mut diag), Language::Nix);
+        cleanup(&nix);
+
+        let dart = scratch(&[("pubspec.yaml", "name: x")]);
+        assert_eq!(detect_language(&dart, &mut diag), Language::Dart);
+        cleanup(&dart);
+
+        let haskell = scratch(&[("stack.yaml", "resolver: lts")]);
+        assert_eq!(detect_language(&haskell, &mut diag), Language::Haskell);
+        cleanup(&haskell);
+    }
+
+    #[test]
+    fn detect_all_languages_includes_nix_dart_haskell() {
+        let root = scratch(&[
+            ("flake.nix", "{}"),
+            ("pubspec.yaml", "name: x"),
+            ("stack.yaml", "resolver: lts"),
+        ]);
+        let langs = detect_all_languages(&root);
+        assert!(langs.contains(&Language::Nix), "got: {langs:?}");
+        assert!(langs.contains(&Language::Dart), "got: {langs:?}");
+        assert!(langs.contains(&Language::Haskell), "got: {langs:?}");
         cleanup(&root);
     }
 

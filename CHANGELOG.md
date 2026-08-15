@@ -6,6 +6,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `--format junit` for `skillpack verify`: JUnit XML for xUnit-consuming CI
+  (GitLab CI, Jenkins, CircleCI).
+- `--format json` for `skillpack add` (parity with `init`/`update`/`diff`).
+- `marketplace_category` and `owner_type` overrides in `skillpack.toml` — the
+  marketplace `category` and `owner.type` fields are no longer hardcoded.
+- Nix, Dart/Flutter, and Haskell language detection (plus category/globs
+  hints), widening `introspect` beyond the original 13 languages.
+- A multi-skill pack's marketplace entry now merges every skill's `keywords`.
+- A published JSON Schema for the `verify --format json` report
+  (`verify-report.schema.json`).
+- The reusable `skillpack.yml` workflow now emits `--format github`
+  annotations; the release pipeline gained an `install.sh` smoke job, and the
+  Homebrew formula pins per-platform `sha256` (re-pinned via
+  `scripts/update_homebrew_sha256.py`).
+
+### Fixed
+
+- `update`/`diff` now detect skillpack-generated single-file targets
+  (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `CONVENTIONS.md`,
+  `.goose/instructions.md`, `.github/copilot-instructions.md`) instead of
+  silently dropping them from the default target set; the collision guard is
+  content-aware (a clean generated file is tracked, a divergent one is held).
+- `verify --watch` now reports unrecoverable errors with `INIT_FATAL` (3),
+  matching the standalone `verify` path.
+
 ## [0.13.1](https://github.com/nordicnode/skillpack/compare/v0.13.0...v0.13.1) - 2026-08-15
 
 ### Added

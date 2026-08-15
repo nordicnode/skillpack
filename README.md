@@ -163,7 +163,7 @@ Guided (With skillpack):    [Verified Flags, Anchored in Repo] ─────�
 ## Command-Line Reference
 
 * **`skillpack init`**: Scaffold agent distribution files (interactive, `--auto`, or `--non-interactive`).
-* **`skillpack verify`**: Check guidance files against agent schemas and live `--help` flag surfaces (supports `--min-score <N>`, `--fix`, and `--format {human,json,sarif}`).
+* **`skillpack verify`**: Check guidance files against agent schemas and live `--help` flag surfaces (supports `--min-score <N>`, `--fix`, and `--format {human,json,sarif,github,junit}`).
 * **`skillpack doctor`**: Diagnose language and CLI candidate discovery decision traces.
 * **`skillpack update`**: Incrementally regenerate files from `skillpack.toml` after CLI changes.
 * **`skillpack diff`**: Preview pending guidance updates without modifying disk.

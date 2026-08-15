@@ -235,6 +235,7 @@ pub(crate) fn project_manifest_name(root: &Path, language: Language) -> Option<S
             }
             None
         }
+        Language::Nix | Language::Dart | Language::Haskell => None,
         Language::Unknown => None,
     }
 }
@@ -385,7 +386,12 @@ pub(crate) fn project_manifest_version(root: &Path, language: Language) -> Optio
             }
             None
         }
-        Language::Swift | Language::Go | Language::Unknown => None,
+        Language::Swift
+        | Language::Go
+        | Language::Nix
+        | Language::Dart
+        | Language::Haskell
+        | Language::Unknown => None,
     }
 }
 

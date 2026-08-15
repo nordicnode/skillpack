@@ -216,6 +216,15 @@ pub(crate) fn has_csproj(root: &Path) -> bool {
     })
 }
 
+/// True if the root contains any `*.cabal` file (Haskell package manifest).
+pub(crate) fn has_cabal_file(root: &Path) -> bool {
+    fs::read_dir(root).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("cabal"))
+    })
+}
+
 /// Detect whether the project ships an invokable CLI, and if so capture its
 /// `--help` output under a hard timeout. Returns
 /// `(has_cli, command, output, subcommand_tree)`.

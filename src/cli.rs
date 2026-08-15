@@ -196,7 +196,9 @@ pub enum Commands {
         root: PathBuf,
 
         /// Output format. `human` (default) prints a readable report; `json`
-        /// prints a machine-readable object with per-check ids for CI gating.
+        /// prints a machine-readable object with per-check ids for CI gating;
+        /// `sarif` emits SARIF 2.1.0 for GitHub Code Scanning; `github` emits
+        /// `::error`/`::warning` annotations; `junit` emits xUnit XML.
         #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
         format: crate::verify::OutputFormat,
 
@@ -382,6 +384,11 @@ pub enum Commands {
         /// Override one or more Tera templates (same semantics as `init`).
         #[arg(long, value_name = "DIR")]
         template_dir: Option<PathBuf>,
+
+        /// Output format. `human` (default) prints the interactive summary;
+        /// `json` prints a machine-readable object to stdout.
+        #[arg(long, value_enum, default_value_t = crate::verify::OutputFormat::Human)]
+        format: crate::verify::OutputFormat,
     },
     /// Print shell completions to stdout for the given shell, so users can
     /// tab-complete `skillpack` flags and subcommands. Pipe the output into

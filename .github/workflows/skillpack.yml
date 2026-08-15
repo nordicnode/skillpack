@@ -86,7 +86,8 @@ jobs:
 
       # Run verify with exit-code gating (critical failure → exit 1 → job
       # fails → consumer's PR is blocked). Warnings pass (they do not gate).
-      # Pass --format json so the GitHub Actions log carries a structured
-      # report a consumer can scrape or paste into a PR comment.
+      # `--format github` emits `::error`/`::warning` workflow commands so
+      # failed/warned checks surface inline on the PR diff. Swap to
+      # `--format json` if you want a structured report to scrape instead.
       - name: skillpack verify
-        run: skillpack verify --format json
+        run: skillpack verify --format github

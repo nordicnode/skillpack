@@ -50,7 +50,7 @@ This CLI uses subcommands. Each one has its own flags (verified by `skillpack ve
 - `doctor` — flags: `--root`, `--format`, `--verbose`, `--debug`, `--log-level`, `--log-format`
 - `update` — flags: `--root`, `--target`, `--force`, `--template-dir`, `--format`, `--verbose`, `--debug`, `--log-level`, `--log-format`
 - `diff` — flags: `--root`, `--target`, `--force`, `--template-dir`, `--format`, `--verbose`, `--debug`, `--log-level`, `--log-format`
-- `add` — flags: `--non-interactive`, `--root`, `--description`, `--trigger`, `--author`, `--invocation`, `--import`, `--license`, `--target`, `--verbose`, `--debug`, `--log-level`, `--force`, `--template-dir`, `--log-format`
+- `add` — flags: `--non-interactive`, `--root`, `--description`, `--trigger`, `--author`, `--invocation`, `--import`, `--license`, `--target`, `--verbose`, `--debug`, `--log-level`, `--force`, `--template-dir`, `--format`, `--log-format`
 - `completions` — flags: `--verbose`, `--debug`, `--log-level`, `--log-format`
 - `config` — flags: `--root`, `--validate`, `--verbose`, `--debug`, `--log-level`, `--log-format`
 

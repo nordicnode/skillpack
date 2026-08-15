@@ -138,9 +138,10 @@ No-op when there's no fixable drift.
 | `diff --force` | check `AGENTS.md` too (same collision guard as `update --force`). |
 | `diff --template-dir <DIR>` | same override semantics — use when checking a pack generated with custom templates (avoids spurious drift) |
 | `add <name>` | append a new skill to an existing `skillpack.toml` pack (then regenerate). Same bootstrap flags as `init --non-interactive` (`--description`/`--trigger`/`--author`/`--invocation`/`--import`/`--license`); interactive interview by default. |
+| `add --format human\|json` | human summary (default) or a machine-readable JSON object |
 | `config` | print a summary of the committed `skillpack.toml` (skills + defaults) |
 | `config --validate` | validate `skillpack.toml` against the structural invariants; exit non-zero when invalid |
-| `verify --format human\|json\|sarif\|github` | human report (default), machine-readable JSON for CI, SARIF 2.1.0 for GitHub Code Scanning upload-sarif, or GitHub Actions `::error`/`::warning` annotations for inline PR-diff comments |
+| `verify --format human\|json\|sarif\|github\|junit` | human report (default), machine-readable JSON for CI, SARIF 2.1.0 for GitHub Code Scanning upload-sarif, GitHub Actions `::error`/`::warning` annotations for inline PR-diff comments, or JUnit XML for xUnit-consuming CI (GitLab/Jenkins/CircleCI) |
 | `verify --fix` | mechanically repair detected drift (rewrites only the file the drift lives in; surgical). No-op when nothing is fixable. |
 | `verify --min-score <N>` | minimum discoverability score (0–100) the run must reach to exit zero; gate runs against the post-fix report. Omitted by default. Pairs with `--format json` for CI. |
 | `verify --watch` | re-run verify on every file change (debounced); iterative feedback during SKILL.md / skillpack.toml edits. Only valid with `--format human` (Ctrl-C stops). |
@@ -194,11 +195,16 @@ The easier path is `skillpack add <name>` — it appends a skill (via the
 interview, or the `--non-interactive` bootstrap flags) and re-renders in one
 step, instead of hand-authoring the `[[skills]]` array.
 
-Polyglot monorepos: `introspect` detects every language manifest (not just the
-primary) and records the rest as `secondary_languages`. `init --auto` on a
-monorepo with no committed config emits one skill per detected language — the
-primary keeps the project name, each secondary becomes `{name}-{lang}` with a
-library-style intent you can refine via `skillpack update` / `skillpack add`.
+A multi-skill pack's marketplace entry merges every skill's `keywords`
+(deduped) so it is discoverable under all of them, not just the primary's.
+
+Polyglot monorepos: `introspect` detects every language manifest (Rust, Node,
+Python, Go, Ruby, PHP, JVM, C#, Zig, Swift, C/C++, Elixir, Deno, Nix,
+Dart/Flutter, Haskell) and records all but the primary as
+`secondary_languages`. `init --auto` on a monorepo with no committed config
+emits one skill per detected language — the primary keeps the project name,
+each secondary becomes `{name}-{lang}` with a library-style intent you can
+refine via `skillpack update` / `skillpack add`.
 
 Limitation: the invocation drift checks (`invocation.*`, which spawn the CLI
 `--help` and diff flags) run against the FIRST skill file only — give each
@@ -219,6 +225,8 @@ category = "the data tooling"              # override the category prose
 globs = ["src/**", "*.md"]                 # override Cursor/Windsurf auto-attach globs
 opencode_mode = "subagent"                 # override the OpenCode mode
 keywords = ["journal", "log"]              # override the marketplace keywords
+marketplace_category = "database"          # override the marketplace `category` field
+owner_type = "organization"                # override the marketplace `owner.type` field
 ```
 
 Editor autocomplete/validation for `skillpack.toml` is available via the JSON

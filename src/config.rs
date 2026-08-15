@@ -79,6 +79,12 @@ pub struct SkillConfig {
     /// Override the derived marketplace `keywords` list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keywords: Option<Vec<String>>,
+    /// Override the marketplace `category` field (default `developer-tools`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marketplace_category: Option<String>,
+    /// Override the marketplace `owner.type` field (default `individual`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_type: Option<String>,
 }
 
 impl SkillConfig {
@@ -99,6 +105,8 @@ impl SkillConfig {
             category: self.category.clone(),
             opencode_mode: self.opencode_mode.clone(),
             keywords: self.keywords.clone(),
+            marketplace_category: self.marketplace_category.clone(),
+            owner_type: self.owner_type.clone(),
         }
     }
 
@@ -119,6 +127,8 @@ impl SkillConfig {
             category: intent.category.clone(),
             opencode_mode: intent.opencode_mode.clone(),
             keywords: intent.keywords.clone(),
+            marketplace_category: intent.marketplace_category.clone(),
+            owner_type: intent.owner_type.clone(),
         }
     }
 }
