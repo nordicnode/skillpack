@@ -6,6 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.3](https://github.com/nordicnode/skillpack/compare/v0.13.2...v0.13.3) - 2026-08-15
+
+### Added
+
+- Shell/PowerShell languages, nested polyglot detection, Trae target, verify config gate
+- *(release)* auto re-pin homebrew sha256 checksums on the v* tag push
+- add 8 languages, remove command, and 4 rules-directory targets
+
+### Fixed
+
+- *(ci)* make multi-skill test git-identity-independent and unblock release PR
+- honor intent-driven CLI rendering, multi-skill/update artifacts, distribution hardening
+
+### Other
+
+- fold per-language CLI probes into each language's spec module
+- one module per language in introspect/manifest, per-format modules in generate
+- list Qoder, Continue, Augment, and Amazon Q as supported agents
+
 ### Added
 
 - Eight new language ecosystems: **Lua** (`*.rockspec`), **Julia**
