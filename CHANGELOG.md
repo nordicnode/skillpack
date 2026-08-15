@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.2](https://github.com/nordicnode/skillpack/compare/v0.13.1...v0.13.2) - 2026-08-15
+
+### Added
+
+- expand languages, output formats, and distribution hardening
+
 ### Added
 
 - `--format junit` for `skillpack verify`: JUnit XML for xUnit-consuming CI
