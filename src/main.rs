@@ -238,11 +238,12 @@ fn auto_intents(
     root: &Path,
     triggers: &[String],
     import: Option<&str>,
+    description: Option<&str>,
 ) -> Result<Vec<(String, types::Intent)>> {
     let primary_name = coerce_kebab(&profile.name);
     let mut out = vec![(
         primary_name.clone(),
-        auto_intent(profile, triggers, import)?,
+        auto_intent(profile, triggers, import, description)?,
     )];
     for lang in &profile.secondary_languages {
         let lang_str = lang.as_str();
@@ -292,59 +293,14 @@ fn auto_intents(
 /// Derive a library import pattern for a secondary language in a polyglot
 /// monorepo, using the language's own manifest name when present (the
 /// package/crate/module the agent would actually import) and falling back to
-/// the secondary skill name. One language-shaped pattern per ecosystem so the
-/// rendered skill tells an agent how to consume the package in that language.
+/// the secondary skill name. One language-shaped pattern per ecosystem — the
+/// per-language formatting lives in `introspect::manifest`'s `LanguageSpec`
+/// implementations, so adding a language updates this function's data, not
+/// its shape.
 fn secondary_import_pattern(lang: types::Language, root: &Path, fallback: &str) -> String {
     let name =
         introspect::project_manifest_name(root, lang).unwrap_or_else(|| fallback.to_string());
-    match lang {
-        types::Language::Rust => {
-            format!("use {crate_name}::…;", crate_name = name.replace('-', "_"))
-        }
-        types::Language::Node => format!("import {{ … }} from '{name}'"),
-        types::Language::Python => format!("import {module}", module = name.replace('-', "_")),
-        types::Language::Go => format!("import \"{name}\""),
-        types::Language::Ruby => format!("require '{name}'"),
-        types::Language::Php => format!("require '{name}'"),
-        types::Language::Jvm => format!("import {pkg}.*;", pkg = name.replace('-', ".")),
-        types::Language::CSharp => format!("using {ns};", ns = name.replace('-', "")),
-        types::Language::Zig => format!("const {name} = @import(\"{name}\");"),
-        types::Language::Swift => format!("import {name}"),
-        types::Language::CCpp => format!("#include <{name}.h>"),
-        types::Language::Elixir => format!("import {mod}", mod = pascal_name(&name)),
-        types::Language::Deno => format!("import {{ … }} from \"{name}\""),
-        types::Language::Nix => format!("{{ inputs, ... }}: inputs.{name}"),
-        types::Language::Dart => format!("import 'package:{name}/{name}.dart';"),
-        types::Language::Haskell => format!("import {mod}", mod = pascal_name(&name)),
-        types::Language::Lua => format!("require(\"{name}\")"),
-        types::Language::Julia => format!("using {name}"),
-        types::Language::Crystal => format!("require \"./{name}\""),
-        types::Language::Clojure => format!("(require '[{name} :refer :all])"),
-        types::Language::Ocaml => format!("open {mod}", mod = pascal_name(&name)),
-        types::Language::Erlang => format!("application:ensure_all_started({name})."),
-        types::Language::R => format!("library({name})"),
-        types::Language::Perl => format!("use {name};"),
-        types::Language::Shell => format!("source ./{name}.sh"),
-        types::Language::Powershell => format!("Import-Module {name}"),
-        types::Language::Unknown => {
-            format!("(no standard import form for {name}; document it via `skillpack update`)")
-        }
-    }
-}
-
-/// Upper-camel-case a kebab/snake name for languages whose import statement
-/// names a module (`import Foo.Bar`), e.g. `my-lib` → `MyLib`.
-fn pascal_name(name: &str) -> String {
-    name.split(['-', '_', '.'])
-        .filter(|s| !s.is_empty())
-        .map(|seg| {
-            let mut c = seg.chars();
-            match c.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect()
+    introspect::language_spec(lang).import_pattern(&name)
 }
 
 /// Derive the [`Intent`] entirely from the repo — `init --auto`. Zero
@@ -360,12 +316,21 @@ fn auto_intent(
     profile: &types::ProjectProfile,
     triggers: &[String],
     import: Option<&str>,
+    description: Option<&str>,
 ) -> Result<types::Intent> {
+    // Description precedence: README/manifest hint first, then the explicit
+    // `--description` flag — so a README-less repo can still `init --auto`
+    // (the old error told users to "Pass --description" but never honored it).
     let one_line_description = profile
         .description_hint
         .clone()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+        .or_else(|| {
+            description
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "--auto could not derive a description (no README hint or manifest \
@@ -635,7 +600,13 @@ fn run_init_inner(
         // license from the LICENSE file, invocation from the detected
         // CLI) so a fresh checkout inits with ZERO flags and zero prompts.
         // A polyglot monorepo gets one skill per detected language.
-        auto_intents(&profile, root, &triggers, import.as_deref())?
+        auto_intents(
+            &profile,
+            root,
+            &triggers,
+            import.as_deref(),
+            description.as_deref(),
+        )?
     } else if non_interactive {
         // Plain --non-interactive without a config: the intent comes from
         // the bootstrap flags (description/trigger/author + invocation or
@@ -2364,7 +2335,7 @@ mod confirm_tests {
             description_hint: Some("Find files by name".into()),
             diag: types::DiagTrace::default(),
         };
-        let intent = auto_intent(&profile, &[], None).unwrap();
+        let intent = auto_intent(&profile, &[], None, None).unwrap();
         assert_eq!(
             intent.invocation_command.as_deref(),
             Some(stem.as_str()),
@@ -2375,8 +2346,38 @@ mod confirm_tests {
         // name wins.
         let mut go = profile.clone();
         go.cli_command = Some(vec!["go".into(), "run".into(), ".".into()]);
-        let intent = auto_intent(&go, &[], None).unwrap();
+        let intent = auto_intent(&go, &[], None, None).unwrap();
         assert_eq!(intent.invocation_command.as_deref(), Some("fd-find"));
+    }
+
+    // Regression: `init --auto --description` must work in a README-less repo
+    // (the old error told users to "Pass --description" but `--auto` never
+    // honored the flag — the fallback now fills the description hint).
+    #[test]
+    fn auto_intent_honors_description_flag_without_readme_hint() {
+        let profile = types::ProjectProfile {
+            name: "nodocs".into(),
+            language: types::Language::Rust,
+            secondary_languages: Vec::new(),
+            has_cli: true,
+            cli_command: Some(vec!["node".into(), "cli.js".into()]),
+            cli_help_output: Some("usage".into()),
+            cli_subcommand_tree: Vec::new(),
+            repo_url: None,
+            license: Some("MIT".into()),
+            version: None,
+            authors: None,
+            // No README hint / manifest description → the flag must save it.
+            description_hint: None,
+            diag: types::DiagTrace::default(),
+        };
+        let intent = auto_intent(&profile, &[], None, Some("A docs-less tool")).unwrap();
+        assert_eq!(intent.one_line_description, "A docs-less tool");
+        // The flag also becomes the trigger fallback.
+        assert_eq!(intent.when_to_use_phrases, vec!["A docs-less tool"]);
+
+        // Without the flag (and no hint), the old error still fires.
+        assert!(auto_intent(&profile, &[], None, None).is_err());
     }
 
     // Regression: a README hint with a multibyte char across byte 120 must

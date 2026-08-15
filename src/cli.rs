@@ -522,6 +522,31 @@ pub enum Target {
     Goose,
 }
 
+/// Every concrete target, in canonical (declaration) order — the expansion
+/// of `--target all`, and the iteration order for derived per-skill cleanup
+/// paths (`generate::orphaned_skill_rel_paths`).
+pub const ALL_TARGETS: [Target; 19] = [
+    Target::Claude,
+    Target::Cursor,
+    Target::Codex,
+    Target::OpenCode,
+    Target::Copilot,
+    Target::AgentsMd,
+    Target::ClaudeMd,
+    Target::Gemini,
+    Target::Windsurf,
+    Target::Aider,
+    Target::Cline,
+    Target::Roo,
+    Target::Kilo,
+    Target::Goose,
+    Target::Qoder,
+    Target::Continue,
+    Target::Augment,
+    Target::AmazonQ,
+    Target::Trae,
+];
+
 /// The canonical `--target` value names (declaration order, plus the `all`
 /// sentinel and the `freebuff` alias). Used by the `--target list` helper.
 pub fn target_names() -> Vec<&'static str> {
@@ -559,27 +584,7 @@ pub fn resolve_targets(raw: &[String]) -> anyhow::Result<Vec<Target>> {
     for r in raw {
         if r == "all" {
             // Canonical order — `Target` declaration order minus the sentinel.
-            out.extend([
-                Target::Claude,
-                Target::Cursor,
-                Target::Codex,
-                Target::OpenCode,
-                Target::Copilot,
-                Target::AgentsMd,
-                Target::ClaudeMd,
-                Target::Gemini,
-                Target::Windsurf,
-                Target::Aider,
-                Target::Cline,
-                Target::Roo,
-                Target::Kilo,
-                Target::Goose,
-                Target::Qoder,
-                Target::Continue,
-                Target::Augment,
-                Target::AmazonQ,
-                Target::Trae,
-            ]);
+            out.extend(ALL_TARGETS);
         } else if r == "freebuff" || r == "agents.md" || r == "agents-md" {
             out.push(Target::AgentsMd);
         } else {

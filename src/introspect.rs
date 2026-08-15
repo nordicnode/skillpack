@@ -38,7 +38,7 @@ pub(crate) use cli_candidates::which_on_path;
 // bin target (`main.rs`) derives per-secondary-language import patterns from
 // each secondary manifest — a `pub(crate)` re-export is invisible to the bin
 // crate. The other two stay internal to the lib.
-pub use manifest::project_manifest_name;
+pub use manifest::{language_spec, project_manifest_name};
 pub(crate) use manifest::{project_manifest_version, select_csproj};
 pub(crate) use repo::{normalize_git_url, urls_equivalent};
 pub(crate) use workspace::{
@@ -231,126 +231,17 @@ fn is_noise_dir(p: &Path) -> bool {
         )
 }
 
-/// Per-directory signal check for one language, mirroring the conditions in
-/// `detect_language`'s chain — keep the two in sync. Used by
+/// Per-directory signal check for one language — the per-language `present`
+/// in `manifest::language_spec` (keep detection and the nested walk in sync
+/// by construction: both go through the same registry). Used by
 /// `detect_all_languages` / `language_manifest_dir` to probe the root and
 /// nested subdirectories alike. `CCpp` deliberately omits the bare
 /// `Makefile` signal here (weak and shared across ecosystems), matching the
 /// pre-nested-walk behavior; `detect_language` still honors Makefile for the
-/// PRIMARY.
+/// PRIMARY. Script-first ecosystems (`Shell`/`Powershell`) return false —
+/// a stray `*.sh` must not mint a secondary skill.
 fn language_present(dir: &Path, lang: Language) -> bool {
-    match lang {
-        Language::Rust => dir.join("Cargo.toml").exists(),
-        Language::Node => dir.join("package.json").exists(),
-        Language::Python => {
-            dir.join("pyproject.toml").exists()
-                || dir.join("setup.py").exists()
-                || dir.join("setup.cfg").exists()
-        }
-        Language::Go => dir.join("go.mod").exists(),
-        Language::Php => dir.join("composer.json").exists(),
-        Language::Jvm => {
-            dir.join("pom.xml").exists()
-                || dir.join("build.gradle").exists()
-                || dir.join("build.gradle.kts").exists()
-        }
-        Language::CSharp => cli_probe::has_csproj(dir),
-        Language::Ruby => dir.join("Gemfile").exists() || cli_probe::has_gemspec(dir),
-        Language::Zig => dir.join("build.zig").exists() || dir.join("build.zig.zon").exists(),
-        Language::Swift => dir.join("Package.swift").exists(),
-        Language::CCpp => dir.join("CMakeLists.txt").exists() || dir.join("meson.build").exists(),
-        Language::Elixir => dir.join("mix.exs").exists(),
-        Language::Deno => dir.join("deno.json").exists() || dir.join("deno.jsonc").exists(),
-        Language::Nix => {
-            dir.join("flake.nix").exists()
-                || dir.join("shell.nix").exists()
-                || dir.join("default.nix").exists()
-        }
-        Language::Dart => dir.join("pubspec.yaml").exists(),
-        Language::Haskell => {
-            dir.join("stack.yaml").exists()
-                || dir.join("cabal.project").exists()
-                || cli_probe::has_cabal_file(dir)
-        }
-        Language::Lua => cli_probe::has_file_with_ext(dir, "rockspec"),
-        Language::Julia => dir.join("Project.toml").exists(),
-        Language::Crystal => dir.join("shard.yml").exists(),
-        Language::Clojure => dir.join("deps.edn").exists() || dir.join("project.clj").exists(),
-        Language::Ocaml => {
-            dir.join("dune-project").exists() || cli_probe::has_file_with_ext(dir, "opam")
-        }
-        Language::Erlang => {
-            dir.join("rebar.config").exists() || cli_probe::has_file_ending_with(dir, ".app.src")
-        }
-        Language::R => cli_probe::root_file_contains(dir, "DESCRIPTION", "Package:"),
-        Language::Perl => {
-            dir.join("cpanfile").exists()
-                || dir.join("Makefile.PL").exists()
-                || dir.join("META.json").exists()
-        }
-        // Script-first ecosystems are PRIMARY-only: `detect_language` covers
-        // them via `shell_project`/`powershell_project`, but weak signals
-        // like a stray `*.sh` must not mint a secondary skill.
-        Language::Shell | Language::Powershell | Language::Unknown => false,
-    }
-}
-
-/// True when the repo's primary surface is shell scripting: a shebang'd
-/// `*.sh` at the root (excluding the ubiquitous install/setup/configure
-/// helpers that tag along with non-shell projects) or under `bin/`/
-/// `scripts/`/`src/`. Weak but sufficient — this branch only fires when NO
-/// other language manifest exists.
-fn shell_project(root: &Path) -> bool {
-    fn has_shell_shebang(p: &Path) -> bool {
-        fs::read_to_string(p)
-            .ok()
-            .and_then(|c| c.lines().next().map(str::to_string))
-            .is_some_and(|l| {
-                l.starts_with("#!")
-                    && (l.contains("bash") || l.contains("/sh") || l.contains("zsh"))
-            })
-    }
-    if let Ok(rd) = fs::read_dir(root) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.extension().and_then(|x| x.to_str()) == Some("sh") {
-                let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                if !matches!(stem, "install" | "setup" | "configure") && has_shell_shebang(&p) {
-                    return true;
-                }
-            }
-        }
-    }
-    for sub in ["bin", "scripts", "src"] {
-        if let Ok(rd) = fs::read_dir(root.join(sub)) {
-            for e in rd.flatten() {
-                let p = e.path();
-                if p.extension().and_then(|x| x.to_str()) == Some("sh") && has_shell_shebang(&p) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// True when the repo ships PowerShell scripts/modules (`.ps1`/`.psm1`/
-/// `.psd1`) at the root or under `bin`/`src`/`scripts`/`tools`. Same weak
-/// primary-only status as [`shell_project`].
-fn powershell_project(root: &Path) -> bool {
-    for sub in ["", "bin", "src", "scripts", "tools"] {
-        if let Ok(rd) = fs::read_dir(root.join(sub)) {
-            for e in rd.flatten() {
-                if matches!(
-                    e.path().extension().and_then(|x| x.to_str()),
-                    Some("ps1") | Some("psm1") | Some("psd1")
-                ) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    language_spec(lang).present(dir)
 }
 
 /// Detect the dominant language by checking for known manifests. Each falsy
@@ -359,7 +250,11 @@ fn powershell_project(root: &Path) -> bool {
 /// case (a `Cargo.toml` with `[workspace]` members but no `[package]`)
 /// surfaces as a note pointing at member walking.
 pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
-    if root.join("Cargo.toml").exists() {
+    // Every manifest check delegates to the language's `present` signal in
+    // `manifest::language_spec`; the chain order here IS the detection
+    // priority (Rust beats Node, etc.). Only the workspace/Makefile edge
+    // cases carry extra diag notes.
+    if language_spec(Language::Rust).present(root) {
         // A workspace-only `Cargo.toml` (no `[package]`) has no binary of its
         // own; its members may. Push a note so doctor explains the walk below.
         let is_workspace_only = is_cargo_workspace_only(root);
@@ -371,7 +266,7 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
             );
         }
         Language::Rust
-    } else if root.join("package.json").exists() {
+    } else if language_spec(Language::Node).present(root) {
         if is_npm_workspace_only(root) {
             diag.push(
                 "detect_language.node",
@@ -380,32 +275,26 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
             );
         }
         Language::Node
-    } else if root.join("pyproject.toml").exists()
-        || root.join("setup.py").exists()
-        || root.join("setup.cfg").exists()
-    {
+    } else if language_spec(Language::Python).present(root) {
         Language::Python
-    } else if root.join("go.mod").exists() {
+    } else if language_spec(Language::Go).present(root) {
         Language::Go
-    } else if root.join("composer.json").exists() {
+    } else if language_spec(Language::Php).present(root) {
         Language::Php
-    } else if root.join("pom.xml").exists()
-        || root.join("build.gradle").exists()
-        || root.join("build.gradle.kts").exists()
-    {
+    } else if language_spec(Language::Jvm).present(root) {
         Language::Jvm
-    } else if cli_probe::has_csproj(root) {
+    } else if language_spec(Language::CSharp).present(root) {
         Language::CSharp
-    } else if root.join("Gemfile").exists() || cli_probe::has_gemspec(root) {
+    } else if language_spec(Language::Ruby).present(root) {
         Language::Ruby
-    } else if root.join("build.zig").exists() || root.join("build.zig.zon").exists() {
+    } else if language_spec(Language::Zig).present(root) {
         Language::Zig
-    } else if root.join("Package.swift").exists() {
+    } else if language_spec(Language::Swift).present(root) {
         Language::Swift
-    } else if root.join("CMakeLists.txt").exists()
-        || root.join("meson.build").exists()
-        || root.join("Makefile").exists()
-    {
+    } else if language_spec(Language::CCpp).present(root) || root.join("Makefile").exists() {
+        // The per-language signal deliberately omits the bare Makefile (a
+        // weak, cross-ecosystem marker); the primary chain honors it with a
+        // doctor note so a Makefile-only repo still resolves to C/C++.
         if !root.join("CMakeLists.txt").exists() && !root.join("meson.build").exists() {
             diag.push(
                 "detect_language.c_cpp",
@@ -415,46 +304,35 @@ pub(crate) fn detect_language(root: &Path, diag: &mut DiagTrace) -> Language {
             );
         }
         Language::CCpp
-    } else if root.join("mix.exs").exists() {
+    } else if language_spec(Language::Elixir).present(root) {
         Language::Elixir
-    } else if root.join("deno.json").exists() || root.join("deno.jsonc").exists() {
+    } else if language_spec(Language::Deno).present(root) {
         Language::Deno
-    } else if root.join("flake.nix").exists()
-        || root.join("shell.nix").exists()
-        || root.join("default.nix").exists()
-    {
+    } else if language_spec(Language::Nix).present(root) {
         Language::Nix
-    } else if root.join("pubspec.yaml").exists() {
+    } else if language_spec(Language::Dart).present(root) {
         Language::Dart
-    } else if root.join("stack.yaml").exists()
-        || root.join("cabal.project").exists()
-        || cli_probe::has_cabal_file(root)
-    {
+    } else if language_spec(Language::Haskell).present(root) {
         Language::Haskell
-    } else if cli_probe::has_file_with_ext(root, "rockspec") {
+    } else if language_spec(Language::Lua).present(root) {
         Language::Lua
-    } else if root.join("Project.toml").exists() {
+    } else if language_spec(Language::Julia).present(root) {
         Language::Julia
-    } else if root.join("shard.yml").exists() {
+    } else if language_spec(Language::Crystal).present(root) {
         Language::Crystal
-    } else if root.join("deps.edn").exists() || root.join("project.clj").exists() {
+    } else if language_spec(Language::Clojure).present(root) {
         Language::Clojure
-    } else if root.join("dune-project").exists() || cli_probe::has_file_with_ext(root, "opam") {
+    } else if language_spec(Language::Ocaml).present(root) {
         Language::Ocaml
-    } else if root.join("rebar.config").exists()
-        || cli_probe::has_file_ending_with(root, ".app.src")
-    {
+    } else if language_spec(Language::Erlang).present(root) {
         Language::Erlang
-    } else if cli_probe::root_file_contains(root, "DESCRIPTION", "Package:") {
+    } else if language_spec(Language::R).present(root) {
         Language::R
-    } else if root.join("cpanfile").exists()
-        || root.join("Makefile.PL").exists()
-        || root.join("META.json").exists()
-    {
+    } else if language_spec(Language::Perl).present(root) {
         Language::Perl
-    } else if shell_project(root) {
+    } else if language_spec(Language::Shell).present(root) {
         Language::Shell
-    } else if powershell_project(root) {
+    } else if language_spec(Language::Powershell).present(root) {
         Language::Powershell
     } else {
         diag.push(
