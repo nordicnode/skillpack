@@ -134,13 +134,37 @@ jobs:
           # `dry-run: true` builds + compresses exactly like a real release
           # but never uploads — the documented rehearsal mode for this action.
           dry-run: true
-      - name: Smoke-test the built binary
-        # Same assertion the real installer smoke makes (`--version` runs and
-        # exits 0). Windows needs the .exe suffix; Git Bash is preinstalled.
+      # Exec-smoke only the host-native target. A cross-compiled binary cannot
+      # run on the runner (aarch64 Linux on an x86_64 host → Exec format
+      # error; and a future arm64-only `macos-latest` would break the x86_64
+      # smoke the same way). The real release smokes exactly one target
+      # (release.yml's `smoke` job on ubuntu via install.sh), so the rehearsal
+      # mirrors that: execute the linux x86_64 binary and validate every other
+      # target's artifact bytes without trying to run it.
+      - name: Smoke-test the built binary (host-native target only)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         shell: bash
         run: |
           bin="target/${{ matrix.target }}/release/skillpack"
-          [ "${{ matrix.os }}" = "windows-latest" ] && bin="${bin}.exe"
           "$bin" --version
           "$bin" doctor --format json | grep -q '"name"'
           echo "rehearsal smoke OK for ${{ matrix.target }}"
+
+      # Non-native targets: verify the archive contains a real binary of the
+      # right format for the target (ELF / Mach-O / PE magic bytes) without
+      # executing it. `od`/`head`/`tr` are present on every runner's bash.
+      - name: Validate cross-compiled binary artifact (no exec)
+        if: matrix.target != 'x86_64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/${{ matrix.target }}/release/skillpack"
+          [ "${{ matrix.os }}" = "windows-latest" ] && bin="${bin}.exe"
+          test -s "$bin" || { echo "::error::$bin missing or empty"; exit 1; }
+          magic=$(head -c 4 "$bin" | od -An -tx1 | tr -d ' \n')
+          case "${{ matrix.target }}" in
+            *linux*)   [ "${magic:0:8}" = "7f454c46" ] || { echo "::error::${{ matrix.target }}: not an ELF (magic $magic)"; exit 1; } ;;
+            *darwin*)  [ "$magic" = "cffaedfe" ] || [ "$magic" = "cafebabe" ] || { echo "::error::${{ matrix.target }}: not a Mach-O (magic $magic)"; exit 1; } ;;
+            *windows*) [ "${magic:0:4}" = "4d5a" ] || { echo "::error::${{ matrix.target }}: not a PE (magic $magic)"; exit 1; } ;;
+          esac
+          echo "artifact OK for ${{ matrix.target }} (magic $magic)"
