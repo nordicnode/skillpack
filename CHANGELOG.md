@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.1](https://github.com/nordicnode/skillpack/compare/v0.13.0...v0.13.1) - 2026-08-15
+
+### Added
+
+- expand agent ecosystem coverage and power-user tooling
+
+### Fixed
+
+- harden verify, config, and add against silent corruption
+
 ### Added
 
 - Native Claude Code skills directory: the Claude target now also emits
