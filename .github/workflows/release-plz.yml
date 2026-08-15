@@ -38,6 +38,10 @@ permissions:
 on:
   push:
     branches: [main]
+  # Manual trigger: `gh workflow run release-plz.yml` (or the Actions UI's
+  # "Run workflow" button) opens/reopens the release PR without needing a
+  # push. Useful right after the RELEASE_PLZ_TOKEN secret is first configured.
+  workflow_dispatch:
 
 jobs:
   release-plz:
