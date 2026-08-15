@@ -166,6 +166,51 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Re-pin the Homebrew formula's per-binary sha256 pins against the release
+  # the `binaries` job just uploaded, and commit them to main. Previously this
+  # was a manual post-release step (`python3 scripts/update_homebrew_sha256.py`);
+  # the formula is uninstallable without the pins, so the ci.yml checksum guard
+  # keeps main red until they land. Must run after the binaries exist — the
+  # script downloads each tarball from the release to hash it.
+  re-pin-homebrew:
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so the pin commit can be rebased onto current main
+          # before pushing (the tag is usually main HEAD at this point, but a
+          # concurrent merge would otherwise make the push non-fast-forward).
+          fetch-depth: 0
+      - name: Re-pin formula checksums from the published release
+        run: python3 scripts/update_homebrew_sha256.py
+      - name: Commit the pinned formula and push it to main
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add homebrew/skillpack.rb
+          if git diff --cached --quiet; then
+            echo "formula checksums already pinned; nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore: re-pin homebrew sha256 pins for ${GITHUB_REF_NAME}"
+          git fetch origin main
+          git rebase origin/main
+          # The rebased formula must still reference this tag's version — if a
+          # newer release PR landed on main in the meantime, re-pinning would
+          # stamp stale checksums over a bumped formula. Fail loudly instead.
+          ver=$(grep -oP 'version "\K[0-9]+\.[0-9]+\.[0-9]+' homebrew/skillpack.rb | head -1)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$ver" != "$tag" ]; then
+            echo "::error::homebrew formula version $ver does not match tag $tag after rebase; refusing to push"
+            exit 1
+          fi
+          git push origin HEAD:main
+          echo "pinned homebrew formula pushed to main"
+
   # End-to-end smoke test of the one-command installer. After the binaries
   # are uploaded, run install.sh against the just-created release and confirm
   # the installed binary executes. Catches a missing or mismapped asset (the

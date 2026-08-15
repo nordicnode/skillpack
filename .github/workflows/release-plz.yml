@@ -117,8 +117,9 @@ jobs:
           sed -i -E "s#/v[0-9]+\.[0-9]+\.[0-9]+/#/v$ver/#g" homebrew/skillpack.rb
           # Per-binary sha256 pins cannot be recomputed until the release is
           # published; replace them with a reminder comment so a bumped
-          # version never ships a stale checksum (re-pin post-release via
-          # scripts/update_homebrew_sha256.py).
+          # version never ships a stale checksum. The Release workflow's
+          # `re-pin-homebrew` job (fired by the v* tag push) re-pins them
+          # automatically once the binaries are uploaded.
           sed -i -E 's|^[[:space:]]*sha256 .*$|# TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published|' homebrew/skillpack.rb
           # README's pin examples (`@vX.Y.Z` workflow pin + `rev: vX.Y.Z`
           # pre-commit pin) should track the latest release too.

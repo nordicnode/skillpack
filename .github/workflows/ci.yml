@@ -196,20 +196,23 @@ jobs:
       # The release-plz sync strips the per-binary sha256 pins when it bumps
       # the version (they can't exist until the release is published); a
       # committed formula with the `re-pin sha256` reminder is a broken tap
-      # (`brew install` fails without a checksum). Fail until the pins are
-      # regenerated via scripts/update_homebrew_sha256.py.
+      # (`brew install` fails without a checksum). The Release workflow's
+      # `re-pin-homebrew` job re-pins them automatically once the tag is cut
+      # and the binaries are uploaded — so a placeholder on main means that
+      # automation failed, or the version was bumped by hand without running
+      # scripts/update_homebrew_sha256.py. Fail until the pins are back.
       #
       # The release-plz PR is the one legitimate home for the placeholder: its
-      # own sync step strips the pins by design, and the post-release
-      # `update_homebrew_sha256.py` run (which lands on main after the tag is
-      # cut) is what re-pins. So skip those branches here; the guard still
-      # fires on every other PR and on every push to main, which is what
-      # catches a merge that forgot to re-pin.
+      # own sync step strips the pins by design, and the tag-cut
+      # `re-pin-homebrew` job is what re-pins. So skip those branches here;
+      # the guard still fires on every other PR and on every push to main,
+      # which is what catches the automation failing or a manual bump that
+      # forgot to re-pin.
       - name: homebrew formula has pinned checksums
         if: ${{ !startsWith(github.head_ref, 'release-plz') }}
         run: |
           if grep -q "TODO: re-pin sha256" homebrew/skillpack.rb; then
-            echo "::error::homebrew/skillpack.rb has unpinned sha256 placeholders; run python3 scripts/update_homebrew_sha256.py after the release is published"
+            echo "::error::homebrew/skillpack.rb has unpinned sha256 placeholders; the Release workflow's re-pin-homebrew job should have fixed these on the tag push — run python3 scripts/update_homebrew_sha256.py and commit, or investigate the release run"
             exit 1
           fi
           echo "homebrew checksums pinned"

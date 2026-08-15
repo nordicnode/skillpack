@@ -11,14 +11,16 @@
 #   brew install --formula homebrew/skillpack.rb
 #
 # Version/URL bumps: on each release update `version` and the `vX.Y.Z` tag in
-# the `url`s below. The `sha256` pins are per-binary and must be regenerated
-# after each release (they cannot be computed until the binaries exist):
+# the `url`s below. The `sha256` pins are per-binary and cannot be computed
+# until the binaries exist, so the Release workflow's `re-pin-homebrew` job
+# regenerates them automatically when the `v*` tag is pushed (it runs
+# scripts/update_homebrew_sha256.py and commits the result to main). For an
+# out-of-band fix, run the script by hand:
 #
 #   python3 scripts/update_homebrew_sha256.py
 #
 # The release-plz sync step strips the `sha256` lines when it bumps the
-# version, so a stale checksum can never ship; re-pin with the script above
-# once the release is published.
+# version, so a stale checksum can never ship.
 class Skillpack < Formula
   desc "Generate and verify the agent-distribution layer for any OSS project"
   homepage "https://github.com/nordicnode/skillpack"

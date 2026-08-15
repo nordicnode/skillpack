@@ -3,7 +3,10 @@
 
 Downloads each release tarball referenced in homebrew/skillpack.rb and
 rewrites the `sha256` line that follows each `url` to the current checksum.
-Run after a release is published (the binaries must exist):
+The release must be published first (the binaries must exist). Normally this
+runs automatically: the Release workflow's `re-pin-homebrew` job invokes it on
+the `v*` tag push and commits the result to main. Run it by hand only for an
+out-of-band fix:
 
     python3 scripts/update_homebrew_sha256.py
 
