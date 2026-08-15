@@ -198,7 +198,15 @@ jobs:
       # committed formula with the `re-pin sha256` reminder is a broken tap
       # (`brew install` fails without a checksum). Fail until the pins are
       # regenerated via scripts/update_homebrew_sha256.py.
+      #
+      # The release-plz PR is the one legitimate home for the placeholder: its
+      # own sync step strips the pins by design, and the post-release
+      # `update_homebrew_sha256.py` run (which lands on main after the tag is
+      # cut) is what re-pins. So skip those branches here; the guard still
+      # fires on every other PR and on every push to main, which is what
+      # catches a merge that forgot to re-pin.
       - name: homebrew formula has pinned checksums
+        if: ${{ !startsWith(github.head_ref, 'release-plz') }}
         run: |
           if grep -q "TODO: re-pin sha256" homebrew/skillpack.rb; then
             echo "::error::homebrew/skillpack.rb has unpinned sha256 placeholders; run python3 scripts/update_homebrew_sha256.py after the release is published"

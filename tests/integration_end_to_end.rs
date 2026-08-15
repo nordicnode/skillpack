@@ -5523,7 +5523,13 @@ fn scratch_manifest_repo() -> PathBuf {
     let root = tempfile::tempdir().unwrap().keep();
     fs::write(
         root.join("Cargo.toml"),
-        "[package]\nname = \"chronicle\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        // `authors` must be declared: the manifest author is resolved before
+        // the `git config user.name` fallback, so without it the rendered
+        // plugin.json author depends on the ambient git identity of the
+        // machine running the test (CI runners have none -> "Unspecified" ->
+        // spurious `plugin.json has a real author` warning that flakes the
+        // warning-free assertions below).
+        "[package]\nname = \"chronicle\"\nversion = \"0.1.0\"\nedition = \"2021\"\nauthors = [\"Test Author\"]\n",
     )
     .unwrap();
     fs::write(
