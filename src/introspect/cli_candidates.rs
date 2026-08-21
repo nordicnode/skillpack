@@ -68,7 +68,12 @@ pub(crate) fn which_on_path(name: &str) -> Option<PathBuf> {
         _ => {
             if cfg!(windows) {
                 // cmd.exe's built-in default when PATHEXT is not set.
-                vec![".COM".to_string(), ".EXE".to_string(), ".BAT".to_string(), ".CMD".to_string()]
+                vec![
+                    ".COM".to_string(),
+                    ".EXE".to_string(),
+                    ".BAT".to_string(),
+                    ".CMD".to_string(),
+                ]
             } else {
                 Vec::new()
             }
