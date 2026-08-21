@@ -207,7 +207,8 @@ pub(crate) fn has_gemspec(root: &Path) -> bool {
 
 /// True if the root contains any `*.csproj` file. Solution-only repos (`.sln`
 /// at root, csproj in subdirs) are not detected — same limitation class as
-/// Cargo workspace-only roots. ponytail: add .sln directory walk when needed.
+/// Cargo workspace-only roots. Future work: add a `.sln` directory walk when
+/// needed.
 pub(crate) fn has_csproj(root: &Path) -> bool {
     fs::read_dir(root).is_ok_and(|entries| {
         entries
@@ -411,7 +412,7 @@ fn spawn_candidate(candidate: &CliCandidate, diag: &mut DiagTrace) -> DetectCli 
             );
             DetectCli::none()
         }
-        // ponytail: permission-denied etc. are rare; mapping to `none()`
+        // Note: permission-denied etc. are rare; mapping to `none()`
         // means `has_cli=false` (pure-library path) rather than crashing.
         // verify's spawn will then surface the gap downstream if the CLI IS
         // documented. The honest path for V1 — doesn't crash.
@@ -569,7 +570,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
-    // ponytail: walk_*_workspace skip branch (member with no name in manifest
+    // Note: the walk_*_workspace skip branch (member with no name in manifest
     // AND dir-tail file_name() None) is unreachable for non-root member paths —
     // the path-tail fallback always yields a name. These tests assert the
     // observable contract we DO hit: the walk continues past every member to the

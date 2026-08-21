@@ -120,10 +120,12 @@ pub(crate) fn reverse_drift(
     ));
 }
 
-/// True for the universal help/version meta-flags that every CLI implicitly
-/// supports but does not (and should not) list among its own passable flags.
-/// These are excluded from flag-drift comparison so a SKILL.md instruction like
-/// "Run `<cli> --help`" doesn't read as drift.
+/// For each subcommand the SKILL.md documents, spawn `<base> <sub> --help` and
+/// set-diff the documented flags against the real `--help`. Pushes one
+/// `invocation.subcommand_drift` result per documented subcommand. A documented
+/// subcommand whose `--help` won't spawn here fails (honest, like
+/// `invocation.help_present`); a documented flag the real help omits fails;
+/// reverse drift (help advertises a flag the skill doesn't) warns.
 pub(crate) fn check_subcommand_drift(
     base_cmd: &[String],
     spawn_cwd: &Path,

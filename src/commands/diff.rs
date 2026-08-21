@@ -19,6 +19,11 @@ pub(crate) fn run_diff(
     template_dir: Option<&Path>,
     format: verify::OutputFormat,
 ) -> i32 {
+    // Validate the format before honoring `--target list` (see `run_init`).
+    if let Err(e) = reject_report_format(format) {
+        eprintln!("fatal: {e:#}");
+        return exit::INIT_FATAL;
+    }
     if let Some(code) = handle_list_request("diff", &raw_targets, format) {
         return code;
     }

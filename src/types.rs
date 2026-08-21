@@ -17,9 +17,11 @@ pub struct ProjectProfile {
     /// Best-effort tool name, derived from the project manifest or repo dir.
     /// Always coerced to kebab-case before it reaches a generated file.
     pub name: String,
-    /// Detected ecosystem: one of `rust`, `node`, `python`, `go`, `ruby`,
+    /// Detected ecosystem. One of `rust`, `node`, `python`, `go`, `ruby`,
     /// `php`, `csharp`, `jvm`, `zig`, `swift`, `c_cpp`, `elixir`, `deno`,
-    /// or `unknown`.
+    /// `nix`, `dart`, `haskell`, `lua`, `julia`, `crystal`, `clojure`,
+    /// `ocaml`, `erlang`, `r`, `perl`, `shell`, `powershell`, or
+    /// `unknown`.
     pub language: Language,
     /// Any additional languages detected alongside the dominant one (a
     /// polyglot monorepo, e.g. a Rust CLI with a TypeScript frontend). Empty

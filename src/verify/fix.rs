@@ -1,6 +1,6 @@
 //! `verify --fix`: typed fix actions + appliers for mechanical drift.
 //!
-//! Ponytail scope: one variant per mechanical drift class that verify already
+//! Scope note: one variant per mechanical drift class that verify already
 //! detects. Adding a new fixable drift is a compile-driven extension — the
 //! exhaustive `apply` match below means forgetting an applier is a build
 //! failure, not a silent runtime gap.
@@ -172,7 +172,7 @@ fn apply_regen_skill_md_frontmatter(
     // Derive the target from the location path: Codex skills live under
     // `.codex/skills/`, Claude skills under `skills/`. Render ONLY the
     // ecosystem whose file drifted — surgical: we don't touch the other path.
-    // ponytail: ceiling is two path-prefixes (Codex + default Claude). When a
+    // Scope note: the ceiling is two path prefixes (Codex + default Claude). When a
     // third ecosystem path appears (or a non-standard skill location), extend
     // this `if/else` into a match on a thread-friendly enum (or a mapping from
     // Target → canonical path prefix). The current prefix inference is fine

@@ -156,20 +156,12 @@ pub fn run(input: &InvocationInput, report: &mut VerifyReport) -> Result<()> {
     Ok(())
 }
 
-/// Pull the text of the SKILL.md that documents the CLI invocation, so flag-
-/// drift extraction reads only the documented invocation area (not the templated
-/// prose/footguns/metadata). Returns `None` when the skill is a pure library.
-///
-/// Two signals, in order:
-/// 1. A `## Invocation` heading — the section the skillpack CLI template emits.
-///    skillpack *libraries* use `## Usage` (never `## Invocation`), so this
-///    cleanly separates the two for generated packs.
-/// 2. A fenced code block containing a `--flag` token — the fallback for
-///    *hand-written* skills (e.g. the `broken-cli` fixture) that document a CLI
-///    without the `## Invocation` heading. A pure-library import block
-///    (`import { parse } from 'x'`) has no `--flag`, so it correctly stays a
-///    library (Bug 2 + Improvement F, without the prose false-positives that
-///    scoping to the *whole* body would reintroduce).
+/// Spawn `<cmd[0]> [cmd[1..]]` (e.g. `chronicle --help`) under the hard
+/// `HELP_TIMEOUT`, push the outcome as a `invocation.help_present` check, and
+/// return the captured stdout+stderr (empty string on any failure outcome so
+/// the drift checks degrade to a no-op). Spawn calls are emitted as
+/// `tracing::debug!` events by the shared spawn core (design §8.2 --debug /
+/// --log-level debug).
 fn run_help(
     cmd: &[String],
     root: &Path,
@@ -264,8 +256,11 @@ pub(crate) fn snippet(s: &str, max: usize) -> String {
     out
 }
 
-/// Compare documented flags in SKILL.md against those advertised in `--help`,
-/// flagging any documented flag that does not actually exist (drift).
+/// Spawn `cmd` (argv, with the working directory set to `root`) under
+/// `timeout` and return the captured stdout+stderr, or `None` when the spawn
+/// could not run at all (not found / spawn failure / timeout). Non-zero exits
+/// still return the output — some CLIs print `--version`/`--help` and exit 1.
+/// Unlike [`run_help`], this pushes no checks; the caller owns the diff.
 fn spawn_capture(
     cmd: &[String],
     root: &Path,
@@ -286,12 +281,6 @@ fn spawn_capture(
     }
 }
 
-/// For each subcommand the SKILL.md documents, spawn `<base> <sub> --help` and
-/// set-diff the documented flags against the real `--help`. Pushes one
-/// `invocation.subcommand_drift` result per documented subcommand. A documented
-/// subcommand whose `--help` won't spawn here fails (honest, like
-/// `invocation.help_present`); a documented flag the real help omits fails;
-/// reverse drift (help advertises a flag the skill doesn't) warns.
 #[cfg(test)]
 mod checks {
     use super::drift::{diff_one_subcommand, reverse_drift};
@@ -377,6 +366,20 @@ mod checks {
         // broken-cli fixture: a fenced block with flags but no ## Invocation heading.
         let skill = "---\nname: sample-broken\n---\n\n# sample-broken\n\n```\nsample-broken --nonexistent --new\n```\n";
         assert!(extract_documented_invocation(skill).is_some());
+    }
+
+    /// A flag-bearing fence left unclosed at EOF still documents a CLI — the
+    /// old parser only evaluated a block at its closing fence, so a malformed
+    /// hand-written skill fell through to the pure-library path.
+    #[test]
+    fn documented_invocation_from_unterminated_fence() {
+        let skill = "# x\n\n```\nx --new\n"; // no closing ```
+        let block = extract_documented_invocation(skill).expect("unterminated fence");
+        assert!(block.contains("--new"));
+
+        // An unclosed fence WITHOUT flags stays a pure library.
+        let lib = "# x\n\n```\nimport { parse } from 'fastcsv'\n";
+        assert!(extract_documented_invocation(lib).is_none());
     }
 
     /// Regression: `command_from_documented` must extract the program from the

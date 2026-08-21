@@ -296,6 +296,13 @@ pub(crate) fn run_init(
     import: Option<String>,
     format: verify::OutputFormat,
 ) -> i32 {
+    // Validate the format before honoring `--target list`, so an invalid
+    // `--format sarif/github/junit` errors instead of silently degrading
+    // the listing to human output.
+    if let Err(e) = reject_report_format(format) {
+        eprintln!("fatal: {e:#}");
+        return exit::INIT_FATAL;
+    }
     if let Some(code) = handle_list_request("init", &raw_targets, format) {
         return code;
     }

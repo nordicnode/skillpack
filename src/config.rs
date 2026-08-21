@@ -50,9 +50,10 @@ pub struct SkillConfig {
     /// Import pattern for pure libraries. `None` for CLI projects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub import_pattern: Option<String>,
-    /// SPDX license id (e.g. `MIT`).
+    /// Author display name (e.g. `Jane Doe`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    /// SPDX license id (e.g. `MIT`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
     /// Stdin bytes to feed the CLI during `verify` spawns (e.g. `--help`,

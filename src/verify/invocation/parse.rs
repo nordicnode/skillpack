@@ -1,3 +1,17 @@
+/// Pull the text of the SKILL.md that documents the CLI invocation, so flag-
+/// drift extraction reads only the documented invocation area (not the templated
+/// prose/footguns/metadata). Returns `None` when the skill is a pure library.
+///
+/// Two signals, in order:
+/// 1. A `## Invocation` heading — the section the skillpack CLI template emits.
+///    skillpack *libraries* use `## Usage` (never `## Invocation`), so this
+///    cleanly separates the two for generated packs.
+/// 2. A fenced code block containing a `--flag` token — the fallback for
+///    *hand-written* skills (e.g. the `broken-cli` fixture) that document a CLI
+///    without the `## Invocation` heading. A pure-library import block
+///    (`import { parse } from 'x'`) has no `--flag`, so it correctly stays a
+///    library (Bug 2 + Improvement F, without the prose false-positives that
+///    scoping to the *whole* body would reintroduce).
 pub fn extract_documented_invocation(skill_md: &str) -> Option<String> {
     // (1) Prefer an explicit `## Invocation` section.
     if let Some(block) = heading_block(skill_md, "invocation") {
@@ -5,6 +19,8 @@ pub fn extract_documented_invocation(skill_md: &str) -> Option<String> {
     }
 
     // (2) Fallback: any fenced ``` block whose text contains a `--flag`.
+    // A fence left unclosed at EOF still counts — a hand-written skill with a
+    // missing closing fence documents a CLI just as much as a well-formed one.
     let mut in_fence = false;
     let mut block = String::new();
     for line in skill_md.lines() {
@@ -24,6 +40,10 @@ pub fn extract_documented_invocation(skill_md: &str) -> Option<String> {
             block.push_str(line);
             block.push('\n');
         }
+    }
+    // Unterminated final fence: the block accumulated but never closed.
+    if in_fence && extract_flags(&block).iter().any(|f| !is_meta_flag(f)) {
+        return Some(block);
     }
     None
 }
@@ -101,10 +121,10 @@ pub(crate) fn heading_block(skill_md: &str, heading: &str) -> Option<String> {
     }
 }
 
-/// Spawn `<cmd[0]> [cmd[1..]]` (e.g. `chronicle --help`) under a hard timeout,
-/// push the outcome as a check, and return the captured stdout+stderr on
-/// success. Spawn calls are emitted as `tracing::debug!` events by the shared
-/// spawn core (design §8.2 --debug / --log-level debug).
+/// True for the universal help/version meta-flags that every CLI implicitly
+/// supports but does not (and should not) list among its own passable flags.
+/// These are excluded from flag-drift comparison so a SKILL.md instruction like
+/// "Run `<cli> --help`" doesn't read as drift.
 pub fn is_meta_flag(flag: &str) -> bool {
     matches!(flag, "--help" | "-h" | "--version" | "-V" | "--help-all")
 }
