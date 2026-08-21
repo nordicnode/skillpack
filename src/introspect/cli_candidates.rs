@@ -58,13 +58,22 @@ pub struct CliCandidate {
 /// Windows-aware PATH lookup. cmd.exe appends `PATHEXT` (`cmd` → `cmd.exe`) to a
 /// bare name; Rust's `Command::new` does not. Probe `name` plus `name{ext}`
 /// for each ext in `PATHEXT` (e.g. `.EXE;.CMD;.BAT`) so a PATH lookup resolves
-/// `node` to `node.exe`. On Unix the bare-name probe is unchanged (no
-/// `PATHEXT`). Returns the resolved file path or `None` when not on PATH.
+/// `node` to `node.exe`. When `PATHEXT` is unset (minimal environments, some
+/// CI containers), fall back to the common executable extensions instead of
+/// failing every bare-name probe. On Unix the bare-name probe is unchanged
+/// (no `PATHEXT`). Returns the resolved file path or `None` when not on PATH.
 pub(crate) fn which_on_path(name: &str) -> Option<PathBuf> {
-    let exts: Vec<String> = std::env::var("PATHEXT")
-        .ok()
-        .map(|p| p.split(';').map(|s| s.to_string()).collect())
-        .unwrap_or_default();
+    let exts: Vec<String> = match std::env::var("PATHEXT") {
+        Ok(p) if !p.is_empty() => p.split(';').map(|s| s.to_string()).collect(),
+        _ => {
+            if cfg!(windows) {
+                // cmd.exe's built-in default when PATHEXT is not set.
+                vec![".COM".to_string(), ".EXE".to_string(), ".BAT".to_string(), ".CMD".to_string()]
+            } else {
+                Vec::new()
+            }
+        }
+    };
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
         let bare = dir.join(name);
@@ -98,9 +107,10 @@ pub(crate) fn primary_cli_candidate(
     super::manifest::language_spec(language).cli_candidate(root, name)
 }
 
-/// Parse `[[bin]].name` entries from `Cargo.toml`. Returns bin names in
-/// declaration order; empty when no `[[bin]]` tables (implicit single-bin
-/// crate where the artifact matches the package name).
+/// Canonicalize `p` to an absolute path string for use in a spawn argv,
+/// falling back to the lossy display form when canonicalization fails, and
+/// stripping the Windows extended-length prefix (`\\?\C:\…` → `C:\…`) that
+/// `fs::canonicalize` adds so the argv stays paste-able.
 pub(crate) fn canonicalize_for_argv(p: &Path) -> String {
     let path = std::fs::canonicalize(p)
         .ok()

@@ -12,6 +12,9 @@ use crate::introspect::{detect_language, project_manifest_version};
 use crate::types::DiagTrace;
 use crate::verify::result::CheckResult;
 
+/// True if the Claude Code distribution directory (`.claude-plugin/`) is
+/// present. Gates the marketplace.json / plugin.json / SKILL.md checks so a
+/// `--target cursor`-only pack doesn't false-fail on their absence.
 pub(crate) fn claude_present(root: &Path) -> bool {
     root.join(schema::CLAUDE_PLUGIN_DIR).is_dir()
 }

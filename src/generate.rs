@@ -8,8 +8,8 @@
 //! conditionally-present).
 
 use anyhow::{bail, Result};
-use once_cell::sync::Lazy;
 use std::path::Path;
+use std::sync::LazyLock;
 use tera::{Context as TeraContext, Tera};
 
 use crate::cli::Target;
@@ -37,7 +37,7 @@ const CONVENTIONS_MD_TPL: &str = include_str!("../templates/CONVENTIONS.md.tera"
 const WINDSURF_RULE_TPL: &str = include_str!("../templates/windsurf-rule.md.tera");
 const SKILL_BODY_TPL: &str = include_str!("../templates/skill_body.md.tera");
 
-static TERA: Lazy<Tera> = Lazy::new(|| {
+static TERA: LazyLock<Tera> = LazyLock::new(|| {
     let mut tera = Tera::default();
     tera.add_raw_template("marketplace.json", MARKETPLACE_TPL)
         .expect("marketplace template is valid");
@@ -552,7 +552,8 @@ fn derive_keywords(profile: &ProjectProfile, intent: &Intent, has_cli: bool) -> 
 }
 
 /// Tiny stopword set for keyword extraction. Keeps "generate" but drops
-/// "this", "with", "about". Ponytail: inline set beats pulling a crate.
+/// "this", "with", "about". An inline set beats pulling a crate for seven
+/// call sites' worth of filtering.
 fn is_stopword(w: &str) -> bool {
     matches!(
         w.to_lowercase().as_str(),

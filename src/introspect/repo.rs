@@ -90,7 +90,16 @@ pub(crate) fn detect_license(root: &Path) -> Option<String> {
                 return Some("BSD-3-Clause".to_string());
             }
             if lower.contains("gnu general public license") {
-                return Some("GPL-3.0".to_string());
+                // The GPL family shares the header text; distinguish v2 from
+                // v3 via the "Version N" line under the title (both canonical
+                // texts put it in the first three lines). Emit the modern
+                // `-only` SPDX form — bare `GPL-3.0`/`GPL-2.0` are deprecated
+                // ids, and guessing `or-later` from the license file alone
+                // would over-claim.
+                if lower.contains("version 2") && !lower.contains("version 2.1") {
+                    return Some("GPL-2.0-only".to_string());
+                }
+                return Some("GPL-3.0-only".to_string());
             }
         }
     }
@@ -186,9 +195,71 @@ pub(crate) fn repo_url_name(repo_url: &Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     //! README-hint tests that assert the `skip_while` predicate drops raw
-    //! HTML and lands on first prose.
+    //! HTML and lands on first prose, plus LICENSE heuristics tests.
 
-    use super::read_readme_hint;
+    use super::{detect_license, read_readme_hint};
+
+    #[test]
+    fn detect_license_distinguishes_gpl_v2_from_v3() {
+        // Regression: every GPL variant used to collapse to `GPL-3.0`, so a
+        // GPLv2 project shipped plugin.json with the wrong SPDX id.
+        let dir = std::env::temp_dir().join(format!(
+            "skillpack-gpl-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(
+            dir.join("LICENSE"),
+            "                    GNU GENERAL PUBLIC LICENSE\n                       Version 2, June 1991\n",
+        )
+        .unwrap();
+        assert_eq!(detect_license(&dir).as_deref(), Some("GPL-2.0-only"));
+
+        std::fs::write(
+            dir.join("LICENSE"),
+            "GNU GENERAL PUBLIC LICENSE\nVersion 3, 29 June 2007\n",
+        )
+        .unwrap();
+        assert_eq!(detect_license(&dir).as_deref(), Some("GPL-3.0-only"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detect_license_mit_and_apache_unchanged() {
+        let dir = std::env::temp_dir().join(format!(
+            "skillpack-lic-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(
+            dir.join("LICENSE"),
+            "MIT License\n\nPermission is hereby granted, free of charge.\n",
+        )
+        .unwrap();
+        assert_eq!(detect_license(&dir).as_deref(), Some("MIT"));
+
+        std::fs::write(
+            dir.join("LICENSE"),
+            "Apache License\nVersion 2.0, January 2004\n",
+        )
+        .unwrap();
+        assert_eq!(detect_license(&dir).as_deref(), Some("Apache-2.0"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn read_readme_hint_skips_leading_html_div() {

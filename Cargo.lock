@@ -893,7 +893,6 @@ dependencies = [
  "insta",
  "libc",
  "notify",
- "once_cell",
  "predicates",
  "proptest",
  "regex",

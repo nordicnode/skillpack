@@ -37,6 +37,39 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `allowed_tools` hint is now keyed off `has_cli` (pure-library skills no
   longer get a `Bash` hint), and derived marketplace keywords are capped at
   16 so a deep CLI subcommand tree can't bloat the marketplace entry.
+- **`add --target` help text matched the code**: the flag's help claimed it
+  defaults to `claude`, but the implementation delegates to `update`'s
+  default (every target already present, falling back to `all`). The help
+  now describes the real behavior.
+- **GPL license detection distinguishes v2 from v3** — every GPL variant
+  used to collapse to `GPL-3.0`, so a GPLv2 project shipped plugin.json with
+  the wrong SPDX id. Detection reads the "Version N" header line and emits
+  the modern `GPL-2.0-only` / `GPL-3.0-only` ids.
+- **`--target list --format sarif|github|junit` now errors** instead of
+  silently degrading the listing to human output (init/update/diff/add/remove).
+- A hand-written SKILL.md whose flag-bearing fenced block is left unclosed
+  at EOF is still detected as documenting a CLI (the fallback parser only
+  evaluated closed fences).
+- `discovery.empty`'s failure message lists `.trae/rules/` and Trae, which
+  were missing while every other rules directory was named.
+- Windows PATH lookup falls back to cmd.exe's default executable extensions
+  when `PATHEXT` is unset, so bare-name probes (`node`, `go`) resolve in
+  minimal environments.
+- `resolve_targets` now actually dedups into canonical declaration order
+  (`--target cursor --target all` used to reorder Cursor ahead of the pack).
+
+### Changed
+
+- Dropped the `once_cell` dependency (`std::sync::LazyLock` — MSRV is 1.85)
+  and dialoguer's unused `fuzzy-select`/`editor` features (only `Input` is
+  used). Removed stale `Cargo.toml` exclude entries.
+- Corrected several doc comments that a refactor left attached to the wrong
+  items (`is_meta_flag` ↔ `check_subcommand_drift`, `run_help` ↔
+  `extract_documented_invocation`, `spawn_capture` ↔ `check_flag_drift`,
+  `find_kv_colon` ↔ `claude_present`, `canonicalize_for_argv`, and the
+  `SkillConfig::author` field), rewrote the garbled `verify --watch` flag
+  doc, updated the stale language list on `ProjectProfile::language`, and
+  reworded the internal "Ponytail" notes.
 
 ## [0.13.2](https://github.com/nordicnode/skillpack/compare/v0.13.1...v0.13.2) - 2026-08-15
 

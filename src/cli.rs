@@ -223,9 +223,9 @@ pub enum Commands {
         /// Watch for file changes and re-run verify on each change (debounced).
         /// Useful during iterative SKILL.md / skillpack.toml edits — get
         /// instant feedback without manually re-running verify each time.
-        /// Ctrl-C stops the watcher (terminates the process). Only valid
-        /// mode prints a new report per cycle; JSON output isn't meaningful
-        /// for a streaming watcher).
+        /// Ctrl-C stops the watcher (terminates the process). Only valid with
+        /// `--format human`: the watcher prints a fresh report per cycle, and
+        /// JSON/SARIF/GitHub/JUnit output isn't meaningful for a stream.
         #[arg(long)]
         watch: bool,
 
@@ -378,8 +378,9 @@ pub enum Commands {
         license: Option<String>,
 
         /// Agent ecosystem(s) to regenerate after appending. Defaults to
-        /// `claude`; `all` refreshes every target, `list` prints the canonical
-        /// target names and exits. Repeats.
+        /// every target already present in the repo (falling back to `all`
+        /// when none are found), matching `update`; `all` refreshes every
+        /// target, `list` prints the canonical target names and exits. Repeats.
         #[arg(long, num_args = 1.., value_name = "ECOSYSTEM")]
         target: Vec<String>,
 
@@ -595,15 +596,21 @@ pub fn resolve_targets(raw: &[String]) -> anyhow::Result<Vec<Target>> {
             })?);
         }
     }
-    // Dedup preserving canonical order — `--target all --target claude`
-    // must not emit Claude twice (double-writes files).
-    let mut seen = Vec::new();
-    for t in out {
-        if !seen.contains(&t) {
-            seen.push(t);
-        }
-    }
-    Ok(seen)
+    // Dedup, then reorder into canonical (declaration) order. Dedup alone
+    // keeps first-seen order, so `--target cursor --target all` would emit
+    // Cursor's files before everything else; sorting by the ALL_TARGETS index
+    // makes the emitted file sequence identical no matter how the flags were
+    // spelled. `--target all --target claude` must also not emit Claude twice
+    // (double-writes files) — dedup handles that.
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|t| seen.insert(*t));
+    out.sort_by_key(|t| {
+        ALL_TARGETS
+            .iter()
+            .position(|c| c == t)
+            .unwrap_or(usize::MAX)
+    });
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -623,6 +630,26 @@ mod tests {
         assert!(all.contains(&Target::Qoder));
         assert!(all.contains(&Target::AmazonQ));
         assert!(all.contains(&Target::Trae));
+    }
+
+    #[test]
+    fn resolve_targets_dedups_and_canonicalizes_order() {
+        // Repeated + mixed-order flags must collapse to the canonical
+        // declaration order — `render` emits files in this sequence, so a
+        // first-seen order would make `--target cursor --target all` write
+        // Cursor's file before everything else.
+        let mixed = resolve_targets(&[
+            "cursor".to_string(),
+            "all".to_string(),
+            "claude".to_string(),
+            "claude".to_string(),
+        ])
+        .unwrap();
+        let all = resolve_targets(&["all".to_string()]).unwrap();
+        assert_eq!(mixed, all, "mixed flags must dedup+sort to canonical `all`");
+        // Spot-check the canonical head/tail rather than the whole vector.
+        assert_eq!(mixed.first(), Some(&Target::Claude));
+        assert_eq!(mixed.last(), Some(&Target::Trae));
     }
 
     #[test]

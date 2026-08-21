@@ -11,14 +11,14 @@
 use std::path::Path;
 
 use anyhow::Result;
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 use super::result::CheckResult;
 use super::schema;
 
-static NAME_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(schema::NAME_KEBAB_REGEX).expect("compiled constant regex"));
+static NAME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(schema::NAME_KEBAB_REGEX).expect("compiled constant regex"));
 
 mod agentsmd;
 mod claude;
@@ -329,8 +329,8 @@ pub fn run(
     if out.is_empty() {
         out.push(CheckResult::fail(
             "discovery.empty",
-            "at least one ecosystem is present (Claude / Codex / Cursor / OpenCode / Copilot / AGENTS.md / CLAUDE.md / GEMINI.md / Windsurf / Aider / Cline / Roo / Kilo / Goose / Qoder / Continue / Augment / Amazon Q)",
-            "no distribution files found (none of: .claude-plugin/, .claude/skills/, .codex/skills/, .cursor/rules/, .windsurf/rules/, .opencode/agents/, .github/copilot-instructions.md, AGENTS.md, CLAUDE.md, GEMINI.md, CONVENTIONS.md, .clinerules/, .roo/rules/, .kilocode/rules/, .goose/instructions.md, .qoder/rules/, .continue/rules/, .augment/rules/, .amazonq/rules/)",
+            "at least one ecosystem is present (Claude / Codex / Cursor / OpenCode / Copilot / AGENTS.md / CLAUDE.md / GEMINI.md / Windsurf / Aider / Cline / Roo / Kilo / Goose / Qoder / Continue / Augment / Amazon Q / Trae)",
+            "no distribution files found (none of: .claude-plugin/, .claude/skills/, .codex/skills/, .cursor/rules/, .windsurf/rules/, .opencode/agents/, .github/copilot-instructions.md, AGENTS.md, CLAUDE.md, GEMINI.md, CONVENTIONS.md, .clinerules/, .roo/rules/, .kilocode/rules/, .goose/instructions.md, .qoder/rules/, .continue/rules/, .augment/rules/, .amazonq/rules/, .trae/rules/)",
             "To fix: run `skillpack init --target <ecosystem>` first.",
         ));
     }
@@ -338,7 +338,10 @@ pub fn run(
     Ok(out)
 }
 
-/// True if the Claude Code distribution files (`.claude-plugin/`) are present.
+/// Find the index of the `key:` colon separator in one frontmatter line —
+/// the first `:` not inside quotes. Handles escaped quotes (`\"`, `\'`) so a
+/// value like `description: "test: here"` yields the key's colon, not the
+/// one inside the string. Returns `None` when the line has no unquoted colon.
 pub(crate) fn find_kv_colon(line: &str) -> Option<usize> {
     // First `:` not inside quotes. Handles escaped quotes (\", \').
     let mut in_s = false;

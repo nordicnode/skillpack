@@ -21,8 +21,8 @@ use std::time::{Duration, Instant};
 /// GOCACHE build + AV scan under parallel-test load) and any `node_modules`
 /// resolution, while still bounding a hung CLI. History: raised 8s → 15s for
 /// the same Windows `go run .` flake, then 15s → 30s when it recurred under
-/// heavier parallel CI load. Ponytail: ceiling is CI cold-cache; if a real CLI
-/// genuinely needs >30s to print `--help` the agent shouldn't invoke it
+/// heavier parallel CI load. Caveat: the ceiling is CI cold-cache; if a real
+/// CLI genuinely needs >30s to print `--help` the agent shouldn't invoke it
 /// anyway, so this cap is also the fail-safe.
 pub const HELP_TIMEOUT: Duration = Duration::from_secs(30);
 
