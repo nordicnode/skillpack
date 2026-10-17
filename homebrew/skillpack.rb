@@ -30,21 +30,21 @@ class Skillpack < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-aarch64-apple-darwin.tar.gz"
-# TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
+      sha256 "be0a4e97df556cf4d4b5b882ac1971bd96c6477cb5b90edd8033380ca14a4361"
     else
       url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-x86_64-apple-darwin.tar.gz"
-# TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
+      sha256 "4c8a33fe058727679a6ace5e16a7069deff77023c2b312e91dac44324bc31abe"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-aarch64-unknown-linux-gnu.tar.gz"
-# TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
+      sha256 "9a1bbeb27bebe6f46c18c4a4baa83fba53d24e83f0c26b5d2b58d3c69948dd11"
     else
       # Static musl build - no glibc dependency.
       url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-x86_64-unknown-linux-musl.tar.gz"
-# TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
+      sha256 "aeccc3dffcfe1d5b5384eefa49384798ee4e1e37b872f940c13bbef5ac2e47e8"
     end
   end
 
