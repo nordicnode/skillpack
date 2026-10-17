@@ -25,26 +25,26 @@ class Skillpack < Formula
   desc "Generate and verify the agent-distribution layer for any OSS project"
   homepage "https://github.com/nordicnode/skillpack"
   license "MIT"
-  version "0.13.2"
+  version "0.13.3"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.2/skillpack-aarch64-apple-darwin.tar.gz"
-      sha256 "c76105f574f27b1043e386934db6a7b90ce612e18212c62b8e593c136890d7b7"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-aarch64-apple-darwin.tar.gz"
+# TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
     else
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.2/skillpack-x86_64-apple-darwin.tar.gz"
-      sha256 "921a6439ee54b172e6fd62ab9f8efc5f49a81e854451016c538d01ec23a6126b"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-x86_64-apple-darwin.tar.gz"
+# TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.2/skillpack-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "e21e739bc638cedc168a96a3cc46dae63536ab423aaba15ff4bcdcd71e1fd680"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-aarch64-unknown-linux-gnu.tar.gz"
+# TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
     else
       # Static musl build - no glibc dependency.
-      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.2/skillpack-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "85b1b0ace70d706758ad980716c2e9facc39d679e583532a83cc556548013760"
+      url "https://github.com/nordicnode/skillpack/releases/download/v0.13.3/skillpack-x86_64-unknown-linux-musl.tar.gz"
+# TODO: re-pin sha256 via scripts/update_homebrew_sha256.py after the release is published
     end
   end
 

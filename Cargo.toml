@@ -1,6 +1,6 @@
 [package]
 name = "skillpack"
-version = "0.13.2"
+version = "0.13.3"
 edition = "2021"
 rust-version = "1.85"
 authors = ["nordicnode <128633122+nordicnode@users.noreply.github.com>"]
